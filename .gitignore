@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated artefacts -- reproducible from a seeded run
+data/generated/
+*.sqlite
+*.sqlite3
+*.db
+
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

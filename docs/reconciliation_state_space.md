@@ -8,23 +8,30 @@
 
 > **Verified programmatically.** Every figure below was confirmed by exhaustive
 > decision-tree generation in [`../decision_tree/`](../decision_tree/REPORT.md),
-> which builds all 7,046 valid configuration paths and validates each choice
-> against the choices above it. That pass corrected three errors in an earlier
-> hand-count of this document; see Section 9.
+> which builds all 4,224 valid configuration paths and validates each choice
+> against the choices above it. Two passes changed this document from its
+> original hand-count: an exhaustive-generation pass that corrected three
+> hand-count errors, and a later pass that removed SLA thresholds from the
+> design entirely as a deliberate architectural decision, not a correction.
+> Both are logged in Section 9.
 
-| Measure                                                    | Count         |
-| ---------------------------------------------------------- | ------------- |
-| Total representable episode combinations                   | **528** |
-| — logically coherent                                      | 476           |
-| — compliance anomalies (data that should not exist)       | 52            |
-| Underlying valid configurations                            | **7,046** |
-| Per-track states the engine actually branches on           | **49**  |
-| Cross-track compliance rules                               | **7**   |
-| Feed-level data-integrity exceptions (episode-independent) | **7**   |
-| **Total deterministic rules to implement**           | **56**  |
-| Distinct status enum values                                | **9**   |
+| Measure                                                            | Count               |
+| ------------------------------------------------------------------- | ------------------- |
+| Unconstrained cross-product                                        | 12,093,235,200       |
+| Valid configurations                                               | **4,224**       |
+| — logically coherent                                              | 3,860                |
+| — compliance anomalies (data that should not exist)               | 364                  |
+| Eliminated as impossible                                           | 12,093,230,976 (survived: 0.00003%) |
+| Reachable reimbursement verdicts                                   | **31**          |
+| Reachable rebate verdicts                                          | **12**          |
+| Reachable verdict pairs (31 x 12, exact product, all reachable)   | **372**         |
+| Per-track states the engine actually branches on                  | **43**          |
+| Cross-track compliance rules                                       | **7**           |
+| Feed-level data-integrity exceptions (episode-independent)        | **7**           |
+| **Total deterministic rules to implement**                  | **50**          |
+| If-checks evaluated per case (min / average / max)                 | 10 / 21.0 / 32       |
 
-The 528 is a *composition*, not a switch statement. Read Section 5 before panicking.
+The 372 is a *composition*, not a switch statement. Read Section 5 before panicking. The old 9-value status enum is also gone — see Section 0a for what replaced it.
 
 ---
 
@@ -44,7 +51,7 @@ EPISODE (one filed claim)
 
 The four source feeds tempt you into modelling pharmacy and medical as two independent optional components. They are not independent. A drug travels exactly one billing road — pills and self-administered drugs go to the PBM, infused and clinician-administered drugs go to the medical payer. Billing the same dispense down both roads is duplicate billing. That is fraud, not an exception, and the model should make it unrepresentable rather than flag it after the fact.
 
-Two free booleans would give 18 × 18 = 324 reimbursement configurations. The XOR gives 33. The difference is entirely states that cannot legally exist.
+Two free booleans would give 17 × 16 = 272 reimbursement configurations (each track either off or in one of its states). The XOR gives 31 (16 + 15, mutually exclusive so states sum rather than multiply). The difference is entirely states that cannot legally exist.
 
 ### Why the reimbursement track is mandatory, and 340B is not
 
@@ -56,9 +63,9 @@ The assignment settles this; it is not a modelling choice.
 
 | Reimbursement configuration  | States       |
 | ---------------------------- | ------------ |
-| Pharmacy benefit (Section 1) | 17           |
-| Medical benefit (Section 2)  | 16           |
-| **Total**              | **33** |
+| Pharmacy benefit (Section 1) | 16           |
+| Medical benefit (Section 2)  | 15           |
+| **Total**              | **31** |
 
 **Out of scope, deliberately: the no-claim dispense.** A drug dispensed with no claim ever filed — cash-pay patient, or a submission that failed silently — is real revenue leakage, and a 340B track can still be live off the dispense record. Detecting it requires anchoring episodes on dispenses rather than on claims, which contradicts the assignment's stated boundary and its claim-centric business object. Excluded here; carried as a one-line assumption in the design note instead.
 
@@ -73,17 +80,97 @@ The one genuinely episode-external cash case is the orphan deposit — money wit
 ### The state space
 
 ```
-(pharmacy 17 + medical 16) × (340B 16, including "absent")
-= 33 × 16
-= 528
+(pharmacy 16 + medical 15) × (340B 12, including "absent")
+= 31 × 12
+= 372
 ```
 
-Exhaustive generation reached **528 of a possible 528** verdict pairs — every
+Exhaustive generation reached **372 of a possible 372** verdict pairs — every
 combination is achievable. The two tracks are therefore fully independent at the
 verdict level, and all seven cross-track rules in Section 4 are *annotations*,
 never *prohibitions*. The engine needs no cross-track validity table.
 
 Three orthogonal overlays sit on top and are *not* multiplied in — they are feed-level, not episode-level: duplicate delivery, late arrival, orphan records. Section 6.
+
+---
+
+## 0a. The disposition model — and why aging is not a verdict input
+
+An earlier draft of this document gave every "awaiting X" state two halves — within SLA and past SLA — and treated the SLA breach itself as a distinct verdict. That is gone. Aging is no longer a **verdict** dimension; it is a **read-time sort key** over the pending and exception lists. A-02 does not become a different state at day 31 than it was at day 29. It stays "awaiting payment" for as long as no new inbound record arrives, and the operator sorts that list oldest-first.
+
+**Why this is the right cut, not a shortcut.**
+
+- **It makes incremental processing provably complete, not merely convenient.** If disposition can only change in response to a new inbound record, then a claim with no new record since the last run cannot have a different disposition now. That is not an optimisation you hope is safe — it is a property you can state and prove: the set of claims that need recomputing on any given run is exactly the set touched by new events. Nothing else can have moved. That is the real payoff of dropping SLA from the verdict layer, and it is worth more than any threshold tuning.
+- **It removes a category of number to defend.** "Past SLA" requires picking 30 days, or 45, or something else, for every source and pathway, and then justifying it in review. A sort key needs no such number — age is displayed, not adjudicated.
+- **It is a deliberate exclusion, not an oversight.** Real timing rules exist in the industry: Medicare's 30-day payment ceiling, state prompt-pay statutes (commonly 30 or 45 days), Iowa's 20-day PBM-specific rule, CAQH CORE Operating Rule 370's ±3-business-day remittance window, and the 340B pilot program's 45-day submission window with a 10-day manufacturer-payment window. They are real, and they are **policy** — never a field on a claim record. If a future requirement (SLA-breach alerting, an escalation timer, a contractual penalty calculation) reintroduces them, they belong in engine configuration, looked up per tenant/source/pathway, never as a literal threshold inside a verdict rule. Section 7 covers the config-vs-literal distinction in full.
+
+### Three dispositions, and only three
+
+Status answers one question — "what do I do with this claim?" — and there are exactly three answers:
+
+| Disposition  | Meaning                                    |
+| ------------ | ------------------------------------------- |
+| `CLOSED`    | Nothing to do.                              |
+| `PENDING`   | Waiting on an external party. No defect. Ranked by age. |
+| `EXCEPTION` | A defect exists. Work it.                   |
+
+That is the entire enum. Everything else — what kind of defect, how much money, which track — lives one layer down.
+
+### Reason codes carry the detail, and they are a list
+
+A claim can be underpaid **and** missing settlement **and** show a cash gap at the same time, and with two tracks in play it can be broken on one and merely waiting on the other. A single reason field cannot hold that; a list can:
+
+```
+disposition = EXCEPTION
+reasons = [UNDERPAID, CASH_MISMATCH]
+```
+
+`INSUFFICIENT_DATA` is a first-class reason code, not an error path. It fires when the engine deterministically cannot decide — an unmatched recoupment (A-13), rebate cash with no attributable episode (D-4), or a correlated no-cash finding on both tracks at once (X-5) are the three worked examples elsewhere in this document. That code is exactly what should drive the agent layer's required behaviour of saying "I cannot determine this from the available feeds, and here is precisely what is missing" instead of guessing.
+
+### Reopened is a flag, not a fourth disposition
+
+A reopened claim still either waits or gets worked — it does not need a fourth bucket. What it needs is provenance:
+
+```
+reopened_from            # the disposition it was reopened out of
+previously_closed_at
+reopened_on
+```
+
+These live as attributes on the exception (or the pending record), not as a parallel queue. Two queues would mean two workflows, and claims bouncing between them on every reconciliation run. One queue, one workflow, an attribute that says how it got there.
+
+The flag also drives priority, deterministically: reopened-from-closed outranks never-paid, because in the reopened case the money was already recognised and is now at risk of being un-recognised — a stronger claim on attention than money that was simply never collected. And reopening is not exclusively a fall from `CLOSED`: a claim can be reopened out of `PENDING` too — for example, a 340B rebate clawed back while the reimbursement side is still legitimately in flight. The flag records where it came from either way.
+
+### Status exists at two levels
+
+Per track, and per episode as a rollup where the worst status wins:
+
+```
+EXCEPTION > PENDING > CLOSED
+```
+
+An episode can sit in the exception queue because one track is broken while the other track is legitimately still waiting — the rollup does not average the two tracks or hide the healthy one, it surfaces the worse of the two, because that is the one that needs a human.
+
+### Disposition and reasons are computed together, in one pass
+
+Not two passes where a first rule decides EXCEPTION and a second rule figures out why. The rule that decides is the rule that knows why, because it is the same rule:
+
+```
+if received < expected:
+    disposition = EXCEPTION
+    reason = UNDERPAID
+    variance = expected - received
+```
+
+One rule, three outputs. Splitting "decide" from "explain" into separate passes would let them drift out of sync — a defect flagged without a reason, or a reason attached to a claim the first pass called clean.
+
+### Nothing is written back to source records
+
+Pharmacy, medical, 340B and bank records are immutable — they are what actually happened, as reported by an external system, and this design does not get to edit them. Disposition, reasons and variance are computed fields on a **derived verdict**, recomputed per (claim, cursor) on every run, never stored as truth on the raw rows. Re-running reconciliation over the same source data must always produce the same verdict; that is only possible if the verdict is a pure function of the immutable source, not a mutation of it.
+
+### What this replaces
+
+The earlier design collapsed everything to a flat 9-value status enum (`RECONCILED`, `IN_FLIGHT`, `AWAITING_PAYMENT`, `UNDERPAID`, `OVERPAID`, `DENIED`, `CASH_MISMATCH`, `CLAWBACK`, `COMPLIANCE_FLAG`). That enum conflated two layers that behave differently — disposition (three values, one per claim) and reason (a list, because defects compose). The split above is what replaced it.
 
 ---
 
@@ -101,8 +188,7 @@ Track-local constraints:
 | #              | Possibility                                    | What is TRUE                                                                             | What is FALSE                                                                                                     |
 | -------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | **A-01** | Rejected at point of sale                      | Adjudication rejected with a reject code; expected = 0; received = 0; drug not dispensed | No payment, no reversal, no recoupment, no adjustment, no settlement, no cash, no 340B qualification should exist |
-| **A-02** | Awaiting payment, within SLA                   | Adjudication accepted; expected = E; received = 0; age < payment SLA                     | Not an exception; no remittance yet; no cash                                                                      |
-| **A-03** | Awaiting payment, past SLA                     | Adjudication accepted; expected = E; received = 0; age > SLA                             | No payment record, no denial, no reversal — the silence itself is the problem                                    |
+| **A-02** | Awaiting payment                               | Adjudication accepted; expected = E; received = 0; no defect                             | Not an exception; no remittance yet; no cash — aged at read time for queue sorting, not branched on for verdict   |
 | **A-04** | Fully reconciled ✅                            | Payment = E; bank deposit matched; settlement confirmed; outstanding = 0                 | No variance, no reversal, no recoupment, no open action                                                           |
 | **A-05** | Remittance with no cash                        | Remittance states paid = E; bank shows no matching deposit; outstanding = E              | Not a denial, not an underpayment — the payer*claims* it paid                                                  |
 | **A-06** | Paid and matched, settlement missing           | Payment = E; cash matched; settlement event absent                                       | Money is not in dispute; only the closing confirmation is missing                                                 |
@@ -118,7 +204,13 @@ Track-local constraints:
 | **A-16** | Reversed before payment                        | Claim cancelled pre-payment (patient never collected); expected → 0                     | No money ever moved; nothing to claw back                                                                         |
 | **A-17** | Duplicate payment                              | Two payment events, same claim, same amount; cash shows both                             | Not an overpayment by contract — it is the same payment twice; distinguish from A-09                             |
 
-**Subtotal: 17 states.**
+**Subtotal: 16 states.**
+
+> **A-03 retired.** "Awaiting payment, past SLA" was the past-SLA half of a pair
+> whose within-SLA twin, A-02, now covers both. Aging is no longer a verdict
+> dimension (Section 0a) — a claim with no new inbound record stays "awaiting
+> payment" indefinitely, aged at read time for sorting, never re-verdicted for
+> the passage of time alone.
 
 ---
 
@@ -135,8 +227,7 @@ Track-local constraints:
 | #              | Possibility                                           | What is TRUE                                                                                  | What is FALSE                                                                                                                                      |
 | -------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **B-01** | Clearinghouse rejection                               | 837 rejected before reaching the payer; no claim on file with payer; expected uncollected = E | Not a denial — the payer never saw it; no appeal path; resubmission is the action. Drug**was** administered, so 340B may legitimately exist |
-| **B-02** | Submitted, awaiting 835, within SLA                   | Accepted by clearinghouse; no payer response; age < SLA                                       | Not an exception yet                                                                                                                               |
-| **B-03** | Submitted, 835 missing, past SLA                      | Accepted; no 835; age > SLA                                                                   | No denial, no payment — payer silence                                                                                                             |
+| **B-02** | Submitted, awaiting 835                               | Accepted by clearinghouse; no payer response; no defect                                       | Not an exception — aged at read time for queue sorting, not branched on for verdict                                                                |
 | **B-04** | Paid in full, cash matched ✅                         | 835 shows paid = E; deposit matched; outstanding = 0                                          | No adjustment, no appeal, no open action                                                                                                           |
 | **B-05** | 835 paid, no cash                                     | 835 shows paid = E; no matching deposit                                                       | Payer paperwork and payer money disagree                                                                                                           |
 | **B-06** | Partial payment, no appeal filed                      | 835 shows P < E with adjustment reason codes; cash matched                                    | Not a denial; appeal window may still be open and unused                                                                                           |
@@ -151,7 +242,7 @@ Track-local constraints:
 | **B-15** | Paid then payer takeback                              | Post-payment recoupment on the medical side; may or may not be traceable to a deposit         | Same shape as A-12/A-13 but a different counterparty and dispute process                                                                           |
 | **B-16** | Duplicate 835 for the same claim                      | Two remittance records, same claim, same payment                                              | Only one payment actually occurred — double-counting risk if not deduplicated                                                                     |
 
-**Subtotal: 16 states.**
+**Subtotal: 15 states.**
 
 > **B-17 removed.** "Paid and matched, posting date far outside the window" was
 > in an earlier draft as a 17th state. Exhaustive generation never produced it,
@@ -159,6 +250,10 @@ Track-local constraints:
 > matched, nothing outstanding. It is an informational attribute on a settled
 > claim, not a reconciliation verdict. Carry it as a `days_to_settle` field, not
 > as a status.
+
+> **B-03 retired.** Same reasoning as A-03: "Submitted, 835 missing, past SLA"
+> was the past-SLA half of a pair whose within-SLA twin, B-02, now covers both.
+> See Section 0a.
 
 ---
 
@@ -175,30 +270,36 @@ Track-local constraints:
 | #              | Possibility                                         | What is TRUE                                                                                                       | What is FALSE                                                            |
 | -------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | **C-00** | No 340B track                                       | Dispense not 340B-eligible, or entity is not a covered entity; expected rebate = 0                                 | Nothing to reconcile on this track; absence is not an exception          |
-| **C-01** | Qualification pending, past SLA                     | Dispense sent to TPA; no qualification decision; age > SLA                                                         | No request, no rebate — stuck at the first gate                         |
-| **C-01a** | Qualification pending, within SLA | Dispense sent to TPA; no decision yet; age < SLA | Not an exception — normal in-flight at the first gate |
+| **C-01** | Qualification pending                               | Dispense sent to TPA; no qualification decision; no defect                                                         | Not an exception — aged at read time for sorting; stuck at the first gate is a reason code, not a timer            |
 | **C-02** | Not qualified                                       | TPA evaluated and declined (patient definition, prescriber affiliation, or drug not eligible); expected rebate = 0 | No request, no manufacturer involvement; correct outcome, not a failure  |
-| **C-03** | Qualified, request not yet submitted, within SLA    | Qualification confirmed; expected rebate = R; request queued                                                       | Not an exception yet                                                     |
-| **C-04** | Qualified, request stuck, past SLA                  | Qualification confirmed; no request submitted; age > SLA                                                           | Money is being left on the table by inaction, not by rejection           |
-| **C-05** | Request submitted, manufacturer pending, within SLA | Request filed; awaiting decision                                                                                   | Normal in-flight                                                         |
-| **C-06** | Request submitted, manufacturer silent, past SLA    | Request filed; no decision; age > SLA                                                                              | No rejection, no approval — manufacturer non-response                   |
+| **C-03** | Qualified, request not yet submitted                | Qualification confirmed; expected rebate = R; request queued; no defect                                            | Not an exception — aged at read time for sorting                         |
+| **C-05** | Request submitted, manufacturer pending              | Request filed; awaiting decision; no defect                                                                        | Not an exception — aged at read time for sorting                         |
 | **C-07** | Manufacturer rejected                               | Explicit rejection with a reason; expected rebate → 0 unless corrected and resubmitted                            | Not a TPA problem; the qualification stood, the manufacturer disputed it |
 | **C-08** | Approved, paid, cash matched ✅                     | Approval + payment = R; deposit matched; outstanding = 0                                                           | Fully recovered on the rebate side                                       |
 | **C-09** | Approved and paid per TPA, no cash                  | TPA reports paid; no matching deposit                                                                              | The TPA's ledger and the bank disagree                                   |
 | **C-10** | Approved, partial rebate paid                       | Payment P < R; cash matched; variance = R − P                                                                     | Usually a unit/price dispute, not a qualification dispute                |
-| **C-11** | Approved, never paid, past SLA                      | Approval on record; no payment; age > SLA                                                                          | Manufacturer agreed and did not pay — clean, chaseable                  |
-| **C-11a** | Approved, awaiting payment, within SLA | Approval on record; no payment yet; age < SLA | Not an exception — the manufacturer still has time to pay |
+| **C-11** | Approved, awaiting payment                          | Approval on record; no payment yet; no defect                                                                      | Not an exception — aged at read time for sorting; manufacturer agreed, timing alone is not a defect                |
 | **C-13** | Rebate clawed back                                  | Rebate previously paid, then reversed by the manufacturer (duplicate-discount finding, audit, or dispute)          | Net rebate = 0; the original qualification is now contested              |
 | **C-14** | Duplicate rebate payment                            | Two rebate payments for one dispense                                                                               | Refund liability; distinguish from a legitimate two-part payment         |
 
-**Subtotal: 16 states (including C-00 "absent").**
+**Subtotal: 12 states (including C-00 "absent").**
 
-> **C-01a and C-11a added; C-12 removed.** The original table gave both timing
-> halves for C-03/C-04 and C-05/C-06 but only the past-SLA half for
-> qualification-pending and approved-unpaid — an inconsistency the exhaustive
-> generator caught, since both in-flight states are reachable and each accounts
-> for 271 configurations. C-12 ("unmatched rebate") moved to Section 6 as D-4:
-> cash with no attributable episode cannot be a state *of* an episode.
+> **C-01a and C-11a added; C-12 removed.** *(Earlier pass.)* The original table
+> gave both timing halves for C-03/C-04 and C-05/C-06 but only the past-SLA half
+> for qualification-pending and approved-unpaid — an inconsistency the
+> exhaustive generator caught, since both in-flight states were reachable and
+> each accounted for 271 configurations. C-12 ("unmatched rebate") moved to
+> Section 6 as D-4: cash with no attributable episode cannot be a state *of* an
+> episode.
+
+> **C-01a, C-11a, C-04, C-06 retired.** *(SLA-removal pass, this document.)*
+> Aging is no longer a verdict dimension (Section 0a). C-01a and C-11a — the
+> within-SLA twins added in the correction above — merge back into C-01 and
+> C-11, which are now unified, age-agnostic states. C-04 ("qualified, request
+> stuck, past SLA") and C-06 ("request submitted, manufacturer silent, past
+> SLA") are gone the same way A-03 and B-03 are gone: they were the past-SLA
+> halves of C-03 and C-05, whose within-SLA names now cover both. Net for this
+> track: 16 states → 12. See Section 9 for the full history.
 
 ---
 
@@ -220,103 +321,78 @@ These fire on the *combination* of two track verdicts. They are the reason the e
 
 ---
 
-## 5. The combination count, and why you do not implement 528 branches
+## 5. The combination count, and why you do not implement 372 branches
 
 ### The arithmetic
 
 ```
-Reimbursement states:  17 (pharmacy) + 16 (medical)   =  33
-340B states:           16 (including "absent")
-Total representable:   33 × 16                        = 528
+Reimbursement states:  16 (pharmacy) + 15 (medical)   =  31
+340B states:           12 (including "absent")
+Total representable:   31 × 12                        = 372
 ```
 
 ### Split into coherent vs anomalous
 
 **Four** pharmacy verdicts mean the dispense did not happen: A-01 (rejected at POS), A-10 (reversed after payment, money returned), A-11 (reversal recorded, money not returned) and A-16 (reversed before payment). An earlier hand-count listed only three — it missed A-11, which is a no-dispense state just as much as A-10 is. For those four, the only coherent 340B verdicts are C-00 (absent), C-02 (not qualified) and C-13 (rebate correctly unwound).
 
-Generation confirms the split is **clean**: of the 528 pairs, 476 contain only coherent configurations and 52 contain only anomalous ones. Zero pairs are mixed, which means coherence is decidable from the verdict pair alone — the engine never has to inspect the underlying configuration to know whether a compliance flag is warranted.
+Medical is different — the drug was administered before billing, so **all 15 medical states are compatible with a live 340B track**, including B-01.
 
-Medical is different — the drug was administered before billing, so **all 17 medical states are compatible with a live 340B track**, including B-01.
+Generation confirms the split at the underlying-configuration level: of the **4,224** valid configurations, **3,860** are logically coherent and **364** are compliance anomalies — produced entirely by the four no-dispense pharmacy verdicts above paired with a 340B verdict that should not survive them.
 
-| Segment                                   | Calculation | Count                                |
-| ----------------------------------------- | ----------- | ------------------------------------ |
-| Pharmacy, dispense occurred (13 verdicts) | 13 × 16    | 208                                  |
-| Pharmacy, no dispense, coherent 340B      | 4 × 3      | 12                                   |
-| Medical (all verdicts)                    | 16 × 16    | 256                                  |
-| **Logically coherent total**        |             | **476**                        |
-| Pharmacy, no dispense, 340B active anyway | 4 × 13     | **52** ← compliance anomalies |
-| **Total representable**             |             | **528**                        |
-
-Those 52 are not noise to be filtered out. They are the highest-value exceptions in the system — data that should be impossible, which is exactly what an exception engine exists to surface.
+Those 364 are not noise to be filtered out. They are the highest-value exceptions in the system — data that should be impossible, which is exactly what an exception engine exists to surface.
 
 ### What actually gets built
 
-The engine does **not** enumerate 528 cases. It resolves each track independently, then applies cross-track rules:
+The engine does **not** enumerate 372 cases. It resolves each track independently, then applies cross-track rules:
 
 ```
 episode_status = compose(
-    reimbursement_verdict,   # one of 34, from ~34 track rules
-    rebate_verdict,          # one of 15, from ~15 track rules
+    reimbursement_verdict,   # one of 31, from 31 track rules
+    rebate_verdict,          # one of 12, from 12 track rules
     cross_track_flags        # subset of 7
 )
 ```
 
 | What                                | Count        |
 | ----------------------------------- | ------------ |
-| Pharmacy track rules                | 17           |
-| Medical track rules                 | 17           |
-| 340B track rules                    | 15           |
+| Pharmacy track rules                | 16           |
+| Medical track rules                 | 15           |
+| 340B track rules                    | 12           |
 | Cross-track compliance rules        | 7            |
-| **Total deterministic rules** | **56** |
+| **Total deterministic rules** | **50** |
 
-56 rules generate 528 outcomes. That compositional property is worth stating out loud in the design note and in the walkthrough — it is the difference between an architecture and a switch statement.
+50 rules generate 372 outcomes, evaluated as 10-32 if-checks per case (average 21.0 — Section 9 has the stage-by-stage breakdown). That compositional property is worth stating out loud in the design note and in the walkthrough — it is the difference between an architecture and a switch statement.
 
-### Status enum
+### Disposition, not a status enum
 
-The 528 combinations collapse to a small closed set of statuses. Detail lives in the reason codes, not the enum.
-
-| Status               | Meaning                                                 |
-| -------------------- | ------------------------------------------------------- |
-| `RECONCILED`       | Every track settled, cash matched, outstanding = 0      |
-| `IN_FLIGHT`        | Open, within SLA, no defect                             |
-| `AWAITING_PAYMENT` | Past SLA, no payer response                             |
-| `UNDERPAID`        | Money received, less than expected, variance quantified |
-| `OVERPAID`         | Money received in excess; refund liability              |
-| `DENIED`           | Explicit refusal on a track; action required            |
-| `CASH_MISMATCH`    | Remittance and bank disagree in either direction        |
-| `CLAWBACK`         | Money previously received has been taken back           |
-| `COMPLIANCE_FLAG`  | A cross-track rule fired; requires human review         |
-
-**9 values.** Each carries: `track`, `reason_code`, `variance_amount`, `age_days`, `source_record_ids[]`.
+An earlier draft collapsed everything to a flat 9-value status enum. That conflated two layers that behave differently: *disposition* (what to do — `CLOSED` / `PENDING` / `EXCEPTION`) and *reason* (why — `UNDERPAID`, `CASH_MISMATCH`, `INSUFFICIENT_DATA`, and so on). A claim can carry several reasons at once and only one disposition; a single enum value cannot express "exception, underpaid and cash-mismatched." Section 0a has the full model: three dispositions, a reason-code list, the reopened flag, and the two-level (track / episode) rollup.
 
 ### What this means for the agent layer
 
-The agent must be able to narrate any of the 528, but it never enumerates them either. It reads two track verdicts plus cross-track flags and composes an explanation the same way the engine composes a status.
+The agent must be able to narrate any of the 372 verdict pairs, but it never enumerates them either. It reads two track verdicts plus cross-track flags and composes an explanation the same way the engine composes a disposition.
 
 Practical consequences:
 
-- **Eval coverage.** 10 required scenarios cannot cover 528. Cover the shape instead: 2 happy paths (one per reimbursement type), the 6 required edge cases, and 2 cross-track compliance cases. X-1 and X-2 are the strongest demo material because they are invisible to any single-track system.
-- **Insufficiency behavior.** A-13, D-4 and X-5 are states where the correct agent answer is "I cannot determine this from the available feeds, and here is precisely what is missing." Section 3 of the assignment requires that behavior — these states are where you demonstrate it.
-- **Prioritization is deterministic.** Ranking exceptions by value/age/category is a sort over these verdicts. The agent explains the ranking; it does not produce it.
+- **Eval coverage.** 10 required scenarios cannot cover 372. Cover the shape instead: 2 happy paths (one per reimbursement type), the 6 required edge cases, and 2 cross-track compliance cases. X-1 and X-2 are the strongest demo material because they are invisible to any single-track system.
+- **Insufficiency behavior.** A-13, D-4 and X-5 are states where the correct agent answer is "I cannot determine this from the available feeds, and here is precisely what is missing" — the `INSUFFICIENT_DATA` reason code from Section 0a. Section 3 of the assignment requires that behavior — these states are where you demonstrate it.
+- **Prioritization is deterministic.** Ranking exceptions by value/age/category is a sort over these verdicts, with the reopened-from-closed rule from Section 0a taking precedence. The agent explains the ranking; it does not produce it.
 
 ### What this means for the generator
 
-50 episodes against 528 verdict pairs (7,046 underlying configurations) is under 10% coverage at best, and uniform sampling would be wrong anyway. Target roughly:
+One generator, one seed, two profiles:
 
-| Bucket                                                                                                                    | Episodes |
-| ------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Happy path (A-04, B-04, C-08, and the four episode shapes)                                                                | ~20      |
-| Required edge cases (partial, underpayment, reversal/recoupment, unmatched cash/rebate, denial, duplicate, late-arriving) | ~15      |
-| Cross-track compliance (X-1, X-2, X-3, X-5, X-7)                                                                          | ~8       |
-| Data-integrity overlays (Section 6)                                                                                       | ~7       |
+| Profile | Episodes | Purpose |
+| ------- | -------- | ------- |
+| `demo` | ~60, hand-stratified | The walkthrough. The debrief asks you to trace **one** claim end to end — nobody does that against a 1,500-episode file. Curated to include both happy paths, the required edge cases, and the strongest cross-track compliance cases (X-1, X-2). |
+| `full` | ~1,500 | What the test suite asserts against. Large enough to hit all 372 verdict pairs at least once. |
 
-Roughly 25–30 distinct combinations across 50 episodes. Enough variety that the agent has something worth investigating, without pretending to exhaust the space.
+Coverage is not a hope here, it is an assertion. A coverage test enumerates the 372 reachable verdict pairs and **fails** if the `full` profile does not produce every one of them. That turns this document from a design reference into a test oracle — the state space stops being a claim about the system and becomes a check on it.
 
 ---
 
 ## 6. Feed-level data-integrity exceptions
 
-Orthogonal to episode state. These are properties of *ingestion*, not of a claim, which is why they are not multiplied into the 528. They are handled in the source-adapter / normalization band and can co-occur with any episode state.
+Orthogonal to episode state. These are properties of *ingestion*, not of a claim, which is why they are not multiplied into the 372. They are handled in the source-adapter / normalization band and can co-occur with any episode state.
 
 | #             | Exception                           | What is TRUE                                                                         | What is FALSE                                                                                                  |
 | ------------- | ----------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -354,25 +430,25 @@ A reconciliation rule is invariant under a scale dimension when that dimension a
 
 Worked example: PBM A rejects with code `70`, PBM B with `A1`. Both mean rejected, both resolve to A-01. The mapping table gains a row; `if adjudication == REJECTED` is untouched. Multi-level appeals are the same story — Medicare has five levels where a commercial payer has one, but `PENDING` covers any level and `LOST` means exhausted. Level is a field, not a verdict, because the reconciliation answer (collectible or not) is identical either way.
 
-**56 rules, at any number of tenants, payers, TPAs and banks.**
+**50 rules, at any number of tenants, payers, TPAs and banks.**
 
 ### Three limits on that claim, stated rather than hidden
 
-**1. The rules must be parameterized or the claim is false in practice.**
+**1. Aging is deliberately not a rule input — and if it ever becomes one, it must be config, never a literal.**
 
-The real scaling risk is code *shape*, not rule count. This forks on payer #2:
+An earlier design had `if age_days > 30` gating a verdict. Section 0a explains why that is gone: aging dropped out of the disposition layer entirely and became a read-time sort key instead, which is what makes a claim with no new inbound record provably unable to change disposition. That is not only a scaling concern — it is the property that makes incremental processing correct — but it also happens to remove an entire class of scaling risk before it starts, because a threshold that does not exist cannot fork per payer.
 
-```python
-if age_days > 30:                              # literal -> 56 becomes 56 x P
-```
-
-This does not:
+Real timing rules do exist in the industry, and they should not be mistaken for oversight: Medicare's 30-day payment ceiling, state prompt-pay statutes (commonly 30 or 45 days), Iowa's 20-day PBM-specific rule, CAQH CORE Operating Rule 370's ±3-business-day remittance window, and the 340B pilot program's 45-day submission window with a 10-day manufacturer-payment window. If a future requirement — SLA-breach alerting, an escalation timer, a contractual penalty calculation — reintroduces them, they must be config, never a literal buried in a verdict rule:
 
 ```python
-if age_days > sla_for(tenant, source, pathway):
+if age_days > 30:                              # literal -> a verdict rule forks per payer
 ```
 
-Values that must be configuration and never literals: SLA windows per source and pathway, underpayment tolerance (what counts as a variance versus rounding), cash-match tolerance, and aging-bucket boundaries. Hardcode any of them and rule-count invariance is theoretically true and operationally worthless.
+```python
+if age_days > sla_for(tenant, source, pathway): # config -> same rule, one new row
+```
+
+Values that must be configuration and never literals, if they return at all: SLA/escalation windows per source and pathway, underpayment tolerance (what counts as a variance versus rounding), cash-match tolerance, and aging-bucket boundaries for the read-time sort. Hardcode any of them and rule-count invariance is theoretically true and operationally worthless.
 
 **2. Row growth is large and is the highest-maintenance surface.**
 
@@ -396,28 +472,34 @@ If a shared lockbox could receive a single deposit covering claims from two tena
 
 | Layer                                                   | Count                             |
 | ------------------------------------------------------- | --------------------------------- |
-| Pharmacy benefit states                                 | 17                                |
-| Medical benefit states                                  | 16                                |
-| 340B rebate states (incl. absent)                       | 16                                |
+| Pharmacy benefit states                                 | 16                                |
+| Medical benefit states                                  | 15                                |
+| 340B rebate states (incl. absent)                       | 12                                |
 | Cross-track compliance rules                            | 7                                 |
 | Feed-level data-integrity exceptions                    | 7                                 |
-| **Deterministic rules to implement**              | **56**                      |
-| Representable episode combinations                      | 528 (476 coherent + 52 anomalous) |
-| Underlying valid configurations                         | 7,046 of 326,517,350,400 unconstrained |
-| Status enum values                                      | 9                                 |
-| Distinct combinations to cover in 50 synthetic episodes | ~25–30                           |
+| **Deterministic rules to implement**              | **50**                      |
+| Reachable verdict pairs                                 | 372 (31 × 12, exact product, all reachable) |
+| Valid configurations                                    | 4,224 (3,860 coherent + 364 anomalous) |
+| Unconstrained cross-product                             | 12,093,235,200                    |
+| Dispositions                                            | 3 (`CLOSED` / `PENDING` / `EXCEPTION`) — reason codes carry detail, Section 0a |
+| Generator profiles                                      | `demo` ~60 episodes (curated walkthrough), `full` ~1,500 (asserts all 372 pairs) |
 
 **Cash/bank is deliberately absent from this table.** It is not a track and not a dimension — it is a verification attribute already encoded inside every state in Sections 1–3, plus two feed-level exceptions (D-3, D-7). See Section 0.
 
 ---
 
-## 9. Corrections log — what exhaustive generation changed
+## 9. Corrections log — what exhaustive generation changed, and what a later design decision changed
 
-The figures in this document were originally hand-counted. The decision-tree
-generator in [`../decision_tree/`](../decision_tree/REPORT.md) built all 7,046
-valid configuration paths, validating each choice against the choices above it,
-and disagreed with the hand-count in three places. All three were hand-count
-errors.
+The figures in this document were originally hand-counted. Two separate passes
+moved them since, and they are logged here in order because they are different
+in kind — the first pass fixed mistakes, the second pass changed the design.
+
+### First pass — exhaustive generation corrected the hand-count
+
+The decision-tree generator in [`../decision_tree/`](../decision_tree/REPORT.md)
+built all 7,046 valid configuration paths, validating each choice against the
+choices above it, and disagreed with the hand-count in three places. All three
+were hand-count errors.
 
 | # | Error | Effect |
 |---|---|---|
@@ -426,16 +508,92 @@ errors.
 | 3 | **Two in-flight 340B states were missing.** The table gave both timing halves for C-03/C-04 and C-05/C-06 but only the past-SLA half for qualification-pending and approved-unpaid. Added as C-01a and C-11a, 271 configurations each. | 340B states 14 → 16 |
 | 4 | **A-11 was miscounted as a dispense-occurred state.** "Reversal recorded, money not returned" is a no-dispense state exactly as A-10 is. | Anomalous pairs 36 → 52 |
 
-Net: 34 × 15 = 510 became 33 × 16 = **528**.
+Net for this pass: 34 × 15 = 510 became 33 × 16 = **528**.
 
 **The implementation estimate did not move.** 33 + 16 = 49 track rules, the same
 as 34 + 15, plus 7 cross-track rules — still **56**. The corrections redistributed
-states between tracks without changing how much code there is to write.
+states between tracks without changing how much code there is to write. (The
+second pass, below, did move this estimate — deliberately.)
 
-Two results that only exhaustive generation could establish:
+Two results that only exhaustive generation could establish, at the time:
 
-- **All 528 verdict pairs are reachable.** The tracks are independent at the
+- **All 528 verdict pairs were reachable.** The tracks are independent at the
   verdict level; cross-track rules annotate, they never prohibit.
-- **Coherence is a clean partition.** 476 pairs are wholly coherent, 52 wholly
-  anomalous, none mixed — so a compliance flag is decidable from the verdict pair
-  alone, without inspecting the underlying configuration.
+- **Coherence was a clean partition.** 476 pairs were wholly coherent, 52 wholly
+  anomalous, none mixed — so a compliance flag was decidable from the verdict
+  pair alone, without inspecting the underlying configuration.
+
+### Second pass — SLA thresholds removed by design decision (this document)
+
+This pass is not a correction. Nothing above was wrong. It is a deliberate
+architectural choice: aging stopped being a **verdict** dimension and became a
+**read-time sort key** instead. Section 0a covers the reasoning in full; in
+short —
+
+- A claim with no new inbound record cannot change disposition. That is what
+  makes incremental processing **provably complete** rather than an
+  optimisation you hope is safe — the single biggest architectural payoff of
+  this change.
+- It removes the need to defend arbitrary threshold numbers (why 30 days and
+  not 45?) inside the reconciliation engine itself.
+- Real timing rules genuinely exist in the industry — Medicare's 30-day payment
+  ceiling, state prompt-pay statutes (commonly 30 or 45 days), Iowa's 20-day
+  PBM-specific rule, CAQH CORE Operating Rule 370's ±3-business-day remittance
+  window, and the 340B pilot program's 45-day submission window with a 10-day
+  manufacturer-payment window. They are real, but they are **policy** — never a
+  field on a record. This is a deliberate, informed exclusion, not an
+  oversight, and if any of them is reintroduced it belongs in engine
+  configuration, never as a literal (Section 7).
+
+**States retired.** The past-SLA half of each within-SLA/past-SLA pair is gone,
+because its within-SLA twin now covers both ages — a claim ages in place, it
+does not jump to a new verdict:
+
+| State | Was | Now |
+|---|---|---|
+| A-03 | Awaiting payment, past SLA | Retired — covered by A-02, "Awaiting payment" |
+| B-03 | Submitted, 835 missing, past SLA | Retired — covered by B-02, "Submitted, awaiting 835" |
+| C-04 | Qualified, request stuck, past SLA | Retired — covered by C-03, "Qualified, request not yet submitted" |
+| C-06 | Request submitted, manufacturer silent, past SLA | Retired — covered by C-05, "Request submitted, manufacturer pending" |
+| C-01a | Qualification pending, within SLA | Retired — merged back into C-01, "Qualification pending" |
+| C-11a | Approved, awaiting payment, within SLA | Retired — merged back into C-11, "Approved, awaiting payment" |
+
+C-01a and C-11a existed only because the first pass added them as the
+within-SLA twins of C-01 and C-11 (see row 3 above). Removing the SLA axis
+removes the reason they were split out in the first place, so they fold back
+into the states they were split from.
+
+**Renumbered subtotals:** pharmacy 17 → 16, medical 16 → 15, 340B 16 → 12
+(including C-00 absent). Reachable reimbursement verdicts 33 → 31, reachable
+rebate verdicts 16 → 12.
+
+**Exact figures from this rerun** — same generator and methodology as the
+first pass, applied to the reduced state space:
+
+```
+unconstrained cross-product : 12,093,235,200
+valid configurations        : 4,224          (was 7,046)
+eliminated as impossible    : 12,093,230,976
+survived                    : 0.00003%
+
+reachable reimbursement verdicts : 31        (was 33)
+reachable rebate verdicts        : 12        (was 16)
+verdict pairs                    : 31 x 12 = 372, ALL 372 reachable
+                                    (was 528)
+
+coherent configurations   : 3,860
+anomalous configurations  : 364
+
+deterministic rules       : 31 + 12 = 43 track rules + 7 cross-track = 50   (was 56)
+
+if-checks evaluated per case: min 10, max 32, average 21.0
+  stage 0 route pharmacy vs medical : 1 check always
+  stage 1 reimbursement verdict     : 1-12 checks, avg 5.3
+  stage 2 rebate verdict            : 1-12 checks, avg 7.6
+  stage 3 cross-track flags         : 7 checks always
+```
+
+**Running total across both passes:** 510 (hand-count) → 528 (exhaustive
+generation) → 372 (SLA removed by design decision). The first arrow is a
+correction; the second is a decision. Conflating them would misrepresent this
+pass as fixing an error when nothing before it was wrong.

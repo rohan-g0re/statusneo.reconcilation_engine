@@ -30,7 +30,7 @@ class Counted:
 def pharmacy(r, c, k):
     adj, pay = r.get("ph_adjudication"), r.get("ph_payment")
     post, settle = r.get("ph_post_event"), r.get("ph_settlement")
-    timing, cash_in = r.get("ph_timing"), c.get("cash_reimb_in")
+    cash_in = c.get("cash_reimb_in")
     cash_out = c.get("cash_reimb_out")
 
     if k.t(adj == "REJECTED"):
@@ -42,7 +42,7 @@ def pharmacy(r, c, k):
     if k.t(post == "RECOUPMENT"):
         return "A-12" if k.t(cash_out == "MATCHED") else "A-13"
     if k.t(pay == "NONE"):
-        return "A-02" if k.t(timing == "WITHIN_SLA") else "A-03"
+        return "A-02"
     if k.t(pay == "DUPLICATE"):
         return "A-17"
     if k.t(pay == "OVER"):
@@ -67,14 +67,14 @@ def pharmacy(r, c, k):
 def medical(r, c, k):
     ch, rem = r.get("md_clearinghouse"), r.get("md_remittance")
     appeal, post = r.get("md_appeal"), r.get("md_post_event")
-    timing, cash_in = r.get("md_timing"), c.get("cash_reimb_in")
+    cash_in = c.get("cash_reimb_in")
 
     if k.t(ch == "REJECTED"):
         return "B-01"
     if k.t(post == "RECOUPMENT"):
         return "B-15"
     if k.t(rem == "NONE"):
-        return "B-02" if k.t(timing == "WITHIN_SLA") else "B-03"
+        return "B-02"
     if k.t(rem == "DUPLICATE_835"):
         return "B-16"
     if k.t(rem == "PAID_FULL"):
@@ -100,20 +100,20 @@ def rebate(b, c, k):
         return "C-00"
     qual, req = b.get("r_qualification"), b.get("r_request")
     mfr, pay = b.get("r_manufacturer"), b.get("r_payment")
-    timing, cash_in = b.get("r_timing"), c.get("cash_rebate_in")
+    cash_in = c.get("cash_rebate_in")
 
     if k.t(qual == "PENDING"):
-        return "C-01" if k.t(timing == "PAST_SLA") else "C-01a"
+        return "C-01"
     if k.t(qual == "NOT_QUALIFIED"):
         return "C-02"
     if k.t(req == "NOT_SUBMITTED"):
-        return "C-03" if k.t(timing == "WITHIN_SLA") else "C-04"
+        return "C-03"
     if k.t(mfr == "PENDING"):
-        return "C-05" if k.t(timing == "WITHIN_SLA") else "C-06"
+        return "C-05"
     if k.t(mfr == "REJECTED"):
         return "C-07"
     if k.t(pay == "NONE"):
-        return "C-11" if k.t(timing == "PAST_SLA") else "C-11a"
+        return "C-11"
     if k.t(pay == "CLAWED_BACK"):
         return "C-13"
     if k.t(pay == "DUPLICATE"):

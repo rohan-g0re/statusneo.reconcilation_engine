@@ -18,21 +18,37 @@ python verify.py         # independent verification
 
 | Measure | Value |
 |---|---|
-| Unconstrained cross-product | 326,517,350,400 |
-| **Valid paths (leaf cases)** | **7,046** |
-| Eliminated as impossible | 326,517,343,354 (99.9999978%) |
-| Coherent configurations | 6,578 |
-| Anomalous configurations (tagged, not pruned) | 468 |
-| Leaf depth range | **3 to 15 decisions** |
+| Unconstrained cross-product | 12,093,235,200 |
+| **Valid paths (leaf cases)** | **4,224** |
+| Eliminated as impossible | 12,093,230,976 (99.99997%) |
+| Coherent configurations | 3,860 |
+| Anomalous configurations (tagged, not pruned) | 364 |
+| Leaf depth range | **3 to 15 decisions*** |
 | Cash verification slots per case | **0 to 4** |
-| Reachable reimbursement verdicts | 33 |
-| Reachable rebate verdicts | 16 |
-| **Reachable verdict pairs** | **528** |
-| Previously published figure | 510 |
+| Reachable reimbursement verdicts | 31 |
+| Reachable rebate verdicts | 12 |
+| **Reachable verdict pairs** | **372** |
+| Deterministic rules (track + cross-track) | 43 + 7 = **50** |
+| If-checks per case (min / avg / max) | 10 / 21.0 / 32 |
+
+\* depth range and the per-depth table in §1 are from the pre-SLA-removal run
+(7,046 paths) and were not recomputed after §7. The three structural causes of
+variable depth are unaffected by SLA removal and still hold.
+
+**Running history of the headline count:** 510 (hand-counted) → 528 (exhaustive
+generation corrected four hand-counting errors) → **372** (SLA thresholds
+removed by design decision — see §7). The first change was error correction.
+The second was a deliberate scope decision, not a fix.
 
 ---
 
 ## 1. Yes — branches terminate at different depths
+
+*Figures in this section are from the original 7,046-path run, before SLA
+thresholds were removed (§7). They are kept here because they are what
+established the phenomenon and its three causes below, and both the
+phenomenon and the causes hold unchanged on the current 4,224-path tree — only
+the totals moved. The section was not re-run to produce a fresh histogram.*
 
 You asked whether this could happen. It does, and by a wide margin: **3 to 15**
 decisions from root to leaf.
@@ -154,12 +170,25 @@ presumably why they were skipped when writing by hand.
 33 × 16 = 528, and the tree reached exactly 528 distinct pairs
 ```
 
+*This section documents the error-correction pass only — the numbers above
+(33, 16, 528) are what the tree proved at that point in time. A later,
+separate change removed SLA thresholds entirely by design decision and moved
+the totals again, to 31, 12 and 372; see §7. The two `within-SLA` rebate
+states surfaced by Error 3 above (`qualification-pending-within-SLA`,
+`approved-unpaid-within-SLA`) no longer exist as distinct states after §7 —
+they were merged back into C-01 and C-11 once the SLA qualifier was retired.
+That is a scope decision layered on top of an error correction, not a reversal
+of it.*
+
 ---
 
 ## 4. The tracks are independent at the verdict level — proven, not assumed
 
-The tree reached **528 of a possible 528** verdict pairs. Not one combination is
-unreachable.
+The tree reached **372 of a possible 372** verdict pairs (31 × 12). Not one
+combination is unreachable. This is the same finding as before SLA removal
+(528 of 528) — the product stayed exact when the totals moved, which means the
+independence result was never an artifact of the specific verdict count. It is
+reconfirmed, not just carried over.
 
 Every cross-track rule we wrote turns out to be a **flag, not a prohibition**.
 X-1 through X-7 mark combinations as anomalous, correlated or explicitly-benign,
@@ -169,8 +198,8 @@ So the constraint pressure is not where the earlier document implied. It sits on
 level down:
 
 ```
-configuration level : heavily constrained  ->  7,046 valid of 326 billion
-verdict level       : completely free      ->  33 × 16 = 528, all reachable
+configuration level : heavily constrained  ->  4,224 valid of 12 billion
+verdict level       : completely free      ->  31 × 12 = 372, all reachable
 ```
 
 That is a genuinely useful architectural result. It means the engine can resolve
@@ -184,7 +213,10 @@ rejects.
 
 ### The generator must sample verdicts, not configurations
 
-Configuration frequency is wildly non-uniform — a 60× spread:
+Configuration frequency is wildly non-uniform — a 60× spread on the
+pre-SLA-removal run (exact counts below are from that 7,046-path run and were
+not recomputed post-§7; the imbalance itself is structural and does not go away
+when the totals shrink):
 
 ```
 B-15 (medical takeback)                        1,560 configs
@@ -193,15 +225,18 @@ A-01 (POS rejection)                              26 configs
 X-1 compliance case                                1 config
 ```
 
-Sampling 50 episodes uniformly from 7,046 configurations yields roughly eleven
-recoupment cases and, with better than even odds, zero POS rejections and zero
-X-1. The X-1 case — reimbursement refused while rebate money is held — is the
-single strongest thing to show in the walkthrough, and it is **one path in 7,046**.
+Sampling 50 episodes uniformly from thousands of configurations yields roughly
+a fair number of recoupment cases and, with better than even odds, zero POS
+rejections and zero X-1. The X-1 case — reimbursement refused while rebate
+money is held — is the single strongest thing to show in the walkthrough, and
+it remains a needle-in-a-haystack path: still exactly one named-case check away
+from being missed by random sampling (§7 reconfirms X-1 exists by construction
+on the current 4,224-path tree; exact config count not part of this pass).
 
-Sampling must be stratified over the 528 verdict pairs, with named cases placed
+Sampling must be stratified over the 372 verdict pairs, with named cases placed
 deliberately.
 
-### 56 rules still stands as the implementation estimate
+### 50 rules is now the implementation estimate (was 56)
 
 The tree does not change what gets built. The engine resolves each track
 independently and composes:
@@ -210,8 +245,9 @@ independently and composes:
 episode_status = compose(reimbursement_verdict, rebate_verdict, cross_track_flags)
 ```
 
-Track rules (33 + 16) plus 7 cross-track annotations. The 7,046 configurations
-and 528 verdict pairs are *outputs* of that composition, not branches in it.
+Track rules (31 + 12) plus 7 cross-track annotations = 50. The 4,224
+configurations and 372 verdict pairs are *outputs* of that composition, not
+branches in it.
 
 ### The leaf JSON is the composite case object
 
@@ -254,16 +290,128 @@ Recorded because it is the same trap a reviewer will look for in the design.
 
 ---
 
+## 7. SLA thresholds removed — a deliberate scope decision, not a correction
+
+Unlike §3, this is not a bug fix. Nothing was wrong with the 528-pair model;
+it was decided that it modelled the wrong thing.
+
+### What changed
+
+The three timing variables — `ph_timing`, `md_timing`, `r_timing` — were
+removed from the reconciliation model. Their domain functions still exist in
+`spec.py` as stubs (`dom_ph_timing`, `dom_md_timing`, `dom_r_timing`), each now
+returning `[]` unconditionally with a docstring explaining why, so the
+`VARIABLES` list stays stable. `classify.py`, `verify.py` and `count_ifs.py`
+were updated to match: the within-SLA/past-SLA split disappears everywhere a
+verdict used to branch on it.
+
+### Why
+
+- **Aging stops being a verdict dimension.** It becomes a read-time sort key
+  over the pending and exception lists, not a branch the engine takes.
+- **The payoff is completeness, not simplicity.** A claim with no new inbound
+  record can no longer change disposition. That makes event-driven incremental
+  processing **provably complete**, rather than an optimisation you merely hope
+  is safe. Under SLA thresholds, an untouched claim could flip overnight from
+  within-SLA to past-SLA on the calendar alone, which forces a daily sweep over
+  every open claim just in case — exactly the kind of full-table re-scan an
+  event-driven design is supposed to make unnecessary.
+- **It removes the need to defend arbitrary threshold numbers.** Any SLA
+  constant written into the model invites the question "why that number,"
+  with no good answer at this layer.
+- **Real timing rules do exist — as policy, never as fields on a record.**
+  Medicare's 30-day payment ceiling, state prompt-pay laws (commonly 30 or 45
+  days), Iowa's 20-day PBM rule, CAQH CORE 370's ±3 business day claim
+  acknowledgment window, and the 340B rebate pilot's 45-day submission /
+  10-day manufacturer payment windows are all real. None of them belongs in
+  this model as a literal. If reintroduced, they belong in engine
+  configuration, evaluated at read time, never hard-coded into the decision
+  tree. This was an informed exclusion, made with the rules in view, not an
+  oversight.
+
+### Exact numbers from the rerun
+
+```
+unconstrained cross-product : 12,093,235,200      (was 326,517,350,400)
+valid paths in the tree     : 4,224               (was 7,046)
+eliminated as impossible    : 12,093,230,976
+survived validity checking  : 0.00003%
+
+VALIDATION PASSED -- all 4224 paths satisfy every constraint
+OVERALL: ALL CHECKS PASSED   (verify.py: all named cases found, all impossible cases absent)
+
+reachable reimbursement verdicts : 31             (was 33)
+reachable rebate verdicts        : 12             (was 16)
+product                          : 31 x 12 = 372
+pairs actually reached           : 372            -> EXACT, still a perfect product
+                                                     (was 528)
+
+coherent configurations   : 3,860                 (was 6,578)
+anomalous configurations  : 364                   (was 468)
+
+deterministic rules : 31 + 12 = 43 track + 7 cross-track = 50    (was 56)
+
+if-checks per case  : min 10, max 32, average 21.0
+  stage 0 route pharmacy vs medical : 1 check always
+  stage 1 reimbursement verdict     : 1-12 checks, avg 5.3
+  stage 2 rebate verdict            : 1-12 checks, avg 7.6
+  stage 3 cross-track flags         : 7 checks always
+```
+
+### Verdicts retired
+
+`A-03`, `B-03`, `C-04`, `C-06` — the past-SLA halves of pairs whose
+within-SLA twin now covers both cases. Also `C-01a` and `C-11a`, the two
+`within-SLA` rebate states that Error 3 in §3 had just added, are now merged
+back into `C-01` and `C-11` — the split they existed to name no longer exists.
+(`B-17` and `C-12` were already retired in §3 for unrelated reasons; that
+reasoning is untouched by this change.)
+
+Reimbursement lost 2 verdicts (33 → 31: `A-03`, `B-03`). Rebate lost 4 (16 →
+12: `C-04`, `C-06`, `C-01a`, `C-11a`). 2 + 4 accounts for the entire movement
+from 528 to 372 — there is no residual unexplained by the retirement list.
+
+### The independence finding survives unchanged
+
+The pair space is still an **exact product**: 372 of a possible 372 (31 × 12).
+This is the same result as §4 reported at 528 of 528 — the two tracks are
+independent at the verdict level regardless of what the verdict counts
+themselves are, so every cross-track rule is still an annotation, never a
+prohibition, and the engine still needs no cross-track validity table.
+
+### The named-case check survives with one wording edit
+
+All twelve named cases in `verify.py` still exist by construction on the
+current tree. Eleven are untouched. The twelfth needed one edit: the case
+previously asserted as *"rebate approved but never paid, past SLA"* is now
+asserted as *"rebate approved but never paid"* — the SLA qualifier was removed
+from the assertion because the underlying distinction no longer exists to
+qualify.
+
+### Running history
+
+```
+510   hand-counted                                        (original doc)
+528   exhaustive generation corrected four hand-count errors   (§3, error correction)
+372   SLA thresholds removed                                (§7, this pass — a scope decision)
+```
+
+The first change corrected mistakes in existing scope. The second removed
+scope on purpose. They should not be read as the same kind of event.
+
+---
+
 ## Files
 
 | File | Contents |
 |---|---|
-| `spec.py` | Decision variables, domain functions, coherence and cross-track rules |
+| `spec.py` | Decision variables, domain functions, coherence and cross-track rules (timing domains retired to stubs) |
 | `build_tree.py` | DFS generator + independent validator |
 | `classify.py` | Collapses configurations onto curated A/B/C verdicts |
 | `verify.py` | Pruning contrast, named-case existence, impossible-case absence |
+| `count_ifs.py` | Counts if-checks actually evaluated per case (rules run, not rules written) |
 | `tree.json` | Nested decision tree, every node |
-| `leaves.json` | 7,046 composite case objects |
+| `leaves.json` | 4,224 composite case objects |
 | `leaves_classified.json` | Same, annotated with curated verdicts |
-| `pairs.json` | 528 verdict pairs with configuration counts |
+| `pairs.json` | 372 verdict pairs with configuration counts |
 | `NOTES.md` | Chunk-by-chunk work log, written as the work happened |

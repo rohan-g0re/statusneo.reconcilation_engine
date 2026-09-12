@@ -28,7 +28,6 @@ def classify_pharmacy(r, c):
     pay = r.get("ph_payment")
     post = r.get("ph_post_event")
     settle = r.get("ph_settlement")
-    timing = r.get("ph_timing")
     cash_in = c.get("cash_reimb_in")
     cash_out = c.get("cash_reimb_out")
 
@@ -44,10 +43,8 @@ def classify_pharmacy(r, c):
         return "A-12" if cash_out == "MATCHED" else "A-13"
 
     if pay == "NONE":
-        if post == "ADJUSTMENT":
-            # Expected reduced but still nothing received: aging still governs.
-            return "A-02" if timing == "WITHIN_SLA" else "A-03"
-        return "A-02" if timing == "WITHIN_SLA" else "A-03"
+        # SLA dropped: no within/past split. One verdict, aged at read time.
+        return "A-02"
 
     if pay == "DUPLICATE":
         return "A-17"
@@ -96,7 +93,7 @@ def classify_medical(r, c):
         return "B-15"
 
     if rem == "NONE":
-        return "B-02" if timing == "WITHIN_SLA" else "B-03"
+        return "B-02"
 
     if rem == "DUPLICATE_835":
         return "B-16"
@@ -151,26 +148,22 @@ def classify_rebate(b, c):
     cash_in = c.get("cash_rebate_in")
 
     if qual == "PENDING":
-        if timing == "PAST_SLA":
-            return "C-01"
-        return "C-GAP-qualification-pending-within-sla"
+        return "C-01"
 
     if qual == "NOT_QUALIFIED":
         return "C-02"
 
     if req == "NOT_SUBMITTED":
-        return "C-03" if timing == "WITHIN_SLA" else "C-04"
+        return "C-03"
 
     if mfr == "PENDING":
-        return "C-05" if timing == "WITHIN_SLA" else "C-06"
+        return "C-05"
     if mfr == "REJECTED":
         return "C-07"
 
     if mfr == "APPROVED":
         if pay == "NONE":
-            if timing == "PAST_SLA":
-                return "C-11"
-            return "C-GAP-approved-unpaid-within-sla"
+            return "C-11"
         if pay == "CLAWED_BACK":
             return "C-13"
         if pay == "DUPLICATE":
@@ -278,7 +271,7 @@ def main():
         print()
 
     print("=" * 72)
-    print("RECONCILIATION AGAINST THE HAND-COUNTED 510")
+    print("RECONCILIATION AFTER DROPPING SLA")
     print("=" * 72)
     all_reimb = sorted(reimb_states)
     all_rebate = sorted(rebate_states)          # includes the two GAP states
@@ -288,7 +281,7 @@ def main():
     print(f"product                          : {len(all_reimb)} x "
           f"{len(all_rebate)} = {product}")
     print(f"pairs actually reached           : {len(pairs)}")
-    print(f"hand-counted figure              : 510")
+    print(f"figure before SLA removal        : 528")
     print()
     if product == len(pairs):
         print("  Product is EXACT -- every verdict pair is reachable, so the two")

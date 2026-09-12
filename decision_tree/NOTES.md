@@ -310,3 +310,118 @@ pairs actually reached           : 528   <- EXACT
 `docs/reconciliation_state_space.md`, since the tree proved its 510 wrong:
 remove B-17, move C-12 to the feed-level table, add the two missing within-SLA
 rebate states, restate the total as 528.
+
+---
+
+## Chunk 6 — SLA thresholds removed entirely
+
+**Decision, not a bug fix.** Chunk 5 corrected the doc's arithmetic; this
+chunk changes what the model is of. SLA thresholds are dropped from the
+reconciliation model altogether.
+
+**Changed.** `ph_timing`, `md_timing`, `r_timing` removed from `spec.py` as
+live decision variables. Their domain functions (`dom_ph_timing`,
+`dom_md_timing`, `dom_r_timing`) are kept as stubs — each now returns `[]`
+unconditionally, with a docstring explaining why — so the `VARIABLES` list
+stays the same shape and nothing downstream has to special-case a missing
+entry. `classify.py`, `verify.py` and `count_ifs.py` updated to match: every
+within-SLA/past-SLA branch collapses to one branch.
+
+**Why.** Aging was the only thing SLA timing ever measured, and aging does not
+need to be a verdict. It can be a sort key applied at read time over the
+pending and exception lists instead of a fork in the decision tree. That
+reframing has a concrete payoff: a claim with no new inbound record can no
+longer change disposition. Nothing about it can flip overnight just because a
+calendar day rolled over. That makes event-driven incremental processing
+**provably complete** — not an optimisation you hope holds, but a property
+that follows from the model having no time-only transitions left. Under SLA
+thresholds this wasn't true: an untouched claim could cross from within-SLA to
+past-SLA while sitting still, which meant a daily sweep over every open claim
+was required just to catch that, regardless of whether anything actually
+happened. Dropping the thresholds also removes any obligation to defend
+specific threshold numbers, which were never going to have a good answer at
+this layer.
+
+This was checked against reality before cutting it, not assumed. Real claim
+timing rules exist: Medicare's 30-day payment ceiling, state prompt-pay laws
+(30 or 45 days depending on the state), Iowa's 20-day PBM rule, CAQH CORE
+370's ±3 business day acknowledgment window, and the 340B rebate pilot's
+45-day submission window and 10-day manufacturer payment window. All of them
+are policy enforced externally, never a field carried on the record itself. If
+timing logic comes back, it belongs in engine configuration, read at
+evaluation time — not as a literal decision variable in this tree. Excluding
+it here was informed, not an oversight.
+
+### Rerun, full numbers
+
+```
+unconstrained cross-product : 12,093,235,200      (was 326,517,350,400)
+valid paths in the tree     : 4,224               (was 7,046)
+eliminated as impossible    : 12,093,230,976
+survived validity checking  : 0.00003%
+
+VALIDATION PASSED -- all 4224 paths satisfy every constraint
+OVERALL: ALL CHECKS PASSED   (verify.py: all named cases found, all impossible cases absent)
+
+reachable reimbursement verdicts : 31             (was 33)
+reachable rebate verdicts        : 12             (was 16)
+product                          : 31 x 12 = 372
+pairs actually reached           : 372            -> EXACT, still a perfect product
+                                                     (was 528)
+
+coherent configurations   : 3,860                 (was 6,578)
+anomalous configurations  : 364                   (was 468)
+
+deterministic rules : 31 + 12 = 43 track + 7 cross-track = 50    (was 56)
+
+if-checks per case  : min 10, max 32, average 21.0
+  stage 0 route pharmacy vs medical : 1 check always
+  stage 1 reimbursement verdict     : 1-12 checks, avg 5.3
+  stage 2 rebate verdict            : 1-12 checks, avg 7.6
+  stage 3 cross-track flags         : 7 checks always
+```
+
+### Verdicts retired
+
+`A-03`, `B-03`, `C-04`, `C-06` — the past-SLA halves of pairs whose within-SLA
+twin now covers both cases on its own. Also `C-01a` and `C-11a` — the two
+within-SLA rebate states (`qualification-pending-within-SLA`,
+`approved-unpaid-within-SLA`) that Chunk 3 had just added to fix the doc's
+undercount — are merged straight back into `C-01` and `C-11`, since the SLA
+split that justified giving them separate names no longer exists. `B-17` and
+`C-12` stay retired for the unrelated reasons already recorded in Chunk 3;
+nothing about this pass touches that reasoning.
+
+Reimbursement verdicts: 33 → 31 (−2). Rebate verdicts: 16 → 12 (−4). That is
+the whole movement from 528 to 372 — nothing left unaccounted for.
+
+### The independence finding held, again
+
+Pair space is still an **exact product**: 372 reachable of a possible 372 (31
+× 12). Same shape as Chunk 3's 528-of-528 result, just at the new totals. The
+two tracks are independent at the verdict level regardless of what the
+per-track verdict counts are — every cross-track rule (X-1 through X-7) is
+still an annotation, never a prohibition, and the engine still needs no
+cross-track validity table. This wasn't assumed to still hold; the rerun
+confirmed it does.
+
+### Named-case check needed exactly one wording change
+
+All twelve named cases in `verify.py` were re-checked against the new tree and
+still exist by construction. Eleven needed nothing. The twelfth's assertion
+text changed from *"rebate approved but never paid, past SLA"* to *"rebate
+approved but never paid"* — same predicate, minus a qualifier that no longer
+describes anything.
+
+### What this revealed
+
+Removing SLA turned out to be a clean cut, not a tangle. Every number that
+moved (verdict counts, pair count, coherent/anomalous split, cross-product)
+moved for a reason traceable to the four/six retired verdicts and nothing
+else — no stray side effects turned up in the rerun. The independence result
+and the named-case scaffolding were built on the verdict *structure*, not the
+specific verdict *count*, so they survived a change to the count unshaken.
+That is itself a small piece of evidence the architecture is sound: a
+non-trivial deletion from the model didn't require touching the validator's
+logic, only its two hard-coded expectations (the SLA-flavoured predicate text
+and the doc-comparison numbers baked into the print statements).

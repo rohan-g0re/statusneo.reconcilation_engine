@@ -65,16 +65,13 @@ def dom_ph_settlement(p):
 
 
 def dom_ph_timing(p):
-    """Aging is only a decision where it changes the verdict."""
-    if p.get("ph_adjudication") != "ACCEPTED":
-        return []
-    if p.get("ph_post_event") in ("REVERSAL_PRE_PAY", "REVERSAL_POST_PAY"):
-        return []                                  # closed by our own action
-    if p.get("ph_payment") == "NONE":
-        return ["WITHIN_SLA", "PAST_SLA"]          # A-02 vs A-03
-    if p.get("ph_settlement") == "MISSING":
-        return ["WITHIN_SLA", "PAST_SLA"]          # A-06 exception or not
-    return []                                      # paid + settled: aging irrelevant
+    """REMOVED. Aging is no longer a verdict dimension.
+
+    SLA thresholds were dropped: an untouched claim cannot change disposition,
+    so aging is a read-time sort key over the pending/exception lists, never a
+    branch in the engine. Kept as a stub so the variable list stays stable.
+    """
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -116,12 +113,7 @@ def dom_md_post_event(p):
 
 
 def dom_md_timing(p):
-    if p.get("md_clearinghouse") != "ACCEPTED":
-        return []
-    if p.get("md_remittance") == "NONE":
-        return ["WITHIN_SLA", "PAST_SLA"]          # B-02 vs B-03
-    if p.get("md_appeal") in ("PENDING", "WON"):
-        return ["WITHIN_SLA", "PAST_SLA"]          # B-11, and B-14 if won-but-unpaid
+    """REMOVED -- see dom_ph_timing."""
     return []
 
 
@@ -162,20 +154,7 @@ def dom_r_payment(p):
 
 
 def dom_r_timing(p):
-    if p.get("r_present") != "PRESENT":
-        return []
-    if p.get("r_qualification") == "PENDING":
-        return ["WITHIN_SLA", "PAST_SLA"]          # C-01 stuck at the first gate
-    if p.get("r_qualification") == "NOT_QUALIFIED":
-        return []                                  # terminal, correct outcome
-    if p.get("r_request") == "NOT_SUBMITTED":
-        return ["WITHIN_SLA", "PAST_SLA"]          # C-03 vs C-04
-    if p.get("r_manufacturer") == "PENDING":
-        return ["WITHIN_SLA", "PAST_SLA"]          # C-05 vs C-06
-    if p.get("r_manufacturer") == "REJECTED":
-        return []                                  # terminal
-    if p.get("r_payment") == "NONE":
-        return ["WITHIN_SLA", "PAST_SLA"]          # C-11 approved-but-unpaid
+    """REMOVED -- see dom_ph_timing."""
     return []
 
 
