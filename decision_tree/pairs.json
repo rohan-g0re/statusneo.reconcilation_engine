@@ -1,0 +1,2642 @@
+[
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-01",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-00",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-01",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-02",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-03",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-04",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-05",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-06",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-07",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-08",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-09",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-10",
+  "configurations": 8
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-11",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-13",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-14",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-02",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-00",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-01",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-02",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-03",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-04",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-05",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-06",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-07",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-08",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-09",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-10",
+  "configurations": 8
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-11",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-13",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-14",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-03",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-04",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-00",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-01",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-02",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-03",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-04",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-05",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-06",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-07",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-08",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-09",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-10",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-11",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-13",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-14",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-05",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-00",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-01",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-02",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-03",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-04",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-05",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-06",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-07",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-08",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-09",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-10",
+  "configurations": 8
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-11",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-13",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-14",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-06",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-00",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-01",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-02",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-03",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-04",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-05",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-06",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-07",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-08",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-09",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-10",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-11",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-13",
+  "configurations": 54
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-14",
+  "configurations": 27
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-07",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-00",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-01",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-02",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-03",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-04",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-05",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-06",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-07",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-08",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-09",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-10",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-11",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-13",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-14",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-08",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-00",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-01",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-02",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-03",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-04",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-05",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-06",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-07",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-08",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-09",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-10",
+  "configurations": 72
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-11",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-13",
+  "configurations": 108
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-14",
+  "configurations": 54
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-09",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-00",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-01",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-02",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-03",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-04",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-05",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-06",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-07",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-08",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-09",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-10",
+  "configurations": 48
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-11",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-13",
+  "configurations": 72
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-14",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-10",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-00",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-01",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-02",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-03",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-04",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-05",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-06",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-07",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-08",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-09",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-10",
+  "configurations": 48
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-11",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-13",
+  "configurations": 72
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-14",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-11",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-00",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-01",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-02",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-03",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-04",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-05",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-06",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-07",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-08",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-09",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-10",
+  "configurations": 144
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-11",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-13",
+  "configurations": 216
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-14",
+  "configurations": 108
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-12",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-00",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-01",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-02",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-03",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-04",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-05",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-06",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-07",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-08",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-09",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-10",
+  "configurations": 144
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-11",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-13",
+  "configurations": 216
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-14",
+  "configurations": 108
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-13",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-00",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-01",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-02",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-03",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-04",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-05",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-06",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-07",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-08",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-09",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-10",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-11",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-13",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-14",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-14",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-00",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-01",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-02",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-03",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-04",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-05",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-06",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-07",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-08",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-09",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-10",
+  "configurations": 48
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-11",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-13",
+  "configurations": 72
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-14",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-15",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-16",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-00",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-01",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-02",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-03",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-04",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-05",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-06",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-07",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-08",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-09",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-10",
+  "configurations": 72
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-11",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-13",
+  "configurations": 108
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-14",
+  "configurations": 54
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "A-17",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-01",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-02",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-03",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-04",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-05",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-00",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-01",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-02",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-03",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-04",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-05",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-06",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-07",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-08",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-09",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-10",
+  "configurations": 16
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-11",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-13",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-14",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-06",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-00",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-01",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-02",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-03",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-04",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-05",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-06",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-07",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-08",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-09",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-10",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-11",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-13",
+  "configurations": 36
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-14",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-07",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-00",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-01",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-02",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-03",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-04",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-05",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-06",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-07",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-08",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-09",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-10",
+  "configurations": 16
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-11",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-13",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-14",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-08",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-00",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-01",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-02",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-03",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-04",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-05",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-06",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-07",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-08",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-09",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-10",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-11",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-13",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-14",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-09",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-10",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-00",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-01",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-02",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-03",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-04",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-05",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-06",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-07",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-08",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-09",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-10",
+  "configurations": 8
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-11",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-13",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-14",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-11",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 2
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-00",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-01",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-02",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-03",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-04",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-05",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-06",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-07",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-08",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-09",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-10",
+  "configurations": 16
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-11",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-13",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-14",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-12",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-00",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-01",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-02",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-03",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-04",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-05",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-06",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-07",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-08",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-09",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-10",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-11",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-13",
+  "configurations": 6
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-14",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-13",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 1
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-00",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-01",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-02",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-03",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-04",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-05",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-06",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-07",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-08",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-09",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-10",
+  "configurations": 16
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-11",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-13",
+  "configurations": 24
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-14",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-14",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 4
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-00",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-01",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-02",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-03",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-04",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-05",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-06",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-07",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-08",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-09",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-10",
+  "configurations": 240
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-11",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-13",
+  "configurations": 360
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-14",
+  "configurations": 180
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-15",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 60
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-00",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-01",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-02",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-03",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-04",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-05",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-06",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-07",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-08",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-09",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-10",
+  "configurations": 12
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-11",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-13",
+  "configurations": 18
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-14",
+  "configurations": 9
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-GAP-approved-unpaid-within-sla",
+  "configurations": 3
+ },
+ {
+  "reimbursement": "B-16",
+  "rebate": "C-GAP-qualification-pending-within-sla",
+  "configurations": 3
+ }
+]
