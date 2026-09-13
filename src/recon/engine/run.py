@@ -194,6 +194,20 @@ def append_result(
             reopened_from = str(was)
             previously_closed_at = previous["cursor_at"]
             reopened_on = result.cursor
+        elif previous.get("reopened_from") and now is not Disposition.CLOSED:
+            # The flag describes the episode's **current condition**, not the instant it changed.
+            #
+            # An episode reopened in April is still a reopened episode in July, and the flag's stated
+            # job is to drive priority: money that was recognised and is now at risk outranks money
+            # that was simply never collected. Recording it only on the transition verdict made it
+            # invisible to every later read — the queue ordering it exists to serve would sort on a
+            # column that was almost always NULL.
+            #
+            # It clears when the episode settles again, because at that point there is nothing left
+            # to prioritise.
+            reopened_from = previous["reopened_from"]
+            previously_closed_at = previous.get("previously_closed_at")
+            reopened_on = previous.get("reopened_on")
 
     return repository.append_verdict(
         conn,
@@ -312,6 +326,12 @@ def run_for_episodes(
             else {
                 "episode_disposition": str(previous.episode_disposition),
                 "cursor_at": previous.cursor_at,
+                # Carried so a reopening stays visible for as long as the episode is open.
+                "reopened_from": (
+                    previous.reopened_from.value if previous.reopened_from else None
+                ),
+                "previously_closed_at": previous.previously_closed_at,
+                "reopened_on": previous.reopened_on,
             },
         )
         results.append(result)

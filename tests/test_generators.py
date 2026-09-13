@@ -1140,3 +1140,23 @@ def _build_plans_and_timelines(settings: config.Settings):
             rng=rng_for(settings.master_seed, profile_name, "timeline", sequence),
         )
     return plans, timelines
+
+
+def test_a_tpa_reversal_goes_on_the_wire_as_a_negative_quantity(full_result):
+    """A reversal is a negative line, not a delete — and the sign is the whole point.
+
+    The orchestrator hands the generator an already-negative quantity; an earlier version negated it
+    again, putting a *positive* quantity on the wire. The record still said DISPENSE_REVERSAL, so
+    nothing looked wrong, but the one property the feed spec insists on had quietly inverted.
+    """
+    reversals = [
+        record.payload
+        for record in full_result.records_by_feed["tpa_340b_events.jsonl"]
+        if record.payload.get("event_type") == "DISPENSE_REVERSAL"
+    ]
+    assert reversals, "no TPA reversal was generated"
+    for payload in reversals:
+        assert payload["quantity_dispensed"] < 0, (
+            f"reversal {payload['record_id']} carries a non-negative quantity "
+            f"{payload['quantity_dispensed']}"
+        )

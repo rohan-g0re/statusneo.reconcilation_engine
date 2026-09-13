@@ -28,3 +28,4 @@ web/dist/
 # Playwright MCP session debris and ad-hoc screenshots from browser validation
 .playwright-mcp/
 *.png
+ui-review/

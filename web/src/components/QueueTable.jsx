@@ -40,7 +40,7 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
           No episodes in this queue at this cursor. An empty queue is an answer, not a missing one.
         </p>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap queue-scroll">
           <table data-testid="queue-table">
             <thead>
               <tr>
@@ -58,9 +58,20 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
               {rows.map((row) => (
                 <tr
                   key={row.episode_id}
+                  // A clickable row that cannot be reached by keyboard is unusable for anyone not
+                  // using a mouse. The role and handler are what make it an actual control.
+                  role="button"
+                  tabIndex={0}
+                  aria-current={selected === row.episode_id ? 'true' : undefined}
                   aria-selected={selected === row.episode_id}
                   data-testid={`queue-row-${row.episode_id}`}
                   onClick={() => onSelect(row.episode_id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onSelect(row.episode_id)
+                    }
+                  }}
                 >
                   <td className="mono">{row.episode_id}</td>
                   <td>{row.track === 'PHARMACY' ? 'Pharmacy' : 'Medical'}</td>

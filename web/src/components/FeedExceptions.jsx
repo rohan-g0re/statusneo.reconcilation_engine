@@ -44,6 +44,18 @@ const SECTIONS = [
     ],
   },
   {
+    key: 'orphan_rebates',
+    code: 'D-4',
+    title: 'Unmatched rebates',
+    blurb:
+      'Rebate cash or a rebate event that cannot be tied to any qualified dispense in any other feed. Not a windfall — cash held without provenance is audit exposure.',
+    columns: [
+      ['record_kind', 'Record', false],
+      ['park_reason', 'Why', false],
+      ['received_at', 'Received', false],
+    ],
+  },
+  {
     key: 'duplicate_deliveries',
     code: 'D-1',
     title: 'Duplicate deliveries',
@@ -56,6 +68,15 @@ const SECTIONS = [
     ],
   },
 ]
+
+// Dates render as dates. An ISO timestamp is exact and unreadable; every other surface in this app
+// shows the day, so this one does too.
+function formatCell(key, value) {
+  if (key.endsWith('_cents')) return formatMoney(value)
+  if (value === null || value === undefined) return '—'
+  if (key.endsWith('_at') || key.endsWith('_date')) return String(value).slice(0, 10)
+  return String(value).slice(0, 48)
+}
 
 export default function FeedExceptions({ data }) {
   if (!data) return <p className="spinner">loading…</p>
@@ -91,7 +112,7 @@ export default function FeedExceptions({ data }) {
                         <tr key={index}>
                           {section.columns.map(([key, , numeric]) => (
                             <td key={key} className={numeric ? 'num' : 'mono'}>
-                              {key.endsWith('_cents') ? formatMoney(row[key]) : String(row[key] ?? '—').slice(0, 48)}
+                              {formatCell(key, row[key])}
                             </td>
                           ))}
                         </tr>

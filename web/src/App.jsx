@@ -1,9 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, formatMoney } from './api.js'
 import CursorScrubber from './components/CursorScrubber.jsx'
 import QueueTiles from './components/QueueTiles.jsx'
 import QueueTable from './components/QueueTable.jsx'
-import EpisodePanel from './components/EpisodePanel.jsx'
+import EpisodeDossier from './components/EpisodeDossier.jsx'
 import FeedExceptions from './components/FeedExceptions.jsx'
 
 // The whole app is a function of one piece of state: the cursor.
@@ -19,10 +19,11 @@ export default function App() {
   const [overview, setOverview] = useState(null)
   const [rows, setRows] = useState([])
   const [selected, setSelected] = useState(null)
-  const [detail, setDetail] = useState(null)
-  const [trace, setTrace] = useState(null)
+  const [dossier, setDossier] = useState(null)
   const [feeds, setFeeds] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [dossierBusy, setDossierBusy] = useState(false)
+  const episodeRef = useRef(null)
   const [error, setError] = useState(null)
 
   // --- bootstrap ---------------------------------------------------------
@@ -37,9 +38,15 @@ export default function App() {
   }, [])
 
   // --- everything that depends on the cursor ----------------------------
+  // Monotonic request id. Dragging the cursor fires a refresh per tick, and without this an older,
+  // slower response can land after a newer one and silently repaint the screen with the wrong
+  // cursor's data — wrong numbers, no error, nothing to notice.
+  const requestId = useRef(0)
+
   const refresh = useCallback(
     async (nextCursor, nextDisposition, nextOrderBy) => {
       if (!nextCursor) return
+      const ticket = ++requestId.current
       setBusy(true)
       setError(null)
       try {
@@ -48,10 +55,12 @@ export default function App() {
           api.queue(nextDisposition, nextCursor, nextOrderBy),
           api.feedExceptions(nextCursor),
         ])
+        if (ticket !== requestId.current) return
         setOverview(overviewPayload)
         setRows(queuePayload.episodes)
         setFeeds(feedsPayload)
       } catch (exc) {
+        if (ticket !== requestId.current) return
         setError(String(exc.message ?? exc))
         // Clear rather than keep. Stale rows are worse than no rows here: the heading has already
         // changed to the queue that was asked for, so leaving the previous queue's episodes under it
@@ -61,7 +70,7 @@ export default function App() {
         setOverview(null)
         setFeeds(null)
       } finally {
-        setBusy(false)
+        if (ticket === requestId.current) setBusy(false)
       }
     },
     [],
@@ -85,24 +94,31 @@ export default function App() {
   // --- the selected episode, re-read at the current cursor --------------
   useEffect(() => {
     if (!selected || !cursor) {
-      setDetail(null)
-      setTrace(null)
+      setDossier(null)
       return
     }
     let live = true
-    Promise.all([api.episode(selected, cursor), api.trace(selected)])
-      .then(([detailPayload, tracePayload]) => {
+    setDossierBusy(true)
+    api
+      .dossier(selected, cursor)
+      .then((payload) => {
         if (!live) return
-        setDetail(detailPayload)
-        setTrace(tracePayload)
+        setDossier(payload)
+        // Bring it into view. The queue can be hundreds of rows tall, so the episode panel sits well
+        // below the fold — clicking a row looked like it did nothing at all, even though the row
+        // highlighted and the dossier rendered perfectly a few thousand pixels down the page.
+        // A selection the user cannot see is the same as no selection.
+        episodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       })
       .catch((exc) => {
         if (!live) return
         setError(String(exc.message ?? exc))
-        // Same reasoning as the queue: an episode panel still showing the *previous* cursor's
-        // verdict is a wrong answer presented confidently. Clearing it makes the gap visible.
-        setDetail(null)
-        setTrace(null)
+        // Same reasoning as the queue: a dossier still showing the *previous* cursor's history is a
+        // wrong answer presented confidently. Clearing it makes the gap visible.
+        setDossier(null)
+      })
+      .finally(() => {
+        if (live) setDossierBusy(false)
       })
     return () => {
       live = false
@@ -210,13 +226,15 @@ export default function App() {
         />
       </section>
 
-      <section className="panel">
-        <h2>Episode trace</h2>
+      <section className="panel" id="episode" ref={episodeRef} data-testid="episode-panel">
+        <h2>The episode, end to end</h2>
         <p className="hint">
-          Lineage runs downward — every number points back at the raw source row that produced it.
-          The audit trail runs across time. Both are kept, because they answer different questions.
+          One claim, everything that happened to it, in the order we learned it — the claim filed,
+          what the payer said, when the money moved, how the 340B rebate went, and every point at
+          which the verdict changed. This is the same object the agent layer receives in a single
+          call, and nothing in it was written by a model: every line is composed from the records.
         </p>
-        <EpisodePanel detail={detail} trace={trace} busy={busy} />
+        <EpisodeDossier dossier={dossier} busy={dossierBusy} />
       </section>
 
       <section className="panel">

@@ -1454,3 +1454,46 @@ def test_an_episode_does_not_exist_before_its_anchor_arrives(tmp_path):
     )
     assert len(after) == 1
     assert after[0].verdict_pair == ("A-02", "C-00")
+
+
+def test_a_reopening_stays_visible_while_the_episode_is_still_open(tmp_path):
+    """The flag describes a condition, not an instant.
+
+    An episode reopened in October is still a reopened episode in December, and the flag's stated job
+    is to drive priority — reopened-from-closed outranks never-paid. Recorded only on the transition
+    verdict, it was invisible to every later read, so the queue ordering that exists to serve it
+    sorted on a column that was almost always NULL.
+    """
+    from recon.engine import run as engine_run
+
+    money = pharmacy_money()
+    scenario = _fully_reconciled_pharmacy()
+    scenario.pbm_remittances.append(
+        pbm_835(
+            record_id="PBM-835-000601",
+            received_at="2025-10-06T06:00:00Z",
+            effective="2025-10-05",
+            trace="8873021888",
+            lines=[],
+            plb=[("WO", "AUTH0098231A", 412_60)],
+        )
+    )
+    run = run_scenario(scenario, tmp_path, cursor="2025-09-30T23:59:59Z")
+    episode_id = run.only_episode()["episode_id"]
+    assert run.verdict_row(episode_id)["episode_disposition"] == "CLOSED"
+
+    # October: the clawback lands and the episode reopens.
+    engine_run.run_for_episodes(run.conn, [episode_id], "2025-10-31T23:59:59Z")
+    october = run.verdict_row(episode_id)
+    assert october["reopened_from"] == "CLOSED"
+
+    # December: nothing new has arrived, and it is still a reopened episode.
+    engine_run.run_for_episodes(run.conn, [episode_id], "2025-12-31T23:59:59Z")
+    december = run.verdict_row(episode_id)
+    assert december["episode_disposition"] == "EXCEPTION"
+    assert december["reopened_from"] == "CLOSED", (
+        "the reopening stopped being visible once the transition verdict was superseded"
+    )
+    assert december["previously_closed_at"] == october["previously_closed_at"], (
+        "and it should still point at when the episode had been settled"
+    )

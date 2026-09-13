@@ -29,6 +29,8 @@ export const api = {
     get(`/queue/${disposition}`, { cursor, order_by: orderBy, limit }),
   episode: (episodeId, cursor) => get(`/episode/${episodeId}`, { cursor }),
   trace: (episodeId) => get(`/episode/${episodeId}/trace`),
+  // One call, one episode, its entire history — the same payload the agent layer receives.
+  dossier: (episodeId, cursor) => get(`/episode/${episodeId}/dossier`, { cursor }),
   feedExceptions: (cursor) => get('/feed-exceptions', { cursor }),
   regenerate: async (profile) => {
     const response = await fetch(`/api/regenerate?profile=${profile}`, { method: 'POST' })

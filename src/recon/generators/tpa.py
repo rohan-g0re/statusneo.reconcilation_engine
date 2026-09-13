@@ -203,7 +203,11 @@ def _reversal_record(dispense: TpaDispenseSlice, sequence: int) -> Record:
     # The vendor's own column carries whole units here, not NCPDP's three-implied-decimal
     # convention, so the milli figure this generator receives is converted down to a
     # plain signed unit count before it goes on the wire.
-    quantity_units = -(dispense.reversal_quantity_milli // 1000)
+    # Used as given, NOT negated. ``reversal_quantity_milli`` is already signed negative by the
+    # orchestrator, and negating it here made the reversal go on the wire as a *positive* quantity --
+    # which silently destroys the one property the feed spec insists on: a reversal is a negative
+    # line, not a delete. The worked example in feed_formats.md shows -30, and it means it.
+    quantity_units = dispense.reversal_quantity_milli // 1000
     payload: dict[str, Any] = {
         "record_id": f"TPA-EVT-{sequence:06d}",
         "source_system": "TPA_PORTAL",

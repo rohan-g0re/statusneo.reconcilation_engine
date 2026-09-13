@@ -235,3 +235,116 @@ details.evidence pre {
   font-size: 12.5px; color: var(--text-secondary);
 }
 .spinner { color: var(--text-muted); font-size: 12.5px; }
+
+/* ═══ episode dossier ══════════════════════════════════════════════════ */
+/* The narrative view. Deliberately the most prominent thing on the page once an
+ * episode is selected, because the episode object is what the whole design is about. */
+
+.dossier-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 20px; flex-wrap: wrap;
+  padding-bottom: 14px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dossier-id { font-family: var(--mono); font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
+.dossier-drug { font-size: 14px; color: var(--text-primary); margin-top: 2px; }
+.dossier-keys { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+.dossier-verdict { text-align: right; border-right: 3px solid var(--d, var(--border-strong)); padding-right: 12px; }
+.dossier-disposition { font-size: 15px; font-weight: 650; color: var(--d, var(--text-primary)); letter-spacing: 0.02em; }
+
+.dossier-reasons { margin: 0 0 14px; }
+.dossier-note { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+
+.dossier-money {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px 24px; padding: 12px 14px; margin-bottom: 18px;
+  background: var(--surface-2); border-radius: var(--radius);
+}
+.dossier-money .k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.dossier-money .v { font-size: 13.5px; }
+.dossier-amount { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.dossier-section {
+  font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-secondary); margin: 20px 0 12px;
+}
+
+.dossier-timeline { list-style: none; margin: 0; padding: 0; }
+.dossier-timeline li {
+  display: grid; grid-template-columns: 130px 1fr; gap: 14px;
+  padding: 0 0 18px 0; position: relative;
+}
+.dossier-timeline li::before {
+  content: ''; position: absolute; left: 122px; top: 16px; bottom: 0;
+  width: 2px; background: var(--border);
+}
+.dossier-timeline li:last-child::before { display: none; }
+.dossier-when { text-align: right; padding-right: 4px; position: relative; }
+.dossier-when::after {
+  content: ''; position: absolute; right: -13px; top: 5px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
+}
+.dossier-when time { display: block; font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.dossier-kind { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650; margin-top: 1px; }
+.dossier-body { padding-left: 6px; min-width: 0; }
+.dossier-headline { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.dossier-detail { font-size: 13px; color: var(--text-secondary); max-width: 82ch; }
+.dossier-provenance {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--text-muted); margin-top: 4px;
+}
+.dossier-provenance .mono { font-family: var(--mono); }
+
+@media (max-width: 640px) {
+  .dossier-timeline li { grid-template-columns: 1fr; gap: 2px; }
+  .dossier-timeline li::before { display: none; }
+  .dossier-when { text-align: left; display: flex; gap: 10px; align-items: baseline; }
+  .dossier-when::after { display: none; }
+  .dossier-body { padding-left: 0; }
+}
+
+/* ═══ fixes from the UI review ═════════════════════════════════════════ */
+
+/* The queue gets its own scroll rather than growing the page without limit.
+ *
+ * With 200 rows the page became thousands of pixels tall, which pushed the episode panel so far
+ * below the fold that clicking a row looked like it did nothing. Bounding the table keeps every
+ * section reachable and makes the selected row and its dossier visible at the same time. */
+.queue-scroll { max-height: 46vh; overflow-y: auto; }
+
+/* Focus has to be visible. Nothing here removed the default outline, but nothing reinforced it
+ * against the custom tile and row backgrounds either. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* The timeline's kind label was painted in the same status colour as its dot — and two of those
+ * sit at 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the
+ * meaning, so the label goes back to a legible ink. */
+.dossier-kind { color: var(--text-secondary) !important; }
+
+/* #74736d on --surface-2 measures 4.02:1, below the 4.5:1 body-text floor. Chips and small labels
+ * sit on surface-2 constantly, so muted ink is darkened for the light theme only; the dark theme's
+ * muted step already clears its surface. */
+:root { --text-muted: #6a6964; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) { --text-muted: #8e8d84; }
+}
+
+/* A rebate is not a status, so it needs its own token rather than a hardcoded hex in the JSX —
+ * the violet that reads well on white is 2.04:1 on the dark surface. */
+:root { --track-rebate: #4a3aa7; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) { --track-rebate: #9085e9; }
+}
+
+/* 280px of minimum column does not fit a 360px phone once the app and panel padding are taken out. */
+.dossier-money { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+@media print {
+  .table-wrap, .queue-scroll { overflow: visible; max-height: none; }
+}

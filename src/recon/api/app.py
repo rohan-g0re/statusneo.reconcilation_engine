@@ -262,6 +262,29 @@ def create_app(settings: Settings | None = None):
                 raise HTTPException(status_code=404, detail=f"no episode {episode_id!r}")
             return service.episode_trace(conn, episode_id)
 
+    @app.get("/api/episode/{episode_id}/dossier")
+    def dossier(
+        episode_id: str,
+        cursor: str | None = Query(None, description="Replay cursor, ISO8601 UTC"),
+    ) -> dict[str, Any]:
+        """The whole episode, in one call: identity, economics, and its entire history.
+
+        This is the endpoint the agent layer will use. One request returns everything known about one
+        claim — every record that reached it, every cash movement, every verdict it has held and
+        every reason for them, merged into one chronological narrative.
+
+        Handing the agent six endpoints to stitch together would put the stitching *inside* the model,
+        which is exactly where it must not be: the narrative is assembled here, deterministically, and
+        the agent explains it.
+        """
+        from recon.api import dossier as dossier_module
+
+        with open_conn() as conn:
+            payload = dossier_module.build_dossier(conn, episode_id, resolve_cursor(cursor))
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"no episode {episode_id!r}")
+        return payload
+
     @app.get("/api/feed-exceptions")
     def feed_exceptions(
         cursor: str | None = Query(None, description="Replay cursor, ISO8601 UTC"),

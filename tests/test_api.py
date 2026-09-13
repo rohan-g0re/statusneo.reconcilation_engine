@@ -24,6 +24,7 @@ pytest.importorskip("fastapi", reason="the API layer is an optional extra: pip i
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from recon import config  # noqa: E402
 from recon.config import load_settings  # noqa: E402
 
 
@@ -268,3 +269,130 @@ def test_the_api_layer_computes_nothing(client):
         assert forbidden not in source, f"the API appears to compute money: {forbidden!r}"
     # And it must not import the engine's rule modules at all.
     assert "recon.engine" not in source
+
+
+# ═══ the episode dossier — the object the whole design points at ════════════
+
+
+def _richest_dossier(client):
+    """The episode with the most to say, across all three queues."""
+    best = None
+    for disposition in ("EXCEPTION", "PENDING", "CLOSED"):
+        for row in client.get(f"/api/queue/{disposition}?limit=100").json()["episodes"]:
+            payload = client.get(f"/api/episode/{row['episode_id']}/dossier").json()
+            if best is None or len(payload["timeline"]) > len(best["timeline"]):
+                best = payload
+    return best
+
+
+def test_the_dossier_is_one_call_for_the_whole_episode(client):
+    """Everything about one claim, in a single request.
+
+    This is what the agent layer will consume. Handing it six endpoints to stitch together would put
+    the stitching inside the model — which is exactly where it must not be.
+    """
+    payload = _richest_dossier(client)
+    for key in (
+        "identity",
+        "current",
+        "economics",
+        "timeline",
+        "counts",
+        "verdict_log",
+        "crosswalk_keys",
+        "unresolved",
+    ):
+        assert key in payload, f"the dossier is missing {key!r}"
+    assert payload["timeline"], "an episode with records should have a timeline"
+    assert payload["identity"]["drug"], "the drug should be named, not just an NDC"
+
+
+def test_the_timeline_runs_in_the_order_we_learned_things(client):
+    """Ordered by arrival, because that is the order replay reproduces."""
+    payload = _richest_dossier(client)
+    arrivals = [event["at"] for event in payload["timeline"]]
+    assert arrivals == sorted(arrivals)
+
+
+def test_the_timeline_tells_the_whole_story(client):
+    """A rich episode should show the claim, the money, the rebate and the verdicts."""
+    payload = _richest_dossier(client)
+    kinds = {event["kind"] for event in payload["timeline"]}
+    assert "CLAIM" in kinds, "the claim being filed is where every story starts"
+    assert "VERDICT" in kinds, "and what we concluded belongs on the same timeline"
+    assert kinds & {"CASH", "REMITTANCE"}, "money has to appear somewhere"
+    for event in payload["timeline"]:
+        assert event["headline"], "every event needs a sentence a person can read"
+
+
+def test_verdicts_appear_as_transitions_not_as_samples(client):
+    """A monthly-evaluated episode has a dozen identical verdict rows; showing all of them buries
+    the two that matter."""
+    payload = _richest_dossier(client)
+    verdict_events = [e for e in payload["timeline"] if e["kind"] == "VERDICT"]
+    assert verdict_events, "at least the first verdict should be shown"
+    assert len(verdict_events) < len(payload["verdict_log"]), (
+        "the timeline should summarise the verdict log, not reprint it"
+    )
+    assert payload["counts"]["verdict_changes"] == len(verdict_events)
+
+
+def test_the_dossier_honours_the_cursor(client):
+    """At an earlier cursor the story is genuinely shorter — records that had not arrived are not
+    part of it yet."""
+    payload = _richest_dossier(client)
+    episode_id = payload["episode_id"]
+    early = client.get(
+        f"/api/episode/{episode_id}/dossier?cursor=2025-08-01T23:59:59Z"
+    ).json()
+    assert len(early["timeline"]) < len(payload["timeline"])
+
+
+def test_every_sourced_event_points_at_a_real_feed_record(client):
+    """Lineage, inside the narrative: a claim on the timeline names the file and line it came from."""
+    payload = _richest_dossier(client)
+    sourced = [e for e in payload["timeline"] if e.get("source") and e["source"].get("file")]
+    assert sourced, "record-derived events must carry their provenance"
+    for event in sourced:
+        assert event["source"]["file"] in set(config.FEED_FILENAMES)
+        assert event["source"]["line"] >= 1
+        assert event["source"]["record_id"]
+
+
+def test_the_dossier_reports_money_the_engine_computed(client):
+    """Read back, never recomputed. The dossier's economics must equal the verdict row exactly."""
+    payload = _richest_dossier(client)
+    episode_id = payload["episode_id"]
+    detail = client.get(f"/api/episode/{episode_id}").json()
+    for field in (
+        "expected_reimbursement_cents",
+        "received_reimbursement_cents",
+        "reimbursement_variance_cents",
+        "expected_rebate_cents",
+        "received_rebate_cents",
+        "rebate_variance_cents",
+    ):
+        assert payload["economics"][field] == detail["verdict"][field]
+
+
+def test_a_reopening_is_narrated_when_one_happened(client):
+    """The case the model makes most of: an episode that had settled and came undone."""
+    reopened = None
+    for disposition in ("EXCEPTION", "PENDING"):
+        for row in client.get(f"/api/queue/{disposition}?limit=200").json()["episodes"]:
+            if row["reopened_from"]:
+                reopened = client.get(f"/api/episode/{row['episode_id']}/dossier").json()
+                break
+        if reopened:
+            break
+    if reopened is None:
+        pytest.skip("this dataset contains no reopened episode")
+
+    headlines = [e["headline"] for e in reopened["timeline"] if e["kind"] == "VERDICT"]
+    assert any("Reopened" in headline for headline in headlines), (
+        f"a reopened episode must say so on its timeline; got {headlines}"
+    )
+
+
+def test_an_unknown_episode_has_no_dossier(client):
+    assert client.get("/api/episode/E-999999/dossier").status_code == 404
