@@ -149,24 +149,29 @@ CREATE TABLE normalized_record (
 
 CREATE UNIQUE INDEX ux_norm_idempotency ON normalized_record(record_kind, idempotency_key);
 
-CREATE INDEX ix_norm_raw           ON normalized_record(raw_id);
-CREATE INDEX ix_norm_received      ON normalized_record(received_at);
 CREATE INDEX ix_norm_kind_received ON normalized_record(record_kind, received_at);
-CREATE INDEX ix_norm_ncpdp_key     ON normalized_record(pharmacy_npi, rx_number, fill_number, date_of_service);
-CREATE INDEX ix_norm_340b_key      ON normalized_record(pharmacy_npi, rx_number, ndc11, date_of_service);
-CREATE INDEX ix_norm_340b_med_key  ON normalized_record(provider_npi, ndc11, date_of_service);
-CREATE INDEX ix_norm_clm01         ON normalized_record(clm01);
-CREATE INDEX ix_norm_clp07         ON normalized_record(clp07);
-CREATE INDEX ix_norm_trn02         ON normalized_record(trn02);
-CREATE INDEX ix_norm_ach_trace     ON normalized_record(ach_trace_number);
-CREATE INDEX ix_norm_allocation    ON normalized_record(allocation_code);
 CREATE INDEX ix_norm_parent        ON normalized_record(parent_norm_id);
+-- ═══ A note on what is NOT indexed here ════════════════════════════════════════════════
+-- normalized_record deliberately carries almost no identifier indexes.  Resolving an identifier
+-- is the crosswalk's job, and crosswalk_key is the table indexed for it; duplicating those
+-- indexes here would cost write throughput on a write-once table for reads that never happen.
+-- An earlier version carried nine such indexes and an audit found every one of them unused.
+
 -- The amount+date rescue path: when the CCD+ addenda are lost (~20% of deposits) the only
--- remaining handle is the pair (amount, effective date).  Without this index that fallback is
--- a full scan of every remittance ever received, on every deposit that lost its trace number.
--- Partial, because only remittances and rebate batches are ever rescue candidates.
-CREATE INDEX ix_norm_amount_match  ON normalized_record(record_kind, amount_cents, date_of_service)
-  WHERE record_kind IN ('REMITTANCE','REBATE_BATCH');
+-- remaining handle is the pair (amount, effective date).
+--
+-- NOT a partial index, and that is deliberate.  A partial index on
+-- `WHERE record_kind IN ('REMITTANCE','REBATE_BATCH')` looks tighter, but the call site binds
+-- record_kind as a *parameter*, and SQLite cannot prove a bound placeholder satisfies a partial
+-- index's literal predicate.  It silently declines the index and walks every remittance instead --
+-- a scan disguised as a seek, on ~20% of all deposits.  A plain composite index is usable
+-- whatever form the parameters take.
+CREATE INDEX ix_norm_amount_match  ON normalized_record(record_kind, amount_cents, date_of_service);
+
+-- The backward half of the same rescue: find keyless parked deposits by amount.  Partial here is
+-- safe because `trn02 IS NULL` is a literal predicate in the query, not a parameter.
+CREATE INDEX ix_norm_keyless_amount ON normalized_record(amount_cents, date_of_service)
+  WHERE trn02 IS NULL;
 
 CREATE TRIGGER trg_norm_no_update BEFORE UPDATE ON normalized_record
   BEGIN SELECT RAISE(ABORT, 'normalized_record is immutable; re-normalize by rebuild'); END;
@@ -248,8 +253,14 @@ CREATE UNIQUE INDEX ux_crosswalk ON crosswalk_key(key_type, key_value, resolved_
 -- HOT QUERY 1 -- covering index: includes the cursor column and both payload columns,
 -- so key resolution on an inbound document is one index probe with no table fetch.
 CREATE INDEX ix_crosswalk_lookup
-  ON crosswalk_key(key_type, key_value, first_seen_at, episode_id, remittance_norm_id);
+  ON crosswalk_key(key_type, key_value, first_seen_at, episode_id, remittance_norm_id,
+                   resolved_from_norm_id);
 CREATE INDEX ix_crosswalk_episode ON crosswalk_key(episode_id);
+-- HOT QUERY 3 -- "which episode did this record resolve to?", asked once per remittance claim
+-- line, PLB entry and rebate dispense line during every allocation.  Without it the allocator
+-- scans the whole crosswalk per child, which is the difference between an allocation that is a
+-- handful of seeks and one that is quadratic in the size of the crosswalk.
+CREATE INDEX ix_crosswalk_resolved_from ON crosswalk_key(resolved_from_norm_id, episode_id);
 
 -- ═══ VERDICT -- append-only, keyed (episode, cursor) ═══════════════════════
 CREATE TABLE verdict (
@@ -358,7 +369,8 @@ CREATE TABLE parked_record (
   park_reason TEXT    NOT NULL CHECK (park_reason IN (
                 'NO_KEY_MATCH','AMBIGUOUS_KEY_MATCH','NO_KEYS_PRESENT'))
 ) STRICT;
-CREATE INDEX ix_parked_received ON parked_record(received_at);
+-- Orphan-rebate reporting asks for parked rows by kind, so the kind leads.
+CREATE INDEX ix_parked_kind_received ON parked_record(record_kind, received_at);
 
 CREATE TABLE parked_record_key (
   parked_id INTEGER NOT NULL REFERENCES parked_record(parked_id),
@@ -416,6 +428,8 @@ CREATE TABLE cash_allocation (
 CREATE INDEX ix_alloc_bank    ON cash_allocation(bank_norm_id);
 CREATE INDEX ix_alloc_episode ON cash_allocation(episode_id);
 CREATE INDEX ix_alloc_remit   ON cash_allocation(remittance_norm_id);
+-- D-7 residual reporting: cash attributed no more precisely than the account it landed in.
+CREATE INDEX ix_alloc_residual ON cash_allocation(basis, caused_by_received_at);
 
 -- ═══ WORK ITEM -- the agent's only write target ════════════════════════════
 -- Beyond the six required tables.  The agent flags a human; it never moves money and
@@ -432,4 +446,4 @@ CREATE TABLE work_item (
 ) STRICT;
 CREATE INDEX ix_work_item_episode ON work_item(episode_id);
 
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;

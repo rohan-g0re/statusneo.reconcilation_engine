@@ -224,10 +224,15 @@ def generate(settings: Settings, *, decision_tree_dir: Path | None = None) -> Ge
         service_day = _date_of_service(
             settings, sequence=sequence, profile_name=profile_name
         )
-        needs_unique_340b_key = (
-            leaf["reimbursement_track"]["reimb_type"] == "MEDICAL"
-            and leaf["curated_rebate_state"] != "C-00"
-        )
+        # EVERY medical episode, not only the 340B-bearing ones.
+        #
+        # A medical 837 publishes ``NATURAL_340B_MEDICAL`` unconditionally, because the feed gives
+        # it no way not to: unlike a pharmacy claim's NCPDP 420-DK flag, an 837 carries no 340B
+        # marker at all.  So a non-340B medical episode is a live resolution target for TPA
+        # records, and if it shares a triple with a 340B episode the rebate either attaches to the
+        # wrong episode or goes ambiguous.  Either way the collision is accidental rather than
+        # designed, which is precisely what the uniqueness pass exists to prevent.
+        needs_unique_340b_key = leaf["reimbursement_track"]["reimb_type"] == "MEDICAL"
         if needs_unique_340b_key:
             service_day = _place_medical_340b_date(
                 service_day,
@@ -996,6 +1001,39 @@ def _medical_remittance_batches(
                     outcome,
                 )
             )
+
+    # A takeback whose cycle produced no claims of its own still happened, and the medical side
+    # needs this loop exactly as the pharmacy side does.  Without it a recoupment landing in a
+    # cycle with no matching (payer, cycle, cash-fate) group is silently dropped, and B-15 becomes
+    # unreachable for those episodes — the clawback simply never appears on any feed.
+    for (payer_id, cycle, recovery_outcome), members in sorted(recoupments.items()):
+        slice_ref = f"med-835:{payer_id}:{cycle}:RECOUP-{recovery_outcome}:0"
+        rng = rng_for(settings.master_seed, str(settings.profile), "med835", slice_ref)
+        effective = _cycle_effective_date(cycle, rng)
+        batches.append(
+            (
+                MedicalRemittanceSlice(
+                    slice_ref=slice_ref,
+                    sequence=(batch_number := batch_number + 1),
+                    rng_seed=rng.randrange(2**32),
+                    received_at=stamp(effective + timedelta(days=1), hour=6),
+                    eft_effective_date=effective.isoformat(),
+                    payer_id=payer_id,
+                    trace_number=_mint_trace_number(slice_ref),
+                    claim_lines=(),
+                    provider_level_adjustments=tuple(
+                        PlbEntrySlice(
+                            reason_code="WO",
+                            amount_cents=plan.negative_reimbursement_cents,
+                            reference_id=plan.clm01,
+                            slice_ref=refs.mint(plan.episode_id, "plb"),
+                        )
+                        for plan in members
+                    ),
+                ),
+                recovery_outcome,
+            )
+        )
     return batches
 
 
@@ -1292,9 +1330,14 @@ def _build_ground_truth(
     # the whole key and it does not separate them — so the correct connector behaviour is to park
     # them as ambiguous.  Recording it here is what lets a test tell that correct behaviour apart
     # from a crosswalk bug, instead of scoring the engine down for refusing to guess.
+    # Counted over **every** medical episode, not only the 340B-bearing ones — because an 837
+    # publishes the key unconditionally, so a non-340B episode sharing the triple is just as much
+    # a second candidate, and the resolution is just as ambiguous.  Counting only rebate-bearing
+    # episodes understates the ambiguity and leaves genuinely unresolvable cases scored as though
+    # the engine had got them wrong.
     medical_340b_triples: dict[tuple[str, str, str], int] = defaultdict(int)
     for plan in plans:
-        if plan.track.value == "MEDICAL" and plan.has_rebate_track:
+        if plan.track.value == "MEDICAL":
             medical_340b_triples[
                 (
                     plan.billing_provider_npi or "",

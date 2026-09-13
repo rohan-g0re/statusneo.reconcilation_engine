@@ -149,19 +149,23 @@ def _placeholders(count: int) -> str:
 #: Whitelisted queue orderings.  A free-form ``ORDER BY`` string from a caller would
 #: be an injection point, and prioritisation is a deterministic sort rather than a
 #: judgement, so the set of legitimate sorts is small and closed.
+#: Every column here is **table-qualified**, which is not cosmetic: ``episode_id`` exists on both
+#: ``episode`` and ``verdict``, so an unqualified reference makes SQLite reject the whole statement
+#: with "ambiguous column name" and the queue does not run at all.  Writing the alias in is what
+#: stops a silent ``ORDER BY`` edit from breaking the only read path the operator actually uses.
 QUEUE_ORDERINGS: dict[str, str] = {
-    "age_desc": "age_days DESC, episode_id",
-    "age_asc": "age_days ASC, episode_id",
+    "age_desc": "age_days DESC, e.episode_id",
+    "age_asc": "age_days ASC, e.episode_id",
     "variance_desc": (
-        "(ABS(reimbursement_variance_cents) + ABS(rebate_variance_cents)) DESC, episode_id"
+        "(ABS(l.reimbursement_variance_cents) + ABS(l.rebate_variance_cents)) DESC, e.episode_id"
     ),
     # Reopened-from-closed outranks never-paid: a claim that was settled and came
     # undone is a different kind of problem from one that never settled.
     "reopened_first": (
-        "CASE reopened_from WHEN 'CLOSED' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END, "
-        "age_days DESC, episode_id"
+        "CASE l.reopened_from WHEN 'CLOSED' THEN 0 WHEN 'PENDING' THEN 1 ELSE 2 END, "
+        "age_days DESC, e.episode_id"
     ),
-    "episode_id": "episode_id",
+    "episode_id": "e.episode_id",
 }
 
 def _latest_cte(episode_filter: str = "") -> str:

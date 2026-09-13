@@ -37,10 +37,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from conftest_pipeline import build_pipeline, score  # noqa: E402
 
-#: The measured rate is 98% (demo) and 97% (full). The thresholds sit a little below so a small
-#: unrelated change does not fail the build, but close enough that a real regression does.
-MIN_RESOLVABLE_RATE_DEMO = 0.94
-MIN_RESOLVABLE_RATE_FULL = 0.94
+#: Demo is exact. Full measures 1349/1354 — 99.6% — and the five stragglers are characterised
+#: rather than unexplained:
+#:
+#: * three are cash-allocation timing at the margin, where a deposit's true remittance had not yet
+#:   arrived at the cursor the deposit was processed at;
+#: * one is an amount-and-date rescue matching a *different* batch of the same amount inside the
+#:   CORE-370 window. That is not a bug to fix, it is what amount-and-date matching IS — the reason
+#:   losing the CCD+ addenda is expensive, and the reason the basis is recorded as ``AMOUNT_DATE``
+#:   so a weaker match stays visible in the audit trail;
+#: * one is a residual medical 340B key collision.
+#:
+#: The demo threshold is exact because demo is the walkthrough profile: if the curated sixty are
+#: not all correct, the thing a reviewer is shown is wrong.
+MIN_RESOLVABLE_RATE_DEMO = 1.0
+MIN_RESOLVABLE_RATE_FULL = 0.99
 
 
 @pytest.fixture(scope="module")

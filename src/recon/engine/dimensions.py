@@ -191,9 +191,14 @@ def gather_evidence(conn: sqlite3.Connection, episode_row: Any, cursor: str) -> 
     rows = conn.execute(
         "SELECT DISTINCT n.norm_id, n.raw_id, n.record_kind, n.source_system, n.received_at,"
         "       n.amount_cents, n.status_code, n.canonical, n.clp07, n.rx_number, n.ndc11,"
-        "       n.date_of_service, n.parent_norm_id"
+        "       n.date_of_service, n.parent_norm_id,"
+        # The parent remittance's own effective date.  Used to order a claim's payment legs by
+        # when the payer *issued* them rather than when we happened to receive them, which is
+        # what makes the ordering immune to the late-arrival defect (D-2).
+        "       parent.date_of_service AS parent_effective_date"
         "  FROM crosswalk_key k"
         "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        "  LEFT JOIN normalized_record parent ON parent.norm_id = n.parent_norm_id"
         " WHERE k.episode_id = :episode_id"
         "   AND k.first_seen_at <= :cursor"
         "   AND n.received_at <= :cursor"
@@ -538,7 +543,20 @@ def _read_medical_claim_lines(
     amounts: set[int] = set()
     original: dict[str, Any] | None = None
 
-    for line in sorted(evidence.claim_lines, key=lambda row: (row["received_at"], row["norm_id"])):
+    # Ordered by when the payer **issued** the remittance, not when it reached us.
+    #
+    # ``received_at`` is the wrong key here: the late-arrival defect shifts arrival by up to 45
+    # days while leaving event dates untouched, so a late original 835 would sort after the appeal
+    # response that answered it — and the claim's first word would read as its last.  The parent
+    # remittance's effective date is native, unshifted, and is what the payer actually acted on.
+    for line in sorted(
+        evidence.claim_lines,
+        key=lambda row: (
+            row["parent_effective_date"] or row["received_at"],
+            row["received_at"],
+            row["norm_id"],
+        ),
+    ):
         body = json.loads(line["canonical"])
         payment = body.get("payment_cents", 0) or 0
         is_denied = body.get("clp02_claim_status_code") == codes.CLP02_DENIED
@@ -586,22 +604,20 @@ def _medical_appeal(
     if paid >= expected or appeal_credit:
         return "WON"
 
-    # Filed and still open versus filed and exhausted.  The distinguishing evidence is whether
-    # the payer has *responded* to the resubmission — an 835 claim line that arrived after the
-    # replacement was submitted.  No response yet means the outcome is genuinely unknown and the
-    # balance is neither collectible nor writable-off; a response that still falls short means
-    # the appeal was heard and refused, and the residual is now a write-off decision.
-    latest_replacement_at = max(
-        (
-            row["received_at"]
-            for row in evidence.submissions
-            if json.loads(row["canonical"]).get("frequency_code") in {"7", "8"}
-        ),
-        default=None,
-    )
-    if latest_replacement_at is not None and any(
-        line["received_at"] > latest_replacement_at for line in evidence.claim_lines
-    ):
+    # Filed and still open versus filed and exhausted.
+    #
+    # The evidence is whether the payer has *responded* to the resubmission, and the signal for
+    # that is **CLP07 reassignment**: a reprocessed claim gets a brand-new payer ICN while CLM01
+    # never changes.  So more than one distinct CLP07 under one claim means the payer adjudicated
+    # it more than once — it responded.  One ICN means the resubmission is still sitting there.
+    #
+    # This is deliberately not "a claim line arrived after the replacement".  Arrival order is
+    # corrupted by the late-arrival defect, and a shifted original would masquerade as a response.
+    # ICN reassignment is a property of what the payer did, not of when we heard about it.
+    distinct_icns = {
+        line["clp07"] for line in evidence.claim_lines if line["clp07"] is not None
+    }
+    if len(distinct_icns) > 1:
         return "LOST"
     return "PENDING"
 
