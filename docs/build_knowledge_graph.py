@@ -31,6 +31,47 @@ def R(src, rel, dst):
                       "to": dst, "relationType": rel})
 
 
+# --- extending an entity a previous wave already declared -------------------
+#
+# Waves are additive: a later session adds a wave, it does not rewrite earlier
+# ones.  But facts go stale, and `E` appends rather than merges -- calling it a
+# second time with the same name emits two rows for one entity, which the memory
+# server reads as a duplicate and which will silently drift apart.  So a later
+# wave corrects an earlier one through these two, never by re-declaring it and
+# never by editing the earlier wave's source.
+#
+# Both raise rather than no-op.  A correction that quietly matched nothing is
+# how a graph ends up asserting something the project stopped believing.
+
+def OBS(name, *observations):
+    """Append observations to an entity declared in an earlier wave."""
+    for e in entities:
+        if e["name"] == name:
+            e["observations"].extend(observations)
+            return
+    raise KeyError(f"OBS: no entity named {name!r} -- declare it with E() first")
+
+
+def UNOBS(name, *substrings):
+    """Drop observations that are no longer true.
+
+    Matched on a distinctive substring rather than the full string, so a
+    correcting wave does not have to restate the sentence it is removing.
+    """
+    for e in entities:
+        if e["name"] == name:
+            for substring in substrings:
+                hits = [o for o in e["observations"] if substring in o]
+                if not hits:
+                    raise KeyError(
+                        f"UNOBS: {name!r} has no observation containing {substring!r} "
+                        "-- it was probably already corrected by an earlier wave")
+                for hit in hits:
+                    e["observations"].remove(hit)
+            return
+    raise KeyError(f"UNOBS: no entity named {name!r}")
+
+
 # ===========================================================================
 # WAVE 1 -- the domain
 # ===========================================================================
@@ -476,8 +517,149 @@ def wave_7_artifacts():
     R("Build order", "precedes", "Agent layer")
 
 
+# ===========================================================================
+# WAVE 8 -- what building the deterministic layer settled
+#
+# Waves 1-7 were written while the project was still design-only.  This wave is
+# the first one written with running code behind it, so it does two jobs: it
+# corrects the earlier waves where implementation proved them wrong, and it adds
+# what could only be learned by building.
+# ===========================================================================
+
+def wave_8_implementation():
+
+    # --- corrections to waves 6 and 7 --------------------------------------
+
+    UNOBS("Build state",
+          "Design complete, ZERO application code committed",
+          "Roughly 5,300 untracked lines sit under src/",
+          "That code predates the no-normalisation",
+          "Treat it as a reference, not a baseline")
+    OBS("Build state",
+        "The deterministic layer is complete end to end: four generators, connector, crosswalk, engine, FastAPI read layer and React front end",
+        "208 tests green; 372 of 372 reachable verdict pairs produced; 4,224 of 4,224 decision-tree configurations classified identically to the oracle",
+        "Verdict fidelity against withheld ground truth: 54/54 resolvable episodes on the demo profile, 1,349/1,354 (99.6%) on the full profile",
+        "The stale planning-agent code was untracked and gitignored rather than repaired -- the shipped code was written fresh against the ratified decisions",
+        "The agent layer is the only assignment component not built")
+
+    OBS("Build order",
+        "Waves 1-5 are done. Wave 6, the agent layer, is all that remains",
+        "Both owed passes were paid: the database design pass, and the record-to-dimension mapping that became src/recon/engine/dimensions.py")
+
+    OBS("Decision ledger",
+        "Section C now reads 20 decided, 2 deferred, nothing outstanding -- C23 closed",
+        "STALE AS OF THIS WAVE: the ledger's own Build status table still says 'Implementation | Not started', and still describes the planning-agent code as untracked and unresolved. Both were true when written and are false now")
+
+    OBS("START_HERE.md",
+        "STALE AS OF THIS WAVE: still asserts 'Design: complete. Code: none committed' and 'Application code: Zero committed'. src/recon/ holds roughly 48 modules",
+        "Left uncorrected deliberately -- the user placed a standing no-touch rule on the design documents, so the staleness is reported rather than edited")
+
+    UNOBS("Generate feeds source-first",
+          "one deposit covering hundreds of claims")
+    OBS("Generate feeds source-first",
+        "Building source-first surfaces cardinality facts you would otherwise miss -- many claims to one deposit, and recoupments netted invisibly into a later payment",
+        "Corrected by implementation: one deposit covers DOZENS of claims, not hundreds -- the spec says 47 and MAX_CLAIMS_PER_REMITTANCE is 24",
+        "The doc's own central warning came true during the build: every slice_ref embedded the episode id, handing each generator the identity it is forbidden to know")
+
+    OBS("Decision provenance must be tracked",
+        "Vindicated by implementation: reconciling the untracked foundation code against the ledger found FOUR ratified decisions violated by it -- A23, A24, 10/11 and C6",
+        "None announced itself; every one produced code that ran and data that looked right",
+        "What made them findable was a written list of what had been decided and by whom, so the code could be diffed against the decisions rather than against a reviewer's memory",
+        "The ledger is therefore not documentation of the past -- it is the test oracle for work that has not been written yet")
+
+    OBS("Two-hop bank resolution",
+        "Both hops assume a trace number survives. Roughly a fifth of deposits arrive with the CCD+ addenda stripped, so TRN02 is simply absent and the two-hop path cannot start")
+
+    # --- what building taught ----------------------------------------------
+
+    E("Amount-and-date fallback", "Mechanism",
+      "The resolution path for a deposit that carries no key at all, because its CCD+ addenda were dropped in transit",
+      "Matches on the two attributes a payment always has: amount, and settlement date within AMOUNT_DATE_WINDOW_DAYS (3)",
+      "A unique candidate resolves; two candidates PARK rather than guess, because picking either is a coin flip that looks authoritative whichever way it falls",
+      "AllocationBasis records which basis resolved each link, so a weaker amount-and-date claim never reads as a trace-number match downstream",
+      "The partial index ix_norm_keyless_amount indexes only the keyless rows, keeping the fallback off a table scan",
+      "A residual false-positive rate is inherent, not a defect: two identical payments inside the window are indistinguishable on the available evidence",
+      "The day window narrows a lookup keyed on amount -- it is not a scan window, and cost still scales with arrivals rather than with the age of the book")
+
+    E("Episode dossier", "Artifact",
+      "One query on one episode id returns the entire history: identity, current verdict, economics, an ordered timeline, records that failed to reach it, the full verdict log and every crosswalk key",
+      "This is the realisation of A25, episode-is-the-object -- the thing a person reads and the exact payload the agent layer receives, with no second shape to maintain",
+      "The timeline mixes what happened in the world with what the engine concluded, in one direction through time, because that is the order the question is actually asked in",
+      "Nothing in it is invented by a model: every line is composed in Python from fields the records carry",
+      "It separates when an event OCCURRED from when it was LEARNED, so a late-arriving document reads as late rather than as a contradiction")
+
+    E("Verbatim port preserves the proof", "Mechanism",
+      "src/recon/engine/verdicts.py is a line-for-line hand port of decision_tree/classify.py, deliberately not a reimplementation",
+      "Exhaustive enumeration proved a property of THAT classifier; a rewrite that tidies the branch order is a different classifier about which nothing has been proved",
+      "The generated artefact leaves_classified.json therefore outlives the exercise and becomes the production oracle",
+      "tests/test_decisions.py::test_engine_verdicts_reproduces_all_4224_oracle_classifications asserts the port matches on all 4,224 configurations -- no threshold, because one divergence means the port is no longer the thing that was proved",
+      "It runs in 0.11s, which is the argument for wiring an exhaustive oracle into CI rather than checking it once by hand")
+
+    E("A docstring is not a test", "Trap",
+      "The module docstring of src/recon/engine/verdicts.py asserted that tests ran it against all 4,224 oracle configurations. No such test existed -- nothing under tests/ imported the module at all",
+      "The claim had been verified by hand during the port and then written down as though it were automated, which reads identically to a verified claim",
+      "Found by a documentation refresh, not by code review: the claim was prose, so no test failure could ever surface it",
+      "The port turned out to be correct on all 4,224. Only the proof was missing -- which is the dangerous case, because nothing was ever going to break",
+      "Grep for the test before believing the sentence, especially when you wrote the sentence")
+
+    E("Silent generator defects", "Trap",
+      "Three defects in the generators, none of which raised an error, each producing a dataset that looked plausible and was worthless for what it was built to test",
+      "assert_slice_is_blind was written, correct, imported, and never called -- isolation unenforced while reading as covered",
+      "Record ids minted from a character-sum digest collided, and because the connector's idempotency key IS the source record id, a collision made it discard the second record as a redelivery: 16 of 53 remittances vanished with their trace numbers",
+      "The identifier minters ignored the master seed, so two unrelated seeds produced byte-identical claim identities while every other part of the run varied",
+      "Independence, idempotency and seed-variation all hold or fail invisibly. Each needs an assertion on the live path, not a comment saying it is true")
+
+    E("Knowledge graph is generated, never written to", "Trap",
+      "docs/build_knowledge_graph.py ends with open(OUT, 'w') -- it truncates and regenerates the whole file",
+      "So mcp__memory__create_entities / add_observations / create_relations must NEVER be used against this graph: those writes land in the .jsonl and are destroyed by the next rebuild, with no error and no trace",
+      "The memory MCP server is a READ interface here -- search_nodes, open_nodes, read_graph",
+      "Extend the graph by adding a wave. Correct an earlier wave with OBS() and UNOBS(), never by re-declaring an entity with E(), which emits a duplicate row rather than merging",
+      "Verify a rebuild with git diff: a diff that REMOVES lines means an earlier wave was disturbed",
+      "The MCP wiring was itself broken and nobody noticed: .mcp.json set MEMORY_FILE_PATH to the RELATIVE './docs/knowledge_graph.jsonl', which the server resolves against its own working directory rather than the project root, so search_nodes and open_nodes returned an empty graph while CLAUDE.md claimed the graph was queryable",
+      "Now pinned to an absolute path. A relative MEMORY_FILE_PATH fails silently -- an empty graph and a missing graph are indistinguishable through the MCP interface",
+      "The .jsonl is committed and greppable, so reading it directly is always the fallback and never depends on the server being wired correctly")
+
+    E("Score the scoreable separately", "Decision",
+      "Verdict fidelity is measured over resolvable episodes and intended-miss episodes as two partitions, never as one number",
+      "Episodes whose links were deliberately broken -- injected identifier drift, or a medical 340B natural key that genuinely cannot separate two same-day administrations -- are expected to miss",
+      "Counting those as engine failures would reward a connector that normalised the defect away, which is exactly the behaviour A23 forbids",
+      "The engine reading a smaller picture there is the D-6 exception working, not a bug",
+      "Provenance: agent default, adopted because a single blended number made a correct engine look broken")
+
+    E("Query plans are asserted, not assumed", "Decision",
+      "Every hot query is pinned by a test that runs EXPLAIN QUERY PLAN and asserts no table scan, so an index regression fails a test rather than slowly costing latency",
+      "The audit found five scans and ten indexes that were never chosen by the planner",
+      "Sharpest lesson: a PARTIAL index whose predicate is bound as a query parameter is declined by SQLite, because it cannot prove at plan time that the parameter satisfies the WHERE clause. Making ix_norm_amount_match non-partial is what made it usable",
+      "Ingest went 2.35s to 1.23s, but the durable win is that the plans are now regression-tested")
+
+    E("SQLite thread affinity under FastAPI", "Trap",
+      "sqlite3 objects can only be used on the thread that created them, and FastAPI runs synchronous dependencies on a threadpool thread that is not the one that built the connection",
+      "A Depends(get_conn) generator therefore raises ProgrammingError under concurrency while passing every single-threaded test",
+      "Fixed with an @contextmanager open_conn() opened inside each handler -- connection per request, created and used on the same thread")
+
+    # --- relations ---------------------------------------------------------
+
+    R("Amount-and-date fallback", "rescues", "Two-hop bank resolution")
+    R("Amount-and-date fallback", "falls back from", "TRN02")
+    R("Amount-and-date fallback", "feeds", "Parked records")
+    R("Episode dossier", "realises", "Episode")
+    R("Episode dossier", "is consumed by", "Agent layer")
+    R("Episode dossier", "is built on", "Lineage")
+    R("Verbatim port preserves the proof", "depends on", "Decision tree")
+    R("A docstring is not a test", "was found in", "Verbatim port preserves the proof")
+    R("Silent generator defects", "violated", "Generator independence")
+    R("Silent generator defects", "illustrates", "Generate feeds source-first")
+    R("Score the scoreable separately", "protects", "D-6 crosswalk failure")
+    R("Score the scoreable separately", "depends on", "No identifier normalisation")
+    R("Query plans are asserted, not assumed", "implements", "Database design is first-class")
+    R("SQLite thread affinity under FastAPI", "constrains", "Deterministic boundary")
+    R("Knowledge graph is generated, never written to", "constrains", "Decision ledger")
+    R("Build state", "is corrected by", "Build order")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
-         wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts]
+         wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
+         wave_8_implementation]
 
 
 def main():

@@ -192,12 +192,25 @@ Global Instructions
   anything else in this repository.
 
   docs/knowledge_graph.jsonl is a traversable knowledge graph of the project --
-  58 entities, 234 observations, 54 relations covering the domain, the object
-  model, every load-bearing decision, the four feeds and their identifiers, the
-  state space, and the process learnings. It is wired to the memory MCP server
-  in .mcp.json, so it can be queried with search_nodes and open_nodes as well as
-  read directly. Rebuild or extend it with a new wave via
-  `python docs/build_knowledge_graph.py`.
+  67 entities, 294 observations, 70 relations across 8 waves, covering the
+  domain, the object model, every load-bearing decision, the four feeds and
+  their identifiers, the state space, the process learnings, and what building
+  the deterministic layer settled. Reading the .jsonl directly always works;
+  it is also wired to the memory MCP server in .mcp.json for search_nodes and
+  open_nodes, which needs an absolute MEMORY_FILE_PATH -- a relative one
+  resolves against the server's own working directory and silently serves an
+  empty graph.
+
+  The file is GENERATED. Never write to it with the memory MCP server's
+  create_entities / add_observations / create_relations: the builder ends with
+  open(OUT, "w"), so those writes are destroyed by the next rebuild without an
+  error. Extend it by adding a wave to docs/build_knowledge_graph.py and running
+  `python docs/build_knowledge_graph.py`; correct an earlier wave with that
+  script's OBS() and UNOBS() helpers rather than re-declaring an entity with E(),
+  which emits a duplicate row instead of merging.
+
+  /complete_compound runs both halves of compounding in one pass: the
+  docs/solutions refresh, then this session's decisions into the graph.
 
   docs/decision_ledger.md records every decision with provenance -- which were
   approved by the user, which were delegated, and which are agent defaults.
