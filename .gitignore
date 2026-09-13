@@ -24,3 +24,7 @@ Thumbs.db
 # Front-end build output and dependencies
 web/node_modules/
 web/dist/
+
+# Playwright MCP session debris and ad-hoc screenshots from browser validation
+.playwright-mcp/
+*.png
