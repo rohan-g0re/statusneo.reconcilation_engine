@@ -110,6 +110,17 @@ Once every item carried a stated cost, the finding was blunt: **only two of ten 
 
 **Scope violations are cheap to prevent, expensive to unwind after a commit.** The 5,300-line overrun was caught only because someone happened to notice untracked implementation appear near a commit boundary. Nothing about "plan only" was enforced or checked. The code implemented parameters that later needed ratification anyway — meaning the code existed before the decisions authorising it. It was left on disk unratified rather than deleted, so ratification could happen in the right order without discarding usable work.
 
+**What the implementation phase proved: the ledger's payoff arrives later, and it arrives as a diff.** This document was written while the project was still design-only, so its case rested on costs avoided — inherently hard to demonstrate. Implementation supplied the missing evidence. When the unratified 5,300-line foundation code was finally reconciled against the ledger, **four ratified decisions turned out to have been violated by it**, and each was findable precisely because the decision was written down with an owner (commit `7ce0c24`):
+
+| Decision | What the code did instead | Why it mattered |
+|---|---|---|
+| A23 — no identifier normalisation | Kept a normalised `rx_number` column | Silently repaired the deliberately injected identifier drift, deleting the crosswalk-failure exception the dataset exists to exercise |
+| A24 — eight key types, exactly | Registered ten, including the ACH trace | Plumbing with no business content promoted to a business key |
+| 10/11 — generator blindness | `slice_ref` embedded the episode id | Handed every generator the identity it is forbidden to know |
+| C6 — integer-cents money rules | An overpayment could drive a line's residual negative | Produced arithmetically impossible remittances |
+
+None of these would have announced itself. Every one produced code that ran, and a dataset that looked right. What made them *findable* was not the code review — it was having a list of things that had been decided, by whom, so the code could be diffed against the decisions rather than against a reviewer's memory. That is the concrete form the return takes: **a ledger is not documentation of the past, it is the test oracle for work that has not been written yet.**
+
 **Mis-framing costs round trips disproportionate to the mistake.** A file-count detail, a description of two mechanisms, a test suite, a README — four small misclassifications, none hard to resolve once spotted. But each occupied a slot in the needs-a-decision queue, and each therefore cost a full round trip of human attention before being re-filed. A ledger with fuzzy admission criteria does not fail loudly; it just gets slower to walk, one misfiled row at a time.
 
 ## When to Apply
@@ -164,6 +175,6 @@ Same five facts, each now carrying a disposition, a provenance note, and where i
 
 ## Related
 
-- `docs/decision_ledger.md` — the full ledger. Section A 31 settled; Section B 9 resolved and 1 deferred; Section C 19 decided, 2 deferred, 1 needing human input
+- `docs/decision_ledger.md` — the full ledger. Section A 31 settled; Section B 9 resolved and 1 deferred; Section C 20 decided, 2 deferred, nothing outstanding
 - `docs/glossary.md` — the companion fix for a related failure in the same session: term drift between *claim* and *episode*, *verdict* and *status*. Same root cause — unrecorded authority, in that case over meaning rather than over choices
 - [`exhaustive-generation-beats-hand-enumeration-2026-09-12.md`](exhaustive-generation-beats-hand-enumeration-2026-09-12.md) — same design session, adjacent failure family: a hand-derived artefact silently diverging from what was actually generated, caught only by an independent second pass

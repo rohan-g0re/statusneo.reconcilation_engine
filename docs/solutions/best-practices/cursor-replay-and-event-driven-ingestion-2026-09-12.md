@@ -156,6 +156,39 @@ def on_document_arrival(document: dict):
 
 Worked example: a bank deposit arrives Tuesday and parks because no remittance with its trace number exists yet. The remittance arrives Friday. It resolves its own claims forward *and*, via the backward check, clears the parked Tuesday deposit — both driven by the same arrival, in the same pass. Skip the backward half and an out-of-order arrival is unmatched forever, even after the record that would explain it finally lands — the forward-only version of this pattern quietly reintroduces the "hope the window is wide enough" problem it was built to eliminate.
 
+**Refinement C — the keyless document, and why matching on attributes is not a retreat.** Refinements A and B both assume the document carries *some* key, even a key that resolves to nothing yet. Real feeds break that assumption: a bank deposit's trace number lives in the CCD+ addenda record, and addenda are routinely stripped somewhere between the originating bank and the receiving one. The deposit still arrives, still carries real money, and identifies nothing at all.
+
+The temptation is to treat this as an exception and queue it for a human. That is wrong at volume, and it is wrong in principle: a deposit with no key is not unmatched, it is unmatched *by trace number*. It still has two attributes that are as much a part of the payment as its trace is — an amount and a settlement date — and a remittance that expects exactly that amount within a couple of days of that date is a match on evidence, not a guess.
+
+```python
+def resolve_or_park(document):
+    if document.trace_number:
+        remittance = resolve_remittance(document.trace_number)
+        if remittance:
+            return remittance, AllocationBasis.TRACE
+
+    # No trace, or a trace that resolves to nothing: fall back to amount + date.
+    # A unique hit is a resolution. Two candidates is NOT a coin flip — it parks.
+    candidates = remittances_expecting(
+        amount=document.amount_cents,
+        within_days=AMOUNT_DATE_WINDOW_DAYS,
+        of=document.settlement_date,
+    )
+    if len(candidates) == 1:
+        return candidates[0], AllocationBasis.AMOUNT_DATE
+    return None, None                                  # park; Refinement B takes it from here
+```
+
+Three things make this safe rather than sloppy:
+
+- **Record which basis resolved it.** A link found by amount-and-date is a weaker claim than one found by trace, and downstream needs to know that. Store the basis on the link; never let the two look identical once written.
+- **Ambiguity parks, it does not guess.** If two remittances expect the same amount in the same window, picking either is a coin flip that will be wrong half the time and will look authoritative in both. Park it.
+- **The window is not a scan window.** This is the one place a day count appears, and the distinction matters: `within_days` narrows a *lookup keyed on amount*, it does not sweep entities by age. Cost still scales with arrivals, not with the size or age of the book.
+
+Expect a residual false-positive rate and do not treat it as a defect. Two genuinely identical payments inside the window are indistinguishable on the evidence available — matching them confidently is what amount-and-date matching *is*, and the honest response is the recorded basis, not a wider window.
+
+**Implementation reference:** `src/recon/ingest/pipeline.py` — `AMOUNT_DATE_WINDOW_DAYS` (line 93), `_recheck_parked_by_amount_and_date` and `_resolve_bank_by_amount_and_date` (lines 612-683); `AllocationBasis.AMOUNT_DATE` records the provenance; the partial index `ix_norm_keyless_amount` (`src/recon/db/schema.sql:171-174`) keeps the fallback lookup off a table scan by indexing only the keyless rows.
+
 ### 5. Drop time-based thresholds from the verdict logic — the decision that makes the rest sound
 
 This is the keystone, and it is easy to under-rate because it looks like a simplification rather than a correctness argument.

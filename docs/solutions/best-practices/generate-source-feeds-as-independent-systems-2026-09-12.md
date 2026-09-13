@@ -137,6 +137,24 @@ No field in `gen_pbm_claim_event`'s output appears anywhere in `gen_medical_837`
 
 For any feed, ask two questions before writing the generator: *who assigns this identifier in reality*, and *does any other feed ever see it*. If the honest answer to the second question is "no," that absence is correct and should be preserved, not patched over with a convenience key.
 
+### Three ways this went wrong in the build — all of them silent
+
+This document was written before the generators existed. Building them produced three concrete failures, and the instructive thing about all three is that **none of them raised an error**. Each one produced a dataset that looked entirely plausible and was quietly worthless for the thing it was built to test.
+
+**1. The blindness guard existed and was never called.** Every per-episode slice reference was spelled `f"{episode_id}:pbm-claim"` — so the handle passed to each generator embedded the episode identity that generator is specifically forbidden to know. `assert_slice_is_blind` had been written, was correct, and was imported without ever being invoked. The generators did not *use* the leaked id, so nothing failed; the isolation was simply unenforced, and one careless later edit would have been enough to cash it in. The fix was opaque handles (`SliceRefs`) plus `_guard`/`_guard_batches` wrappers at every slice-production site, so the assertion runs on the path rather than sitting beside it.
+
+> A guard you wrote but never call is worse than no guard, because it reads like coverage. If a rule matters, invoke it on the production path and write a test that proves the invocation fails when the rule is broken (`tests/test_generators.py`).
+
+**2. A weak record-id digest collided, and the collision ate real data.** Record ids were derived from a character-sum digest of the slice reference. Digests collided, and because the connector's idempotency key *is* the source record id, a collision did not surface as a duplicate — it made the connector discard the second record as a redelivery of the first. Sixteen of fifty-three remittances vanished, taking their claim lines and trace numbers with them, and the run still completed cleanly. Fixed by having the orchestrator mint dense sequence integers (`sequence` on the batch slices) instead of deriving ids from content.
+
+> When a generated identifier doubles as a deduplication key downstream, a collision is not a warning — it is silent deletion. Mint from a counter you control; do not hash your way to uniqueness.
+
+**3. Identifiers ignored the master seed, so every seed produced the same claims.** `_mint_clm01` and `_mint_rx_number` were pure functions of the sequence number, which meant the "different seed, different dataset" guarantee was false: two unrelated seeds minted byte-identical claim identities. Every other part of the run varied, so the defect was invisible in aggregate. Fixed with a seed-derived per-run offset (`_run_offset` in `src/recon/generators/sampling.py`), and regression-tested by generating under an unrelated seed and asserting the identifiers differ.
+
+> If a generator promises seed-varied output, assert it across two seeds. "It looks different every time" is not the same claim, and the parts that did not vary are exactly the parts nobody checks.
+
+The common thread: independence, idempotency, and seed-variation are all properties that hold or fail *invisibly*. Each one needs an assertion on the live path, not a comment saying it is true.
+
 ## Why This Matters
 
 **The crosswalk is usually the hardest and most valuable part of the system.** If the generator hands every feed the same key, the component you most need to prove works is the one component that gets zero exercise. You ship a connector that has only ever seen a no-op join.
@@ -145,7 +163,7 @@ For any feed, ask two questions before writing the generator: *who assigns this 
 
 **Independent generation forces you to research how real source systems actually identify things, and that research surfaces facts a canonical-first design would never expose.** In this project, two consequential findings only appeared because each generator had to be built from the real format outward:
 
-- One bank deposit legitimately covers hundreds of claims through a single remittance, which means the connector needs many-to-one allocation logic (`docs/feed_formats.md`, Section 5) — invisible if every claim had already been assigned its own bank-line key.
+- One bank deposit legitimately covers dozens of claims through a single remittance, which means the connector needs many-to-one allocation logic (`docs/feed_formats.md`, Section 5) — invisible if every claim had already been assigned its own bank-line key.
 - A recoupment can be netted into a *later* payment, so the bank line shows only the net amount, and the only place the explanation lives is a remittance segment (`PLB`) that the bank layer is structurally blind to (`docs/feed_formats.md`, Section 4). A canonical-first model would have had nowhere natural for this asymmetry to live, because it assumes every feed can see the same facts.
 
 **Concrete evidence from the domain this was built for.** Real US healthcare payments have no universal claim identifier — three separate identifier universes, assigned by different parties:

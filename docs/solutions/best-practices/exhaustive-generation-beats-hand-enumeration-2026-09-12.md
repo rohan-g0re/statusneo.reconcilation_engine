@@ -146,11 +146,34 @@ The doc-visible headline (510 → 528, +18) makes the estimate look significantl
 
 When reporting a correction like this, separate "the enumerated count changed" from "the implementation cost changed." They are usually not the same claim, and only exhaustive generation lets you distinguish them.
 
+### The generated artefact becomes the production oracle — and only a verbatim port keeps the proof
+
+The most valuable thing exhaustive generation leaves behind is not the count. It is `leaves_classified.json`: 4,224 configurations, each carrying the classification the generator's own classifier assigned it. That file outlives the exercise, and it changes how the production code should be written.
+
+`decision_tree/classify.py` was **hand-ported, not reimplemented**, into `src/recon/engine/verdicts.py`. The distinction is the whole point. Exhaustive enumeration proved a property of *that classifier* — that its 50 rules reach 372 of 372 pairs across every valid configuration. A rewrite that tidies the branch order is a different classifier, and nothing has been proved about it. Keeping the port line-for-line is what lets the enumeration's result transfer to the code that actually runs.
+
+But transferring the proof requires actually re-running it. This refresh found that the port's module docstring asserted a test existed —
+
+> "``tests`` run this module against ``decision_tree/leaves_classified.json`` and assert it reproduces the classification of every one of the 4,224 configurations."
+
+— and no such test did. Nothing under `tests/` imported `recon.engine.verdicts` at all. The claim had been verified once by hand during the port and then recorded as if it were automated, which is the more dangerous of the two failure modes: an unverified claim looks identical to a verified one, and it was sitting in the docstring of the module whose entire justification is fidelity.
+
+The gap is now closed by `tests/test_decisions.py::test_engine_verdicts_reproduces_all_4224_oracle_classifications`, which loads all 4,224 oracle entries and asserts the port reproduces the reimbursement verdict, the rebate verdict, the cross-track flags and the coherence classification for every one — 100%, no threshold, because one divergence means the port is no longer the thing that was proved. It passes. The port was correct all along; only the proof was missing.
+
+Two lessons worth separating:
+
+- **Wire the oracle into CI, not into the commit message.** An exhaustively generated artefact is a regression test that already exists and costs almost nothing to run — this one executes in 0.11s. Leaving it unwired means the proof decays silently the first time someone edits a branch.
+- **A docstring that describes a test is not a test.** When prose asserts coverage, the assertion is unfalsifiable until something runs. Grep for the test before believing the sentence — including, and especially, when you wrote the sentence yourself.
+
 ### Uniform sampling over a generated space is not neutral
 
 Frequency is wildly non-uniform. Measured on the current tree, configurations per verdict pair range from **1 to 252** — a **252×** spread, with **99 of 372 pairs holding exactly one configuration**. The rarest cross-track flags are X-6 (8 configurations) and X-4 (9). Sampling 50 cases uniformly would miss most of the tail entirely.
 
 Any test-data or QA-sampling strategy built on an enumerated space must stratify over the *outcome* (verdict or state), not over raw configuration count, or the rarest and most important cases systematically vanish from every sample.
+
+**Prove the stratification with a second seed, not with the published one.** A sampler that covers all 372 pairs under its own seed has demonstrated almost nothing — full coverage under the seed you tuned against is the expected result whether the guarantee is structural or lucky. The claim worth making is that coverage is *arithmetic*: reserve one slot per pair before distributing the remainder, and coverage follows from the slot count rather than from the draw. That claim is falsifiable, so it should be tested as one — `tests/test_generators.py::test_a_different_seed_still_covers_all_372_verdict_pairs` regenerates under an unrelated seed and re-asserts full coverage.
+
+The same test earns its keep a second way: it is what catches identifiers that silently ignore the seed. A generator can vary every sampled outcome while minting byte-identical claim numbers on every run, and nothing about the coverage count exposes that.
 
 ## When to Apply
 

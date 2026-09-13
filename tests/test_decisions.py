@@ -16,6 +16,7 @@ from recon.crosswalk import keys
 from recon.db import migrate
 from recon.domain import verdicts
 from recon.domain.enums import Disposition, KeyType
+from recon.engine import verdicts as engine_verdicts
 
 
 # ═══ A23 — no identifier normalisation on the primary match path ════════════
@@ -280,6 +281,102 @@ def test_configuration_density_spans_far_enough_to_force_stratified_sampling(pai
         f"only {len(singletons)} pairs have a single configuration; the design note "
         "claims 99, and stratification is justified by that number"
     )
+
+
+# ═══ recon.engine.verdicts — full port fidelity against the oracle ═════════
+
+
+def _load_oracle_configurations() -> list[dict]:
+    """``decision_tree/leaves_classified.json`` — all 4,224 valid configurations.
+
+    Not copied into ``tests/``: the real artefact the exhaustive generator wrote, and
+    the same file the module docstring of ``recon.engine.verdicts`` names by path. Each
+    entry carries the oracle's own recorded verdict fields (``curated_reimbursement_state``,
+    ``curated_rebate_state``, ``cross_track_flags``, ``coherence``) alongside the
+    configuration split across ``reimbursement_track`` / ``rebate_track`` /
+    ``cash_verification``. The engine's functions take one flat configuration mapping
+    (see ``verify.py``'s own ``matches()`` helper for the oracle's precedent), so the three
+    parts are merged here the same way.
+    """
+    import json
+
+    repo_root = Path(__file__).resolve().parents[1]
+    path = repo_root / "decision_tree" / "leaves_classified.json"
+    assert path.exists(), (
+        f"{path} is missing. It is a live test oracle, not an optional artefact; "
+        "rebuild it with `python decision_tree/classify.py`."
+    )
+    leaves = json.loads(path.read_text(encoding="utf-8"))
+    for leaf in leaves:
+        configuration = {}
+        configuration.update(leaf["reimbursement_track"])
+        configuration.update(leaf["rebate_track"])
+        configuration.update(leaf["cash_verification"])
+        leaf["_configuration"] = configuration
+    return leaves
+
+
+def test_engine_verdicts_reproduces_all_4224_oracle_classifications():
+    """The module docstring's claim, made true: a line-for-line port must match, exactly.
+
+    ``recon.engine.verdicts`` is asserted to be a *faithful* port of
+    ``decision_tree/classify.py`` — the classifier the exhaustive generator ran to prove
+    372 of 372 verdict pairs reachable. If the port diverges from the oracle on even one
+    of the 4,224 configurations, it is no longer the thing that was proved, so this is a
+    100% match with no threshold: one divergence is a failure.
+
+    The oracle's cross-track flags carry a descriptive suffix (``"X-1:denied_with_rebate_paid"``)
+    that the port's ``cross_track_flags`` does not reproduce — the port only returns the bare
+    code (``"X-1"``). That is a recorded, intentional narrowing of the port (see its
+    docstring: "50 rules... generate all 372 pairs"), not a divergence to catch here, so both
+    sides are compared on the code prefix only.
+    """
+    leaves = _load_oracle_configurations()
+    assert len(leaves) == 4224, f"expected 4,224 oracle configurations, found {len(leaves)}"
+
+    divergences: list[dict] = []
+
+    for leaf in leaves:
+        configuration = leaf["_configuration"]
+
+        got_reimbursement = engine_verdicts.classify_reimbursement(configuration)
+        got_rebate = engine_verdicts.classify_rebate(configuration)
+        got_flags = sorted(flag.split(":", 1)[0] for flag in engine_verdicts.cross_track_flags(configuration))
+        got_coherence = engine_verdicts.coherence(configuration)
+
+        want_reimbursement = leaf["curated_reimbursement_state"]
+        want_rebate = leaf["curated_rebate_state"]
+        want_flags = sorted(flag.split(":", 1)[0] for flag in leaf["cross_track_flags"])
+        want_coherence = leaf["coherence"]
+
+        mismatches = {}
+        if got_reimbursement != want_reimbursement:
+            mismatches["reimbursement"] = (want_reimbursement, got_reimbursement)
+        if got_rebate != want_rebate:
+            mismatches["rebate"] = (want_rebate, got_rebate)
+        if got_flags != want_flags:
+            mismatches["cross_track_flags"] = (want_flags, got_flags)
+        if got_coherence != want_coherence:
+            mismatches["coherence"] = (want_coherence, got_coherence)
+
+        if mismatches:
+            divergences.append(
+                {
+                    "case_id": leaf["case_id"],
+                    "configuration": configuration,
+                    "mismatches": mismatches,
+                }
+            )
+
+    if divergences:
+        preview = "\n".join(
+            f"  {d['case_id']}: {d['mismatches']}\n    configuration={d['configuration']}"
+            for d in divergences[:5]
+        )
+        pytest.fail(
+            f"recon.engine.verdicts diverged from the oracle on {len(divergences)} of "
+            f"{len(leaves)} configurations. First {min(5, len(divergences))}:\n{preview}"
+        )
 
 
 # ═══ C6 — integer cents end to end ══════════════════════════════════════════
