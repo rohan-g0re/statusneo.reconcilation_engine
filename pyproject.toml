@@ -14,7 +14,7 @@ dependencies = []
 
 [project.optional-dependencies]
 api = ["fastapi", "uvicorn", "pydantic"]
-agent = ["anthropic"]
+agent = ["httpx"]
 dev = ["pytest"]
 
 [project.scripts]

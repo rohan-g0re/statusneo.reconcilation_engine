@@ -29,3 +29,8 @@ web/dist/
 .playwright-mcp/
 *.png
 ui-review/
+
+# Agent layer: secrets and run journals
+.env
+data/agent_runs/
+.agents/specs/
