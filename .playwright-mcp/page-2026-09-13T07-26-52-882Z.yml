@@ -1,0 +1,68 @@
+- generic [ref=f17e3]:
+  - banner [ref=f17e4]:
+    - generic [ref=f17e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=f17e6]
+      - generic [ref=f17e7]:
+        - text: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates. Profile
+        - code [ref=f17e8]: demo
+        - text: ", engine"
+        - code [ref=f17e9]: 1.0.0
+        - text: .
+    - generic [ref=f17e10]:
+      - generic [ref=f17e11]: 0 episodes · $0.00 total variance
+      - button "Regenerate demo" [ref=f17e12] [cursor=pointer]
+      - button "Regenerate full" [ref=f17e13] [cursor=pointer]
+  - generic [ref=f17e1310]: "500: Internal Server Error"
+  - generic [ref=f17e14]:
+    - heading "Replay cursor" [level=2] [ref=f17e15]
+    - paragraph [ref=f17e16]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+    - generic [ref=f17e17]:
+      - generic [ref=f17e18]:
+        - generic [ref=f17e19]: Cursor
+        - status [ref=f17e20]: 2026-07-01
+        - slider "Replay cursor" [ref=f17e21]: "365"
+        - button "Latest" [disabled] [ref=f17e22]
+      - generic [ref=f17e23]:
+        - generic [ref=f17e24]: 2025-07-01
+        - generic [ref=f17e25]: 2026-07-01
+  - generic [ref=f17e26]:
+    - heading "Queues at this cursor" [level=2] [ref=f17e27]
+    - paragraph [ref=f17e28]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=f17e29]:
+      - button "Exception 0 $0.00 variance" [active] [pressed] [ref=f17e1304] [cursor=pointer]:
+        - generic [ref=f17e31]:
+          - generic [aria-hidden] [ref=f17e32]: ▲
+          - text: Exception
+        - generic [ref=f17e33]: "0"
+        - generic [ref=f17e34]: $0.00 variance
+      - button "Pending 0 $0.00 variance" [ref=f17e1305] [cursor=pointer]:
+        - generic [ref=f17e36]:
+          - generic [aria-hidden] [ref=f17e37]: ◷
+          - text: Pending
+        - generic [ref=f17e38]: "0"
+        - generic [ref=f17e39]: $0.00 variance
+      - button "Closed 0 $0.00 variance" [ref=f17e1306] [cursor=pointer]:
+        - generic [ref=f17e41]:
+          - generic [aria-hidden] [ref=f17e42]: ✓
+          - text: Closed
+        - generic [ref=f17e43]: "0"
+        - generic [ref=f17e44]: $0.00 variance
+  - generic [ref=f17e45]:
+    - heading "EXCEPTION queue" [level=2] [ref=f17e685]
+    - generic [ref=f17e47]:
+      - generic [ref=f17e48]: Rank by
+      - combobox "Rank by" [ref=f17e49]:
+        - option "Reopened first, then oldest"
+        - option "Oldest first" [selected]
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=f17e50]: 0 episodes
+    - paragraph [ref=f17e1311]: No episodes in this queue at this cursor. An empty queue is an answer, not a missing one.
+  - generic [ref=f17e63]:
+    - heading "Episode trace" [level=2] [ref=f17e64]
+    - paragraph [ref=f17e65]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - paragraph [ref=f17e1308]: Select an episode to trace it end to end.
+  - generic [ref=f17e67]:
+    - heading "Feed-level exceptions" [level=2] [ref=f17e68]
+    - paragraph [ref=f17e69]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - paragraph [ref=f17e1309]: loading…

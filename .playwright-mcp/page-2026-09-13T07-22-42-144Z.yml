@@ -1,0 +1,78 @@
+- generic [ref=f13e3]:
+  - banner [ref=f13e4]:
+    - generic [ref=f13e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=f13e6]
+      - generic [ref=f13e7]:
+        - text: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates. Profile
+        - code [ref=f13e8]: demo
+        - text: ", engine"
+        - code [ref=f13e9]: 1.0.0
+        - text: .
+    - generic [ref=f13e10]:
+      - generic [ref=f13e11]: 0 episodes · $0.00 total variance
+      - button "Regenerate demo" [disabled] [ref=f13e12]
+      - button "Regenerate full" [disabled] [ref=f13e13]
+  - generic [ref=f13e14]:
+    - heading "Replay cursor" [level=2] [ref=f13e15]
+    - paragraph [ref=f13e16]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+    - generic [ref=f13e17]:
+      - generic [ref=f13e18]:
+        - generic [ref=f13e19]: Cursor
+        - status [ref=f13e20]: 2026-07-01
+        - slider "Replay cursor" [ref=f13e21]: "365"
+        - button "Latest" [disabled] [ref=f13e22]
+      - generic [ref=f13e23]:
+        - generic [ref=f13e24]: 2025-07-01
+        - generic [ref=f13e25]: 2026-07-01
+  - generic [ref=f13e26]:
+    - heading "Queues at this cursor" [level=2] [ref=f13e27]
+    - paragraph [ref=f13e28]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=f13e29]:
+      - button "Exception 0 $0.00 variance" [pressed] [ref=f13e30] [cursor=pointer]:
+        - generic [ref=f13e31]:
+          - generic [aria-hidden] [ref=f13e32]: ▲
+          - text: Exception
+        - generic [ref=f13e33]: "0"
+        - generic [ref=f13e34]: $0.00 variance
+      - button "Pending 0 $0.00 variance" [ref=f13e35] [cursor=pointer]:
+        - generic [ref=f13e36]:
+          - generic [aria-hidden] [ref=f13e37]: ◷
+          - text: Pending
+        - generic [ref=f13e38]: "0"
+        - generic [ref=f13e39]: $0.00 variance
+      - button "Closed 0 $0.00 variance" [ref=f13e40] [cursor=pointer]:
+        - generic [ref=f13e41]:
+          - generic [aria-hidden] [ref=f13e42]: ✓
+          - text: Closed
+        - generic [ref=f13e43]: "0"
+        - generic [ref=f13e44]: $0.00 variance
+  - generic [ref=f13e45]:
+    - heading "EXCEPTION queue" [level=2] [ref=f13e46]
+    - generic [ref=f13e47]:
+      - generic [ref=f13e48]: Rank by
+      - combobox "Rank by" [ref=f13e49]:
+        - option "Reopened first, then oldest" [selected]
+        - option "Oldest first"
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=f13e50]: loading…
+    - table [ref=f13e52]:
+      - rowgroup [ref=f13e53]:
+        - row [ref=f13e54]:
+          - columnheader "Episode" [ref=f13e55]
+          - columnheader "Track" [ref=f13e56]
+          - columnheader "Service date" [ref=f13e57]
+          - columnheader "Age" [ref=f13e58]
+          - columnheader "Reimb." [ref=f13e59]
+          - columnheader "Rebate" [ref=f13e60]
+          - columnheader "Variance" [ref=f13e61]
+          - columnheader "Why" [ref=f13e62]
+      - rowgroup
+  - generic [ref=f13e63]:
+    - heading "Episode trace" [level=2] [ref=f13e64]
+    - paragraph [ref=f13e65]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - paragraph [ref=f13e66]: loading episode…
+  - generic [ref=f13e67]:
+    - heading "Feed-level exceptions" [level=2] [ref=f13e68]
+    - paragraph [ref=f13e69]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - paragraph [ref=f13e70]: loading…

@@ -1,0 +1,53 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=e6]
+      - generic [ref=e7]: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates.
+    - generic [ref=e8]:
+      - generic [ref=e9]: 0 episodes · $0.00 total variance
+      - button "Regenerate demo" [ref=e10] [cursor=pointer]
+      - button "Regenerate full" [ref=e11] [cursor=pointer]
+  - generic [ref=e12]:
+    - heading "Replay cursor" [level=2] [ref=e13]
+    - paragraph [ref=e14]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+  - generic [ref=e15]:
+    - heading "Queues at this cursor" [level=2] [ref=e16]
+    - paragraph [ref=e17]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=e18]:
+      - button "Exception 0 $0.00 variance" [pressed] [ref=e19] [cursor=pointer]:
+        - generic [ref=e20]:
+          - generic [aria-hidden] [ref=e21]: ▲
+          - text: Exception
+        - generic [ref=e22]: "0"
+        - generic [ref=e23]: $0.00 variance
+      - button "Pending 0 $0.00 variance" [ref=e24] [cursor=pointer]:
+        - generic [ref=e25]:
+          - generic [aria-hidden] [ref=e26]: ◷
+          - text: Pending
+        - generic [ref=e27]: "0"
+        - generic [ref=e28]: $0.00 variance
+      - button "Closed 0 $0.00 variance" [ref=e29] [cursor=pointer]:
+        - generic [ref=e30]:
+          - generic [aria-hidden] [ref=e31]: ✓
+          - text: Closed
+        - generic [ref=e32]: "0"
+        - generic [ref=e33]: $0.00 variance
+  - generic [ref=e34]:
+    - heading "EXCEPTION queue" [level=2] [ref=e35]
+    - generic [ref=e36]:
+      - generic [ref=e37]: Rank by
+      - combobox "Rank by" [ref=e38]:
+        - option "Reopened first, then oldest" [selected]
+        - option "Oldest first"
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=e39]: 0 episodes
+    - paragraph [ref=e40]: No episodes in this queue at this cursor. An empty queue is an answer, not a missing one.
+  - generic [ref=e41]:
+    - heading "Episode trace" [level=2] [ref=e42]
+    - paragraph [ref=e43]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - paragraph [ref=e44]: Select an episode to trace it end to end.
+  - generic [ref=e45]:
+    - heading "Feed-level exceptions" [level=2] [ref=e46]
+    - paragraph [ref=e47]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - paragraph [ref=e48]: loading…

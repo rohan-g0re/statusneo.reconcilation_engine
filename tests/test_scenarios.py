@@ -1423,3 +1423,34 @@ def test_reopening_is_recorded_when_a_closed_episode_comes_undone(tmp_path):
     # think in September?" unanswerable.
     history = repository.verdict_history(run.conn, episode["episode_id"])
     assert [v.episode_disposition.value for v in history] == ["CLOSED", "EXCEPTION"]
+
+
+def test_an_episode_does_not_exist_before_its_anchor_arrives(tmp_path):
+    """Replaying to a cursor before the claim was filed must evaluate nothing.
+
+    This one was a real bug, and it was invisible until the dashboard evaluated at monthly cursors.
+    ``run_all`` evaluated *every* episode at every cursor, and an episode whose claim event had not
+    arrived yet has no evidence at all — which reads identically to "rejected at the point of sale".
+    So claims that had not happened were reported as A-01, CLOSED, expected zero: confidently wrong
+    about a claim that did not exist, and wrong in the most reassuring direction.
+
+    An episode comes into existence when its anchor record arrives. Before that there is nothing to
+    have an opinion about.
+    """
+    from recon.engine import run as engine_run
+
+    run = run_scenario(_fully_reconciled_pharmacy(), tmp_path)
+    episode = run.only_episode()
+
+    # The claim was filed on 2 September; a month earlier nothing existed.
+    before = engine_run.run_for_episodes(
+        run.conn, [episode["episode_id"]], "2025-08-01T23:59:59Z"
+    )
+    assert before == [], "an episode was evaluated before its anchor record arrived"
+
+    # And on the day itself it does exist, awaiting payment.
+    after = engine_run.run_for_episodes(
+        run.conn, [episode["episode_id"]], "2025-09-02T23:59:59Z"
+    )
+    assert len(after) == 1
+    assert after[0].verdict_pair == ("A-02", "C-00")

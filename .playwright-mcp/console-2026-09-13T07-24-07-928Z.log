@@ -1,0 +1,26 @@
+[      34ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-373CG7ZK.js?v=eed8a5b8:21548
+[   29090ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[   29093ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/PENDING?cursor=2026-07-01T23%3A59%3A59Z&order_by=reopened_first&limit=200:0
+[   29095ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2026-07-01T23%3A59%3A59Z:0
+[   32369ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[   32369ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/CLOSED?cursor=2026-07-01T23%3A59%3A59Z&order_by=reopened_first&limit=200:0
+[   32370ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2026-07-01T23%3A59%3A59Z:0
+[   35453ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2026-07-01T23%3A59%3A59Z:0
+[   35455ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[   71921ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001?cursor=2026-07-01T23%3A59%3A59Z:0
+[   71922ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001/trace:0
+[   93097ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2026-07-01T23%3A59%3A59Z&order_by=age_desc&limit=200:0
+[   93097ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[  114287ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2025-12-30T23%3A59%3A59Z:0
+[  114290ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2025-12-30T23%3A59%3A59Z&order_by=age_desc&limit=200:0
+[  114296ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001/trace:0
+[  114296ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001?cursor=2025-12-30T23%3A59%3A59Z:0
+[  114297ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2025-12-30T23%3A59%3A59Z:0
+[  121072ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2025-09-12T23%3A59%3A59Z&order_by=age_desc&limit=200:0
+[  121074ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2025-09-12T23%3A59%3A59Z:0
+[  127238ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001/trace:0
+[  127240ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2026-07-01T23%3A59%3A59Z:0
+[  163936ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[  163936ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2026-07-01T23%3A59%3A59Z&order_by=age_desc&limit=200:0
+[  177352ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2026-07-01T23%3A59%3A59Z:0
+[  177352ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2026-07-01T23%3A59%3A59Z&order_by=age_desc&limit=200:0

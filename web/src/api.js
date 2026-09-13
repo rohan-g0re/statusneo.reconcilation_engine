@@ -1,0 +1,56 @@
+// One place that talks to the API, so no component builds a URL by hand.
+//
+// Every call takes a cursor. That is the architecture surfacing in the client: there is no
+// "replay mode" to enter, because asking what we believed on a given day is the same request
+// with a different parameter.
+
+async function get(path, params = {}) {
+  const query = new URLSearchParams(
+    Object.entries(params).filter(([, value]) => value !== null && value !== undefined),
+  )
+  const suffix = query.toString() ? `?${query}` : ''
+  const response = await fetch(`/api${path}${suffix}`)
+  if (!response.ok) {
+    let detail = response.statusText
+    try {
+      detail = (await response.json()).detail ?? detail
+    } catch {
+      /* a non-JSON error body is still worth surfacing as the status text */
+    }
+    throw new Error(`${response.status}: ${detail}`)
+  }
+  return response.json()
+}
+
+export const api = {
+  meta: () => get('/meta'),
+  overview: (cursor) => get('/overview', { cursor }),
+  queue: (disposition, cursor, orderBy, limit = 200) =>
+    get(`/queue/${disposition}`, { cursor, order_by: orderBy, limit }),
+  episode: (episodeId, cursor) => get(`/episode/${episodeId}`, { cursor }),
+  trace: (episodeId) => get(`/episode/${episodeId}/trace`),
+  feedExceptions: (cursor) => get('/feed-exceptions', { cursor }),
+  regenerate: async (profile) => {
+    const response = await fetch(`/api/regenerate?profile=${profile}`, { method: 'POST' })
+    if (!response.ok) throw new Error(`regenerate failed: ${response.status}`)
+    return response.json()
+  },
+}
+
+// Money is integer cents end to end, and it stays integer until the moment it is displayed.
+export function formatMoney(cents) {
+  if (cents === null || cents === undefined) return '—'
+  const negative = cents < 0
+  const whole = Math.trunc(Math.abs(cents) / 100)
+  const fraction = String(Math.abs(cents) % 100).padStart(2, '0')
+  const grouped = whole.toLocaleString('en-US')
+  return `${negative ? '−' : ''}$${grouped}.${fraction}`
+}
+
+export function cursorFromDate(isoDate) {
+  return `${isoDate}T23:59:59Z`
+}
+
+export function dateFromCursor(cursor) {
+  return cursor ? cursor.slice(0, 10) : ''
+}

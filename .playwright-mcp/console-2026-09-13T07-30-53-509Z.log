@@ -1,0 +1,9 @@
+[      31ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/chunk-373CG7ZK.js?v=eed8a5b8:21548
+[   12408ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2025-10-19T23%3A59%3A59Z:0
+[   26910ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2025-10-18T23%3A59%3A59Z:0
+[   26912ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/overview?cursor=2025-10-19T23%3A59%3A59Z:0
+[   26917ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/queue/EXCEPTION?cursor=2025-10-19T23%3A59%3A59Z&order_by=reopened_first&limit=200:0
+[   26917ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/feed-exceptions?cursor=2025-10-19T23%3A59%3A59Z:0
+[   73101ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/episode/E-000001/trace:0
+[  152642ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/regenerate?profile=demo:0
+[  184507ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/api/regenerate?profile=demo:0

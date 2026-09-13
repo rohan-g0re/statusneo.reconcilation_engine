@@ -1,0 +1,78 @@
+- generic [ref=f7e3]:
+  - banner [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=f7e6]
+      - generic [ref=f7e7]:
+        - text: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates. Profile
+        - code [ref=f7e8]: demo
+        - text: ", engine"
+        - code [ref=f7e9]: 1.0.0
+        - text: .
+    - generic [ref=f7e10]:
+      - generic [ref=f7e11]: 0 episodes · $0.00 total variance
+      - button "Regenerate demo" [disabled] [ref=f7e12]
+      - button "Regenerate full" [disabled] [ref=f7e13]
+  - generic [ref=f7e14]:
+    - heading "Replay cursor" [level=2] [ref=f7e15]
+    - paragraph [ref=f7e16]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+    - generic [ref=f7e17]:
+      - generic [ref=f7e18]:
+        - generic [ref=f7e19]: Cursor
+        - status [ref=f7e20]: 2026-07-01
+        - slider "Replay cursor" [ref=f7e21]: "365"
+        - button "Latest" [disabled] [ref=f7e22]
+      - generic [ref=f7e23]:
+        - generic [ref=f7e24]: 2025-07-01
+        - generic [ref=f7e25]: 2026-07-01
+  - generic [ref=f7e26]:
+    - heading "Queues at this cursor" [level=2] [ref=f7e27]
+    - paragraph [ref=f7e28]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=f7e29]:
+      - button "Exception 0 $0.00 variance" [pressed] [ref=f7e30] [cursor=pointer]:
+        - generic [ref=f7e31]:
+          - generic [aria-hidden] [ref=f7e32]: ▲
+          - text: Exception
+        - generic [ref=f7e33]: "0"
+        - generic [ref=f7e34]: $0.00 variance
+      - button "Pending 0 $0.00 variance" [ref=f7e35] [cursor=pointer]:
+        - generic [ref=f7e36]:
+          - generic [aria-hidden] [ref=f7e37]: ◷
+          - text: Pending
+        - generic [ref=f7e38]: "0"
+        - generic [ref=f7e39]: $0.00 variance
+      - button "Closed 0 $0.00 variance" [ref=f7e40] [cursor=pointer]:
+        - generic [ref=f7e41]:
+          - generic [aria-hidden] [ref=f7e42]: ✓
+          - text: Closed
+        - generic [ref=f7e43]: "0"
+        - generic [ref=f7e44]: $0.00 variance
+  - generic [ref=f7e45]:
+    - heading "EXCEPTION queue" [level=2] [ref=f7e46]
+    - generic [ref=f7e47]:
+      - generic [ref=f7e48]: Rank by
+      - combobox "Rank by" [ref=f7e49]:
+        - option "Reopened first, then oldest" [selected]
+        - option "Oldest first"
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=f7e50]: loading…
+    - table [ref=f7e52]:
+      - rowgroup [ref=f7e53]:
+        - row [ref=f7e54]:
+          - columnheader "Episode" [ref=f7e55]
+          - columnheader "Track" [ref=f7e56]
+          - columnheader "Service date" [ref=f7e57]
+          - columnheader "Age" [ref=f7e58]
+          - columnheader "Reimb." [ref=f7e59]
+          - columnheader "Rebate" [ref=f7e60]
+          - columnheader "Variance" [ref=f7e61]
+          - columnheader "Why" [ref=f7e62]
+      - rowgroup
+  - generic [ref=f7e63]:
+    - heading "Episode trace" [level=2] [ref=f7e64]
+    - paragraph [ref=f7e65]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - paragraph [ref=f7e66]: loading episode…
+  - generic [ref=f7e67]:
+    - heading "Feed-level exceptions" [level=2] [ref=f7e68]
+    - paragraph [ref=f7e69]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - paragraph [ref=f7e70]: loading…

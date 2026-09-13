@@ -1,0 +1,182 @@
+- generic [ref=f19e3]:
+  - banner [ref=f19e4]:
+    - generic [ref=f19e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=f19e6]
+      - generic [ref=f19e7]:
+        - text: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates. Profile
+        - code [ref=f19e8]: demo
+        - text: ", engine"
+        - code [ref=f19e9]: 1.0.0
+        - text: .
+    - generic [ref=f19e10]:
+      - generic [ref=f19e11]: 0 episodes · $0.00 total variance
+      - button "Regenerate demo" [ref=f19e12] [cursor=pointer]
+      - button "Regenerate full" [ref=f19e13] [cursor=pointer]
+  - generic [ref=f19e923]: "500: Internal Server Error"
+  - generic [ref=f19e14]:
+    - heading "Replay cursor" [level=2] [ref=f19e15]
+    - paragraph [ref=f19e16]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+    - generic [ref=f19e17]:
+      - generic [ref=f19e18]:
+        - generic [ref=f19e19]: Cursor
+        - status [ref=f19e20]: 2026-07-01
+        - slider "Replay cursor" [ref=f19e21]: "365"
+        - button "Latest" [disabled] [ref=f19e22]
+      - generic [ref=f19e23]:
+        - generic [ref=f19e24]: 2025-07-01
+        - generic [ref=f19e25]: 2026-07-01
+  - generic [ref=f19e26]:
+    - heading "Queues at this cursor" [level=2] [ref=f19e27]
+    - paragraph [ref=f19e28]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=f19e29]:
+      - button "Exception 0 $0.00 variance" [ref=f19e924] [cursor=pointer]:
+        - generic [ref=f19e31]:
+          - generic [aria-hidden] [ref=f19e32]: ▲
+          - text: Exception
+        - generic [ref=f19e33]: "0"
+        - generic [ref=f19e34]: $0.00 variance
+      - button "Pending 0 $0.00 variance" [ref=f19e925] [cursor=pointer]:
+        - generic [ref=f19e36]:
+          - generic [aria-hidden] [ref=f19e37]: ◷
+          - text: Pending
+        - generic [ref=f19e38]: "0"
+        - generic [ref=f19e39]: $0.00 variance
+      - button "Closed 0 $0.00 variance" [active] [pressed] [ref=f19e926] [cursor=pointer]:
+        - generic [ref=f19e41]:
+          - generic [aria-hidden] [ref=f19e42]: ✓
+          - text: Closed
+        - generic [ref=f19e43]: "0"
+        - generic [ref=f19e44]: $0.00 variance
+  - generic [ref=f19e45]:
+    - heading "CLOSED queue" [level=2] [ref=f19e927]
+    - generic [ref=f19e47]:
+      - generic [ref=f19e48]: Rank by
+      - combobox "Rank by" [ref=f19e49]:
+        - option "Reopened first, then oldest" [selected]
+        - option "Oldest first"
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=f19e50]: 0 episodes
+    - paragraph [ref=f19e928]: No episodes in this queue at this cursor. An empty queue is an answer, not a missing one.
+  - generic [ref=f19e63]:
+    - heading "Episode trace" [level=2] [ref=f19e64]
+    - paragraph [ref=f19e65]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - generic [ref=f19e688]:
+      - generic [ref=f19e689]:
+        - generic [ref=f19e690]:
+          - generic [ref=f19e691]: Episode
+          - generic [ref=f19e692]: E-000001
+        - generic [ref=f19e693]:
+          - generic [ref=f19e694]: Track
+          - generic [ref=f19e695]: Pharmacy benefit
+        - generic [ref=f19e696]:
+          - generic [ref=f19e697]: Service date
+          - generic [ref=f19e698]: 2025-07-08
+        - generic [ref=f19e699]:
+          - generic [ref=f19e700]: Age at cursor
+          - generic [ref=f19e701]: 358 days
+        - generic [ref=f19e702]:
+          - generic [ref=f19e703]: NDC
+          - generic [ref=f19e704]: "59676022530"
+        - generic [ref=f19e705]:
+          - generic [ref=f19e706]: Payer
+          - generic [ref=f19e707]: PBM_MERIDIAN
+        - generic [ref=f19e708]:
+          - generic [ref=f19e709]: Pharmacy NPI
+          - generic [ref=f19e710]: "1234567893"
+        - generic [ref=f19e711]:
+          - generic [ref=f19e712]: Rx / fill
+          - generic [ref=f19e713]: 7000252 / 00
+        - generic [ref=f19e714]:
+          - generic [ref=f19e715]: 340B flagged
+          - generic [ref=f19e716]: "no"
+      - heading "Verdict" [level=3] [ref=f19e717]
+      - generic [ref=f19e718]:
+        - generic [ref=f19e719]:
+          - generic [ref=f19e720]: Disposition
+          - generic [ref=f19e721]: ● EXCEPTION
+        - generic [ref=f19e722]:
+          - generic [ref=f19e723]: Reimbursement
+          - generic [ref=f19e724]: A-15
+        - generic [ref=f19e725]:
+          - generic [ref=f19e726]: Rebate
+          - generic [ref=f19e727]: C-00
+        - generic [ref=f19e728]:
+          - generic [ref=f19e729]: Evaluated at
+          - generic [ref=f19e730]: 2026-07-01T23:59:59Z
+      - table [ref=f19e732]:
+        - rowgroup [ref=f19e733]:
+          - row [ref=f19e734]:
+            - columnheader "Track" [ref=f19e735]
+            - columnheader "Expected" [ref=f19e736]
+            - columnheader "Received" [ref=f19e737]
+            - columnheader "Variance" [ref=f19e738]
+        - rowgroup [ref=f19e739]:
+          - row [ref=f19e740] [cursor=pointer]:
+            - cell "Reimbursement" [ref=f19e741]
+            - cell "$10,148.75" [ref=f19e742]
+            - cell "$3,328.79" [ref=f19e743]
+            - cell "$6,819.96" [ref=f19e744]
+          - row [ref=f19e745] [cursor=pointer]:
+            - cell "340B rebate" [ref=f19e746]
+            - cell "$0.00" [ref=f19e747]
+            - cell "$0.00" [ref=f19e748]
+            - cell "$0.00" [ref=f19e749]
+      - paragraph [ref=f19e750]:
+        - generic [ref=f19e751]: ADJUSTMENT_RESIDUAL
+      - heading "Lineage — every number traced to its source record" [level=3] [ref=f19e752]
+      - generic [ref=f19e753]:
+        - group [ref=f19e754]:
+          - generic "ADJUDICATION pbm_claim_events.jsonl:1 PBM-EVT-000023 arrived 2025-07-08T18:45:57Z" [ref=f19e755] [cursor=pointer]:
+            - generic [ref=f19e756]: ADJUDICATION
+            - generic [ref=f19e757]: pbm_claim_events.jsonl:1
+            - generic [ref=f19e758]: PBM-EVT-000023
+            - generic [ref=f19e759]: arrived 2025-07-08T18:45:57Z
+          - generic [ref=f19e809]: "{\"record_id\":\"PBM-EVT-000023\",\"source_system\":\"PBM_ADJUDICATION\",\"transaction_code\":\"B1\",\"received_at\":\"2025-07-08T18:45:57Z\",\"service_provider_id\":\"1234567893\",\"service_provider_id_qualifier\":\"01\",\"prescription_ref_number\":\"7000252\",\"fill_number\":\"00\",\"date_of_service\":\"20250708\",\"product_service_id\":\"59676022530\",\"product_service_id_qualifier\":\"03\",\"quantity_dispensed\":\"090000\",\"days_supply\":\"090\",\"prescriber_id\":\"1720044662\",\"prescriber_id_qualifier\":\"01\",\"bin\":\"604211\",\"pcn\":\"SPECRX\",\"group_id\":\"RXGRP0042\",\"cardholder_id\":\"W571326428\",\"person_code\":\"01\",\"response_status\":\"P\",\"authorization_number\":\"AUTH1534940X\",\"ingredient_cost_paid\":\"10197.00\",\"dispensing_fee_paid\":\"1.75\",\"patient_pay_amount\":\"50.00\",\"total_amount_paid\":\"10148.75\",\"reject_codes\":[]}"
+        - group [ref=f19e760]:
+          - generic "REMITTANCE_CLAIM_LINE pbm_remittance_835.jsonl:1 PBM-835-000018 arrived 2025-07-25T06:00:00Z" [ref=f19e761] [cursor=pointer]:
+            - generic [ref=f19e762]: REMITTANCE_CLAIM_LINE
+            - generic [ref=f19e763]: pbm_remittance_835.jsonl:1
+            - generic [ref=f19e764]: PBM-835-000018
+            - generic [ref=f19e765]: arrived 2025-07-25T06:00:00Z
+      - heading "Cash allocated to this episode" [level=3] [ref=f19e766]
+      - table [ref=f19e768]:
+        - rowgroup [ref=f19e769]:
+          - row [ref=f19e770]:
+            - columnheader "Amount" [ref=f19e771]
+            - columnheader "Matched on" [ref=f19e772]
+            - columnheader "Caused by a record received" [ref=f19e773]
+        - rowgroup [ref=f19e774]:
+          - row [ref=f19e775] [cursor=pointer]:
+            - cell "$3,328.79" [ref=f19e776]
+            - cell "TRN02" [ref=f19e777]
+            - cell "2025-07-25T06:00:00Z" [ref=f19e779]
+      - heading "Audit trail — what we believed, and when we stopped" [level=3] [ref=f19e780]
+      - list [ref=f19e781]:
+        - listitem [ref=f19e782]:
+          - generic [ref=f19e783]: 2026-07-01T23:59:59Z
+          - generic [ref=f19e784]: EXCEPTION · A-15 C-00
+      - heading "Crosswalk — the keys that resolved to this episode" [level=3] [ref=f19e785]
+      - table [ref=f19e787]:
+        - rowgroup [ref=f19e788]:
+          - row [ref=f19e789]:
+            - columnheader "Key type" [ref=f19e790]
+            - columnheader "Key value" [ref=f19e791]
+            - columnheader "First seen" [ref=f19e792]
+        - rowgroup [ref=f19e793]:
+          - row [ref=f19e794] [cursor=pointer]:
+            - cell "NCPDP_CLAIM" [ref=f19e795]
+            - cell "1234567893|7000252|00|2025-07-08" [ref=f19e797]
+            - cell "2025-07-08T18:45:57Z" [ref=f19e798]
+          - row [ref=f19e799] [cursor=pointer]:
+            - cell "PBM_AUTH" [ref=f19e800]
+            - cell "AUTH1534940X" [ref=f19e802]
+            - cell "2025-07-08T18:45:57Z" [ref=f19e803]
+          - row [ref=f19e804] [cursor=pointer]:
+            - cell "PAYER_ICN" [ref=f19e805]
+            - cell "20260613165554" [ref=f19e807]
+            - cell "2025-07-25T06:00:00Z" [ref=f19e808]
+  - generic [ref=f19e67]:
+    - heading "Feed-level exceptions" [level=2] [ref=f19e68]
+    - paragraph [ref=f19e69]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - paragraph [ref=f19e929]: loading…

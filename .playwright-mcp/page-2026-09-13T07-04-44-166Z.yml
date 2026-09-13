@@ -1,0 +1,650 @@
+- generic [ref=f1e3]:
+  - banner [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - heading "Post-Claim Pharmacy Financial Reconciliation" [level=1] [ref=f1e6]
+      - generic [ref=f1e7]:
+        - text: Deterministic layer. Every figure below was computed in Python and is shown verbatim — nothing on this screen calculates. Profile
+        - code [ref=f1e8]: demo
+        - text: ", engine"
+        - code [ref=f1e9]: 1.0.0
+        - text: .
+    - generic [ref=f1e10]:
+      - generic [ref=f1e11]: 60 episodes · $515,956.29 total variance
+      - button "Regenerate demo" [ref=f1e12] [cursor=pointer]
+      - button "Regenerate full" [ref=f1e13] [cursor=pointer]
+  - generic [ref=f1e674]: "500: Internal Server Error"
+  - generic [ref=f1e14]:
+    - heading "Replay cursor" [level=2] [ref=f1e15]
+    - paragraph [ref=f1e16]: The engine processes records whose arrival time is at or before this cursor. Moving it backwards reproduces the answer as it stood then — the same code path in both directions, which is why the audit question needs no separate feature.
+    - generic [ref=f1e17]:
+      - generic [ref=f1e18]:
+        - generic [ref=f1e19]: Cursor
+        - status [ref=f1e20]: 2026-07-01
+        - slider "Replay cursor" [ref=f1e21]: "365"
+        - button "Latest" [disabled] [ref=f1e22]
+      - generic [ref=f1e23]:
+        - generic [ref=f1e24]: 2025-07-01
+        - generic [ref=f1e25]: 2026-07-01
+  - generic [ref=f1e26]:
+    - heading "Queues at this cursor" [level=2] [ref=f1e27]
+    - paragraph [ref=f1e28]: Three dispositions, because “what do I do with this?” has three answers. A queue is a query over the verdict log, not a table things are moved into — which is why it can be asked at any cursor and why deleting the log loses nothing.
+    - group "Episodes by disposition" [ref=f1e29]:
+      - button "Exception 34 $424,387.21 variance" [ref=f1e71] [cursor=pointer]:
+        - generic [ref=f1e31]:
+          - generic [aria-hidden] [ref=f1e32]: ▲
+          - text: Exception
+        - generic [ref=f1e33]: "34"
+        - generic [ref=f1e34]: $424,387.21 variance
+      - button "Pending 11 $76,901.18 variance" [active] [pressed] [ref=f1e72] [cursor=pointer]:
+        - generic [ref=f1e36]:
+          - generic [aria-hidden] [ref=f1e37]: ◷
+          - text: Pending
+        - generic [ref=f1e38]: "11"
+        - generic [ref=f1e39]: $76,901.18 variance
+      - button "Closed 15 $14,667.90 variance" [ref=f1e73] [cursor=pointer]:
+        - generic [ref=f1e41]:
+          - generic [aria-hidden] [ref=f1e42]: ✓
+          - text: Closed
+        - generic [ref=f1e43]: "15"
+        - generic [ref=f1e44]: $14,667.90 variance
+  - generic [ref=f1e45]:
+    - heading "PENDING queue" [level=2] [ref=f1e675]
+    - generic [ref=f1e47]:
+      - generic [ref=f1e48]: Rank by
+      - combobox "Rank by" [ref=f1e49]:
+        - option "Reopened first, then oldest" [selected]
+        - option "Oldest first"
+        - option "Largest variance first"
+        - option "Episode id"
+      - generic [ref=f1e50]: 34 episodes
+    - table [ref=f1e52]:
+      - rowgroup [ref=f1e53]:
+        - row [ref=f1e54]:
+          - columnheader "Episode" [ref=f1e55]
+          - columnheader "Track" [ref=f1e56]
+          - columnheader "Service date" [ref=f1e57]
+          - columnheader "Age" [ref=f1e58]
+          - columnheader "Reimb." [ref=f1e59]
+          - columnheader "Rebate" [ref=f1e60]
+          - columnheader "Variance" [ref=f1e61]
+          - columnheader "Why" [ref=f1e62]
+      - rowgroup [ref=f1e74]:
+        - row [ref=f1e75] [cursor=pointer]:
+          - cell "E-000001" [ref=f1e76]
+          - cell "Pharmacy" [ref=f1e77]
+          - cell "2025-07-08" [ref=f1e78]
+          - cell "358d" [ref=f1e79]
+          - cell "A-15" [ref=f1e80]
+          - cell "C-00" [ref=f1e81]
+          - cell "$6,819.96" [ref=f1e82]
+          - cell "ADJUSTMENT_RESIDUAL" [ref=f1e83]
+        - row [ref=f1e85] [cursor=pointer]:
+          - cell "E-000006" [ref=f1e86]
+          - cell "Medical" [ref=f1e87]
+          - cell "2025-07-30" [ref=f1e88]
+          - cell "336d" [ref=f1e89]
+          - cell "B-10" [ref=f1e90]
+          - cell "C-08" [ref=f1e91]
+          - cell "$84,240.00" [ref=f1e92]
+          - cell "DENIED DENIED_WITH_REBATE_PAID" [ref=f1e93]:
+            - generic [ref=f1e94]: DENIED
+            - generic [ref=f1e95]: DENIED_WITH_REBATE_PAID
+        - row [ref=f1e96] [cursor=pointer]:
+          - cell "E-000007" [ref=f1e97]
+          - cell "Pharmacy" [ref=f1e98]
+          - cell "2025-08-11" [ref=f1e99]
+          - cell "324d" [ref=f1e100]
+          - cell "A-04" [ref=f1e101]
+          - cell "C-09" [ref=f1e102]
+          - cell "$1,929.00" [ref=f1e103]
+          - cell "REBATE_NO_CASH" [ref=f1e104]
+        - row [ref=f1e106] [cursor=pointer]:
+          - cell "E-000010" [ref=f1e107]
+          - cell "Pharmacy" [ref=f1e108]
+          - cell "2025-08-18" [ref=f1e109]
+          - cell "317d" [ref=f1e110]
+          - cell "A-06" [ref=f1e111]
+          - cell "C-00" [ref=f1e112]
+          - cell "$0.00" [ref=f1e113]
+          - cell "SETTLEMENT_MISSING" [ref=f1e114]
+        - row [ref=f1e116] [cursor=pointer]:
+          - cell "E-000011" [ref=f1e117]
+          - cell "Pharmacy" [ref=f1e118]
+          - cell "2025-08-21" [ref=f1e119]
+          - cell "314d" [ref=f1e120]
+          - cell "A-16" [ref=f1e121]
+          - cell "C-08" [ref=f1e122]
+          - cell "$0.00" [ref=f1e123]
+          - cell "REBATE_ON_UNDISPENSED_CLAIM" [ref=f1e124]
+        - row [ref=f1e126] [cursor=pointer]:
+          - cell "E-000012" [ref=f1e127]
+          - cell "Pharmacy" [ref=f1e128]
+          - cell "2025-08-23" [ref=f1e129]
+          - cell "312d" [ref=f1e130]
+          - cell "A-06" [ref=f1e131]
+          - cell "C-08" [ref=f1e132]
+          - cell "$0.00" [ref=f1e133]
+          - cell "SETTLEMENT_MISSING" [ref=f1e134]
+        - row [ref=f1e136] [cursor=pointer]:
+          - cell "E-000013" [ref=f1e137]
+          - cell "Medical" [ref=f1e138]
+          - cell "2025-08-27" [ref=f1e139]
+          - cell "308d" [ref=f1e140]
+          - cell "B-01" [ref=f1e141]
+          - cell "C-08" [ref=f1e142]
+          - cell "$3,060.00" [ref=f1e143]
+          - cell "CLEARINGHOUSE_REJECTED DENIED_WITH_REBATE_PAID" [ref=f1e144]:
+            - generic [ref=f1e145]: CLEARINGHOUSE_REJECTED
+            - generic [ref=f1e146]: DENIED_WITH_REBATE_PAID
+        - row [ref=f1e147] [cursor=pointer]:
+          - cell "E-000014" [ref=f1e148]
+          - cell "Pharmacy" [ref=f1e149]
+          - cell "2025-08-29" [ref=f1e150]
+          - cell "306d" [ref=f1e151]
+          - cell "A-13" [ref=f1e152]
+          - cell "C-00" [ref=f1e153]
+          - cell "$6,536.77" [ref=f1e154]
+          - cell "RECOUPMENT_UNTRACEABLE INSUFFICIENT_DATA" [ref=f1e155]:
+            - generic [ref=f1e156]: RECOUPMENT_UNTRACEABLE
+            - generic [ref=f1e157]: INSUFFICIENT_DATA
+        - row [ref=f1e158] [cursor=pointer]:
+          - cell "E-000016" [ref=f1e159]
+          - cell "Pharmacy" [ref=f1e160]
+          - cell "2025-09-07" [ref=f1e161]
+          - cell "297d" [ref=f1e162]
+          - cell "A-11" [ref=f1e163]
+          - cell "C-08" [ref=f1e164]
+          - cell "−$8,183.35" [ref=f1e165]
+          - cell "REVERSAL_CASH_NOT_RETURNED REBATE_ON_UNDISPENSED_CLAIM" [ref=f1e166]:
+            - generic [ref=f1e167]: REVERSAL_CASH_NOT_RETURNED
+            - generic [ref=f1e168]: REBATE_ON_UNDISPENSED_CLAIM
+        - row [ref=f1e169] [cursor=pointer]:
+          - cell "E-000022" [ref=f1e170]
+          - cell "Medical" [ref=f1e171]
+          - cell "2025-09-07" [ref=f1e172]
+          - cell "297d" [ref=f1e173]
+          - cell "B-04" [ref=f1e174]
+          - cell "C-13" [ref=f1e175]
+          - cell "$0.00" [ref=f1e176]
+          - cell "REBATE_CLAWED_BACK" [ref=f1e177]
+        - row [ref=f1e179] [cursor=pointer]:
+          - cell "E-000018" [ref=f1e180]
+          - cell "Pharmacy" [ref=f1e181]
+          - cell "2025-09-09" [ref=f1e182]
+          - cell "295d" [ref=f1e183]
+          - cell "A-04" [ref=f1e184]
+          - cell "C-14" [ref=f1e185]
+          - cell "−$6,219.00" [ref=f1e186]
+          - cell "DUPLICATE_REBATE" [ref=f1e187]
+        - row [ref=f1e189] [cursor=pointer]:
+          - cell "E-000019" [ref=f1e190]
+          - cell "Pharmacy" [ref=f1e191]
+          - cell "2025-09-10" [ref=f1e192]
+          - cell "294d" [ref=f1e193]
+          - cell "A-04" [ref=f1e194]
+          - cell "C-13" [ref=f1e195]
+          - cell "$0.00" [ref=f1e196]
+          - cell "REBATE_CLAWED_BACK" [ref=f1e197]
+        - row [ref=f1e199] [cursor=pointer]:
+          - cell "E-000020" [ref=f1e200]
+          - cell "Pharmacy" [ref=f1e201]
+          - cell "2025-09-12" [ref=f1e202]
+          - cell "292d" [ref=f1e203]
+          - cell "A-07" [ref=f1e204]
+          - cell "C-00" [ref=f1e205]
+          - cell "$603.14" [ref=f1e206]
+          - cell "UNDERPAID" [ref=f1e207]
+        - row [ref=f1e209] [cursor=pointer]:
+          - cell "E-000027" [ref=f1e210]
+          - cell "Pharmacy" [ref=f1e211]
+          - cell "2025-09-13" [ref=f1e212]
+          - cell "291d" [ref=f1e213]
+          - cell "A-17" [ref=f1e214]
+          - cell "C-00" [ref=f1e215]
+          - cell "−$6,638.63" [ref=f1e216]
+          - cell "DUPLICATE_PAYMENT" [ref=f1e217]
+        - row [ref=f1e219] [cursor=pointer]:
+          - cell "E-000023" [ref=f1e220]
+          - cell "Medical" [ref=f1e221]
+          - cell "2025-09-26" [ref=f1e222]
+          - cell "278d" [ref=f1e223]
+          - cell "B-13" [ref=f1e224]
+          - cell "C-00" [ref=f1e225]
+          - cell "$9,562.50" [ref=f1e226]
+          - cell "APPEAL_LOST DENIED" [ref=f1e227]:
+            - generic [ref=f1e228]: APPEAL_LOST
+            - generic [ref=f1e229]: DENIED
+        - row [ref=f1e230] [cursor=pointer]:
+          - cell "E-000026" [ref=f1e231]
+          - cell "Pharmacy" [ref=f1e232]
+          - cell "2025-10-18" [ref=f1e233]
+          - cell "256d" [ref=f1e234]
+          - cell "A-09" [ref=f1e235]
+          - cell "C-00" [ref=f1e236]
+          - cell "−$1,511.94" [ref=f1e237]
+          - cell "OVERPAID" [ref=f1e238]
+        - row [ref=f1e240] [cursor=pointer]:
+          - cell "E-000030" [ref=f1e241]
+          - cell "Medical" [ref=f1e242]
+          - cell "2025-10-26" [ref=f1e243]
+          - cell "248d" [ref=f1e244]
+          - cell "B-15" [ref=f1e245]
+          - cell "C-00" [ref=f1e246]
+          - cell "$0.00" [ref=f1e247]
+          - cell "CASH_MISMATCH" [ref=f1e248]
+        - row [ref=f1e250] [cursor=pointer]:
+          - cell "E-000031" [ref=f1e251]
+          - cell "Pharmacy" [ref=f1e252]
+          - cell "2025-10-27" [ref=f1e253]
+          - cell "247d" [ref=f1e254]
+          - cell "A-11" [ref=f1e255]
+          - cell "C-00" [ref=f1e256]
+          - cell "−$3,948.00" [ref=f1e257]
+          - cell "REVERSAL_CASH_NOT_RETURNED" [ref=f1e258]
+        - row [ref=f1e260] [cursor=pointer]:
+          - cell "E-000032" [ref=f1e261]
+          - cell "Pharmacy" [ref=f1e262]
+          - cell "2025-10-28" [ref=f1e263]
+          - cell "246d" [ref=f1e264]
+          - cell "A-05" [ref=f1e265]
+          - cell "C-00" [ref=f1e266]
+          - cell "$37,373.75" [ref=f1e267]
+          - cell "NO_CASH" [ref=f1e268]
+        - row [ref=f1e270] [cursor=pointer]:
+          - cell "E-000033" [ref=f1e271]
+          - cell "Pharmacy" [ref=f1e272]
+          - cell "2025-10-29" [ref=f1e273]
+          - cell "245d" [ref=f1e274]
+          - cell "A-12" [ref=f1e275]
+          - cell "C-08" [ref=f1e276]
+          - cell "$1,826.78" [ref=f1e277]
+          - cell "QUALIFICATION_UNDERMINED_BY_RECOUPMENT" [ref=f1e278]
+        - row [ref=f1e280] [cursor=pointer]:
+          - cell "E-000040" [ref=f1e281]
+          - cell "Pharmacy" [ref=f1e282]
+          - cell "2025-11-10" [ref=f1e283]
+          - cell "233d" [ref=f1e284]
+          - cell "A-05" [ref=f1e285]
+          - cell "C-09" [ref=f1e286]
+          - cell "$24,334.91" [ref=f1e287]
+          - cell "NO_CASH REBATE_NO_CASH CORRELATED_CASH_GAP INSUFFICIENT_DATA" [ref=f1e288]:
+            - generic [ref=f1e289]: NO_CASH
+            - generic [ref=f1e290]: REBATE_NO_CASH
+            - generic [ref=f1e291]: CORRELATED_CASH_GAP
+            - generic [ref=f1e292]: INSUFFICIENT_DATA
+        - row [ref=f1e293] [cursor=pointer]:
+          - cell "E-000036" [ref=f1e294]
+          - cell "Pharmacy" [ref=f1e295]
+          - cell "2025-11-17" [ref=f1e296]
+          - cell "226d" [ref=f1e297]
+          - cell "A-04" [ref=f1e298]
+          - cell "C-10" [ref=f1e299]
+          - cell "$1,064.14" [ref=f1e300]
+          - cell "REBATE_UNDERPAID" [ref=f1e301]
+        - row [ref=f1e303] [cursor=pointer]:
+          - cell "E-000048" [ref=f1e304]
+          - cell "Medical" [ref=f1e305]
+          - cell "2025-11-25" [ref=f1e306]
+          - cell "218d" [ref=f1e307]
+          - cell "B-01" [ref=f1e308]
+          - cell "C-00" [ref=f1e309]
+          - cell "$11,980.80" [ref=f1e310]
+          - cell "CLEARINGHOUSE_REJECTED" [ref=f1e311]
+        - row [ref=f1e313] [cursor=pointer]:
+          - cell "E-000037" [ref=f1e314]
+          - cell "Medical" [ref=f1e315]
+          - cell "2025-11-27" [ref=f1e316]
+          - cell "216d" [ref=f1e317]
+          - cell "B-13" [ref=f1e318]
+          - cell "C-07" [ref=f1e319]
+          - cell "$19,125.00" [ref=f1e320]
+          - cell "APPEAL_LOST DENIED REBATE_REJECTED TOTAL_LOSS" [ref=f1e321]:
+            - generic [ref=f1e322]: APPEAL_LOST
+            - generic [ref=f1e323]: DENIED
+            - generic [ref=f1e324]: REBATE_REJECTED
+            - generic [ref=f1e325]: TOTAL_LOSS
+        - row [ref=f1e326] [cursor=pointer]:
+          - cell "E-000038" [ref=f1e327]
+          - cell "Pharmacy" [ref=f1e328]
+          - cell "2025-11-30" [ref=f1e329]
+          - cell "213d" [ref=f1e330]
+          - cell "A-08" [ref=f1e331]
+          - cell "C-00" [ref=f1e332]
+          - cell "$21,474.24" [ref=f1e333]
+          - cell "UNDERPAID NO_CASH" [ref=f1e334]:
+            - generic [ref=f1e335]: UNDERPAID
+            - generic [ref=f1e336]: NO_CASH
+        - row [ref=f1e337] [cursor=pointer]:
+          - cell "E-000041" [ref=f1e338]
+          - cell "Pharmacy" [ref=f1e339]
+          - cell "2025-12-09" [ref=f1e340]
+          - cell "204d" [ref=f1e341]
+          - cell "A-01" [ref=f1e342]
+          - cell "C-07" [ref=f1e343]
+          - cell "$0.00" [ref=f1e344]
+          - cell "REJECTED_AT_POS REBATE_REJECTED TOTAL_LOSS" [ref=f1e345]:
+            - generic [ref=f1e346]: REJECTED_AT_POS
+            - generic [ref=f1e347]: REBATE_REJECTED
+            - generic [ref=f1e348]: TOTAL_LOSS
+        - row [ref=f1e349] [cursor=pointer]:
+          - cell "E-000045" [ref=f1e350]
+          - cell "Medical" [ref=f1e351]
+          - cell "2025-12-17" [ref=f1e352]
+          - cell "196d" [ref=f1e353]
+          - cell "B-12" [ref=f1e354]
+          - cell "C-13" [ref=f1e355]
+          - cell "$0.00" [ref=f1e356]
+          - cell "REBATE_CLAWED_BACK REBATE_RE_REQUEST_AVAILABLE" [ref=f1e357]:
+            - generic [ref=f1e358]: REBATE_CLAWED_BACK
+            - generic [ref=f1e359]: REBATE_RE_REQUEST_AVAILABLE
+        - row [ref=f1e360] [cursor=pointer]:
+          - cell "E-000047" [ref=f1e361]
+          - cell "Medical" [ref=f1e362]
+          - cell "2025-12-19" [ref=f1e363]
+          - cell "194d" [ref=f1e364]
+          - cell "B-16" [ref=f1e365]
+          - cell "C-00" [ref=f1e366]
+          - cell "−$32,436.00" [ref=f1e367]
+          - cell "DUPLICATE_REMITTANCE" [ref=f1e368]
+        - row [ref=f1e370] [cursor=pointer]:
+          - cell "E-000049" [ref=f1e371]
+          - cell "Medical" [ref=f1e372]
+          - cell "2025-12-29" [ref=f1e373]
+          - cell "184d" [ref=f1e374]
+          - cell "B-05" [ref=f1e375]
+          - cell "C-00" [ref=f1e376]
+          - cell "$12,240.00" [ref=f1e377]
+          - cell "NO_CASH" [ref=f1e378]
+        - row [ref=f1e380] [cursor=pointer]:
+          - cell "E-000052" [ref=f1e381]
+          - cell "Medical" [ref=f1e382]
+          - cell "2026-01-06" [ref=f1e383]
+          - cell "176d" [ref=f1e384]
+          - cell "B-10" [ref=f1e385]
+          - cell "C-00" [ref=f1e386]
+          - cell "$84,240.00" [ref=f1e387]
+          - cell "DENIED" [ref=f1e388]
+        - row [ref=f1e390] [cursor=pointer]:
+          - cell "E-000053" [ref=f1e391]
+          - cell "Medical" [ref=f1e392]
+          - cell "2026-01-08" [ref=f1e393]
+          - cell "174d" [ref=f1e394]
+          - cell "B-06" [ref=f1e395]
+          - cell "C-00" [ref=f1e396]
+          - cell "$23,616.00" [ref=f1e397]
+          - cell "UNDERPAID" [ref=f1e398]
+        - row [ref=f1e400] [cursor=pointer]:
+          - cell "E-000060" [ref=f1e401]
+          - cell "Pharmacy" [ref=f1e402]
+          - cell "2026-01-19" [ref=f1e403]
+          - cell "163d" [ref=f1e404]
+          - cell "A-01" [ref=f1e405]
+          - cell "C-08" [ref=f1e406]
+          - cell "$0.00" [ref=f1e407]
+          - cell "REJECTED_AT_POS DENIED_WITH_REBATE_PAID REBATE_ON_UNDISPENSED_CLAIM" [ref=f1e408]:
+            - generic [ref=f1e409]: REJECTED_AT_POS
+            - generic [ref=f1e410]: DENIED_WITH_REBATE_PAID
+            - generic [ref=f1e411]: REBATE_ON_UNDISPENSED_CLAIM
+        - row [ref=f1e412] [cursor=pointer]:
+          - cell "E-000057" [ref=f1e413]
+          - cell "Medical" [ref=f1e414]
+          - cell "2026-01-25" [ref=f1e415]
+          - cell "157d" [ref=f1e416]
+          - cell "B-09" [ref=f1e417]
+          - cell "C-00" [ref=f1e418]
+          - cell "$3,442.50" [ref=f1e419]
+          - cell "APPEAL_LOST" [ref=f1e420]
+        - row [ref=f1e422] [cursor=pointer]:
+          - cell "E-000059" [ref=f1e423]
+          - cell "Medical" [ref=f1e424]
+          - cell "2026-01-28" [ref=f1e425]
+          - cell "154d" [ref=f1e426]
+          - cell "B-14" [ref=f1e427]
+          - cell "C-00" [ref=f1e428]
+          - cell "$11,980.80" [ref=f1e429]
+          - cell "APPEAL_WON_NO_CASH" [ref=f1e430]
+  - generic [ref=f1e63]:
+    - heading "Episode trace" [level=2] [ref=f1e64]
+    - paragraph [ref=f1e65]: Lineage runs downward — every number points back at the raw source row that produced it. The audit trail runs across time. Both are kept, because they answer different questions.
+    - paragraph [ref=f1e66]: Select an episode to trace it end to end.
+  - generic [ref=f1e67]:
+    - heading "Feed-level exceptions" [level=2] [ref=f1e68]
+    - paragraph [ref=f1e69]: Properties of ingestion rather than of any claim, which is why they are not multiplied into the episode state space. Each one is a query, not a stored flag.
+    - generic [ref=f1e432]:
+      - group [ref=f1e433]:
+        - generic "D-3 Orphan deposits 4 rows" [ref=f1e434] [cursor=pointer]:
+          - generic [ref=f1e435]: D-3
+          - strong [ref=f1e436]: Orphan deposits
+          - generic [ref=f1e437]: 4 rows
+        - generic [ref=f1e438]:
+          - paragraph [ref=f1e439]: Cash received with no linkable claim, rebate or remittance. Not a windfall — cash held without provenance is audit exposure, and it may be a crosswalk failure rather than genuinely unattributable money.
+          - table [ref=f1e441]:
+            - rowgroup [ref=f1e442]:
+              - row [ref=f1e443]:
+                - columnheader "Amount" [ref=f1e444]
+                - columnheader "ACH trace" [ref=f1e445]
+                - columnheader "Received" [ref=f1e446]
+            - rowgroup [ref=f1e447]:
+              - row [ref=f1e448] [cursor=pointer]:
+                - cell "−$8,437.50" [ref=f1e449]
+                - cell "111000020000026" [ref=f1e450]
+                - cell "2025-10-22T17:51:00Z" [ref=f1e451]
+              - row [ref=f1e452] [cursor=pointer]:
+                - cell "$4,472.18" [ref=f1e453]
+                - cell "044000030000031" [ref=f1e454]
+                - cell "2025-11-07T18:16:00Z" [ref=f1e455]
+              - row [ref=f1e456] [cursor=pointer]:
+                - cell "$2,128.01" [ref=f1e457]
+                - cell "021000020000043" [ref=f1e458]
+                - cell "2025-12-23T18:20:00Z" [ref=f1e459]
+              - row [ref=f1e460] [cursor=pointer]:
+                - cell "−$19,875.00" [ref=f1e461]
+                - cell "026000010000057" [ref=f1e462]
+                - cell "2026-02-02T17:47:00Z" [ref=f1e463]
+      - group [ref=f1e464]:
+        - generic "D-7 Allocation residuals 7 rows" [ref=f1e465] [cursor=pointer]:
+          - generic [ref=f1e466]: D-7
+          - strong [ref=f1e467]: Allocation residuals
+          - generic [ref=f1e468]: 7 rows
+        - generic [ref=f1e469]:
+          - paragraph [ref=f1e470]: A single deposit covered N claims and the allocated amounts did not sum to it. The deposit is not wrong; the allocation is incomplete, and the residual is tracked rather than absorbed.
+          - table [ref=f1e472]:
+            - rowgroup [ref=f1e473]:
+              - row [ref=f1e474]:
+                - columnheader "Amount" [ref=f1e475]
+                - columnheader "Bank row" [ref=f1e476]
+                - columnheader "Caused by" [ref=f1e477]
+            - rowgroup [ref=f1e478]:
+              - row [ref=f1e479] [cursor=pointer]:
+                - cell "−$218.62" [ref=f1e480]
+                - cell "73" [ref=f1e481]
+                - cell "2025-09-13T06:00:00Z" [ref=f1e482]
+              - row [ref=f1e483] [cursor=pointer]:
+                - cell "$6,638.63" [ref=f1e484]
+                - cell "119" [ref=f1e485]
+                - cell "2025-10-10T06:00:00Z" [ref=f1e486]
+              - row [ref=f1e487] [cursor=pointer]:
+                - cell "−$6,638.63" [ref=f1e488]
+                - cell "119" [ref=f1e489]
+                - cell "2025-10-23T14:21:13Z" [ref=f1e490]
+              - row [ref=f1e491] [cursor=pointer]:
+                - cell "$1,929.00" [ref=f1e492]
+                - cell "303" [ref=f1e493]
+                - cell "2026-01-21T08:00:00Z" [ref=f1e494]
+              - row [ref=f1e495] [cursor=pointer]:
+                - cell "$20,844.00" [ref=f1e496]
+                - cell "343" [ref=f1e497]
+                - cell "2026-02-13T17:49:00Z" [ref=f1e498]
+              - row [ref=f1e499] [cursor=pointer]:
+                - cell "−$295.21" [ref=f1e500]
+                - cell "358" [ref=f1e501]
+                - cell "2026-02-21T06:00:00Z" [ref=f1e502]
+              - row [ref=f1e503] [cursor=pointer]:
+                - cell "−$20,844.00" [ref=f1e504]
+                - cell "343" [ref=f1e505]
+                - cell "2026-02-22T15:54:38Z" [ref=f1e506]
+      - group [ref=f1e507]:
+        - generic "D-6 Parked records 9 rows" [ref=f1e508] [cursor=pointer]:
+          - generic [ref=f1e509]: D-6
+          - strong [ref=f1e510]: Parked records
+          - generic [ref=f1e511]: 9 rows
+        - generic [ref=f1e512]:
+          - paragraph [ref=f1e513]: A document whose keys resolved to nothing, held rather than discarded, and re-checked on every later arrival. A crosswalk miss is not a missing claim — the mapping failed, which is a different fix with a different owner.
+          - table [ref=f1e515]:
+            - rowgroup [ref=f1e516]:
+              - row [ref=f1e517]:
+                - columnheader "Record" [ref=f1e518]
+                - columnheader "Why" [ref=f1e519]
+                - columnheader "Received" [ref=f1e520]
+            - rowgroup [ref=f1e521]:
+              - row [ref=f1e522] [cursor=pointer]:
+                - cell "PROVIDER_LEVEL_ADJUSTMENT" [ref=f1e523]
+                - cell "NO_KEYS_PRESENT" [ref=f1e524]
+                - cell "2025-09-13T06:00:00Z" [ref=f1e525]
+              - row [ref=f1e526] [cursor=pointer]:
+                - cell "BANK_TRANSACTION" [ref=f1e527]
+                - cell "NO_KEYS_PRESENT" [ref=f1e528]
+                - cell "2025-10-22T17:51:00Z" [ref=f1e529]
+              - row [ref=f1e530] [cursor=pointer]:
+                - cell "BANK_TRANSACTION" [ref=f1e531]
+                - cell "NO_KEYS_PRESENT" [ref=f1e532]
+                - cell "2025-11-07T18:16:00Z" [ref=f1e533]
+              - row [ref=f1e534] [cursor=pointer]:
+                - cell "BANK_TRANSACTION" [ref=f1e535]
+                - cell "NO_KEYS_PRESENT" [ref=f1e536]
+                - cell "2025-12-23T18:20:00Z" [ref=f1e537]
+              - row [ref=f1e538] [cursor=pointer]:
+                - cell "TPA_REBATE_REQUEST" [ref=f1e539]
+                - cell "NO_KEY_MATCH" [ref=f1e540]
+                - cell "2026-01-05T12:00:00Z" [ref=f1e541]
+              - row [ref=f1e542] [cursor=pointer]:
+                - cell "REBATE_DISPENSE_LINE" [ref=f1e543]
+                - cell "NO_KEY_MATCH" [ref=f1e544]
+                - cell "2026-01-21T08:00:00Z" [ref=f1e545]
+              - row [ref=f1e546] [cursor=pointer]:
+                - cell "TPA_QUALIFICATION" [ref=f1e547]
+                - cell "NO_KEY_MATCH" [ref=f1e548]
+                - cell "2026-01-24T14:00:00Z" [ref=f1e549]
+              - row [ref=f1e550] [cursor=pointer]:
+                - cell "BANK_TRANSACTION" [ref=f1e551]
+                - cell "NO_KEYS_PRESENT" [ref=f1e552]
+                - cell "2026-02-02T17:47:00Z" [ref=f1e553]
+              - row [ref=f1e554] [cursor=pointer]:
+                - cell "PROVIDER_LEVEL_ADJUSTMENT" [ref=f1e555]
+                - cell "NO_KEYS_PRESENT" [ref=f1e556]
+                - cell "2026-02-21T06:00:00Z" [ref=f1e557]
+      - group [ref=f1e558]:
+        - generic "D-1 Duplicate deliveries 0 rows" [ref=f1e559] [cursor=pointer]:
+          - generic [ref=f1e560]: D-1
+          - strong [ref=f1e561]: Duplicate deliveries
+          - generic [ref=f1e562]: 0 rows
+  - generic [ref=f1e563]:
+    - heading "Verdict distribution" [level=2] [ref=f1e564]
+    - paragraph [ref=f1e565]: Fifty deterministic rules generate 372 reachable verdict pairs compositionally — the engine resolves each track independently and then annotates, rather than enumerating combinations.
+    - table [ref=f1e567]:
+      - rowgroup [ref=f1e568]:
+        - row [ref=f1e569]:
+          - columnheader "Reimbursement" [ref=f1e570]
+          - columnheader "Rebate" [ref=f1e571]
+          - columnheader "Episodes" [ref=f1e572]
+      - rowgroup [ref=f1e573]:
+        - row [ref=f1e574] [cursor=pointer]:
+          - cell "A-10" [ref=f1e575]
+          - cell "C-00" [ref=f1e576]
+          - cell "2" [ref=f1e577]
+        - row [ref=f1e578] [cursor=pointer]:
+          - cell "A-01" [ref=f1e579]
+          - cell "C-00" [ref=f1e580]
+          - cell "1" [ref=f1e581]
+        - row [ref=f1e582] [cursor=pointer]:
+          - cell "A-01" [ref=f1e583]
+          - cell "C-07" [ref=f1e584]
+          - cell "1" [ref=f1e585]
+        - row [ref=f1e586] [cursor=pointer]:
+          - cell "A-01" [ref=f1e587]
+          - cell "C-08" [ref=f1e588]
+          - cell "1" [ref=f1e589]
+        - row [ref=f1e590] [cursor=pointer]:
+          - cell "A-02" [ref=f1e591]
+          - cell "C-00" [ref=f1e592]
+          - cell "1" [ref=f1e593]
+        - row [ref=f1e594] [cursor=pointer]:
+          - cell "A-02" [ref=f1e595]
+          - cell "C-01" [ref=f1e596]
+          - cell "1" [ref=f1e597]
+        - row [ref=f1e598] [cursor=pointer]:
+          - cell "A-04" [ref=f1e599]
+          - cell "C-00" [ref=f1e600]
+          - cell "1" [ref=f1e601]
+        - row [ref=f1e602] [cursor=pointer]:
+          - cell "A-04" [ref=f1e603]
+          - cell "C-01" [ref=f1e604]
+          - cell "1" [ref=f1e605]
+        - row [ref=f1e606] [cursor=pointer]:
+          - cell "A-04" [ref=f1e607]
+          - cell "C-02" [ref=f1e608]
+          - cell "1" [ref=f1e609]
+        - row [ref=f1e610] [cursor=pointer]:
+          - cell "A-04" [ref=f1e611]
+          - cell "C-03" [ref=f1e612]
+          - cell "1" [ref=f1e613]
+        - row [ref=f1e614] [cursor=pointer]:
+          - cell "A-04" [ref=f1e615]
+          - cell "C-05" [ref=f1e616]
+          - cell "1" [ref=f1e617]
+        - row [ref=f1e618] [cursor=pointer]:
+          - cell "A-04" [ref=f1e619]
+          - cell "C-07" [ref=f1e620]
+          - cell "1" [ref=f1e621]
+        - row [ref=f1e622] [cursor=pointer]:
+          - cell "A-04" [ref=f1e623]
+          - cell "C-08" [ref=f1e624]
+          - cell "1" [ref=f1e625]
+        - row [ref=f1e626] [cursor=pointer]:
+          - cell "A-04" [ref=f1e627]
+          - cell "C-09" [ref=f1e628]
+          - cell "1" [ref=f1e629]
+        - row [ref=f1e630] [cursor=pointer]:
+          - cell "A-04" [ref=f1e631]
+          - cell "C-10" [ref=f1e632]
+          - cell "1" [ref=f1e633]
+        - row [ref=f1e634] [cursor=pointer]:
+          - cell "A-04" [ref=f1e635]
+          - cell "C-11" [ref=f1e636]
+          - cell "1" [ref=f1e637]
+        - row [ref=f1e638] [cursor=pointer]:
+          - cell "A-04" [ref=f1e639]
+          - cell "C-13" [ref=f1e640]
+          - cell "1" [ref=f1e641]
+        - row [ref=f1e642] [cursor=pointer]:
+          - cell "A-04" [ref=f1e643]
+          - cell "C-14" [ref=f1e644]
+          - cell "1" [ref=f1e645]
+        - row [ref=f1e646] [cursor=pointer]:
+          - cell "A-05" [ref=f1e647]
+          - cell "C-00" [ref=f1e648]
+          - cell "1" [ref=f1e649]
+        - row [ref=f1e650] [cursor=pointer]:
+          - cell "A-05" [ref=f1e651]
+          - cell "C-09" [ref=f1e652]
+          - cell "1" [ref=f1e653]
+        - row [ref=f1e654] [cursor=pointer]:
+          - cell "A-06" [ref=f1e655]
+          - cell "C-00" [ref=f1e656]
+          - cell "1" [ref=f1e657]
+        - row [ref=f1e658] [cursor=pointer]:
+          - cell "A-06" [ref=f1e659]
+          - cell "C-08" [ref=f1e660]
+          - cell "1" [ref=f1e661]
+        - row [ref=f1e662] [cursor=pointer]:
+          - cell "A-07" [ref=f1e663]
+          - cell "C-00" [ref=f1e664]
+          - cell "1" [ref=f1e665]
+        - row [ref=f1e666] [cursor=pointer]:
+          - cell "A-08" [ref=f1e667]
+          - cell "C-00" [ref=f1e668]
+          - cell "1" [ref=f1e669]
+        - row [ref=f1e670] [cursor=pointer]:
+          - cell "A-09" [ref=f1e671]
+          - cell "C-00" [ref=f1e672]
+          - cell "1" [ref=f1e673]

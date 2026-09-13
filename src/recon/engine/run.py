@@ -289,9 +289,17 @@ def run_for_episodes(
         return []
     results: list[EngineResult] = []
     placeholders = ",".join("?" * len(episode_ids))
+    # An episode does not exist before its anchor record arrived, so it is not evaluated before then.
+    #
+    # Without this predicate, replaying to an early cursor evaluates episodes whose claim event has
+    # not landed yet. They have no evidence at all, and "no adjudication record" reads identically to
+    # "rejected at the point of sale" — so an episode that had not happened yet was being reported as
+    # A-01, CLOSED, expected zero. Confidently wrong about a claim that did not exist.
     rows = conn.execute(
-        f"SELECT * FROM episode WHERE episode_id IN ({placeholders}) ORDER BY episode_id",
-        list(episode_ids),
+        f"SELECT * FROM episode"
+        f" WHERE episode_id IN ({placeholders}) AND created_from_received_at <= ?"
+        f" ORDER BY episode_id",
+        [*episode_ids, cursor],
     ).fetchall()
     for row in rows:
         previous = repository.latest_verdict(conn, row["episode_id"], cursor, with_children=False)

@@ -20,3 +20,7 @@ data/generated/
 Thumbs.db
 .idea/
 *.swp
+
+# Front-end build output and dependencies
+web/node_modules/
+web/dist/

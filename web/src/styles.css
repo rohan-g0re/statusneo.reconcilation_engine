@@ -1,0 +1,237 @@
+/* Tokens first, components second.
+ *
+ * The three disposition colours are **status** colours, not series colours: they encode a state
+ * (nothing to do / waiting / work it), and status colours are reserved — they never double as
+ * "series 4". Two of them sit below 3:1 on the light surface by design, so every one of them ships
+ * with an icon *and* a label. Colour never carries the meaning on its own.
+ *
+ * Dark mode is selected rather than flipped: each step is chosen for the dark surface.
+ */
+
+:root {
+  color-scheme: light;
+
+  --surface-0: #f4f4f2;
+  --surface-1: #fcfcfb;
+  --surface-2: #ececea;
+  --border: #d9d9d4;
+  --border-strong: #b9b9b2;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #74736d;
+
+  /* Status palette — fixed, never themed. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --accent: #2a78d6;
+
+  --radius: 8px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --surface-0: #111110;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border: #34342f;
+    --border-strong: #4c4c45;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8e8d84;
+    --accent: #3987e5;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ═══ layout ═══════════════════════════════════════════════════════════ */
+
+.app { max-width: 1400px; margin: 0 auto; padding: 20px 24px 64px; }
+
+header.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.masthead h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+.masthead .sub { color: var(--text-muted); font-size: 12.5px; }
+.masthead .sub code { font-family: var(--mono); font-size: 12px; }
+
+.panel {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.panel > h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+.panel > .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; max-width: 78ch; }
+
+/* ═══ cursor scrubber ══════════════════════════════════════════════════ */
+
+.scrubber { display: flex; flex-direction: column; gap: 10px; }
+.scrubber .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.scrubber input[type='range'] { flex: 1 1 320px; min-width: 220px; accent-color: var(--accent); }
+.scrubber .readout {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+  min-width: 11ch;
+}
+.scrubber .ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); }
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+select {
+  font: inherit; font-size: 13px; padding: 5px 8px;
+  border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--surface-2); color: var(--text-primary);
+}
+
+/* ═══ stat tiles ═══════════════════════════════════════════════════════ */
+/* A stat tile, not a chart: three numbers whose job is to be read, not compared
+ * across a continuum. A bar chart of three counts would add ink and no meaning. */
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tile-color, var(--border-strong));
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  display: block;
+  width: 100%;
+}
+.tile:hover { border-color: var(--border-strong); border-left-color: var(--tile-color); }
+.tile[aria-pressed='true'] { background: var(--surface-2); border-color: var(--tile-color); }
+
+.tile .label {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 650; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+/* The icon is the non-colour channel. Removing it would make the tile colour-only. */
+.tile .icon { color: var(--tile-color); font-size: 13px; line-height: 1; }
+.tile .count { font-size: 30px; font-weight: 640; letter-spacing: -0.02em; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+.tile .money { font-family: var(--mono); font-size: 12.5px; color: var(--text-secondary); }
+.tile .money .reopened { color: var(--status-critical); font-weight: 600; }
+
+/* ═══ tables ═══════════════════════════════════════════════════════════ */
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th {
+  position: sticky; top: 0;
+  background: var(--surface-2);
+  font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr[aria-selected='true'] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.mono, th.num { font-family: var(--mono); }
+th.num { text-align: right; }
+
+.verdict-code {
+  font-family: var(--mono); font-size: 12px; font-weight: 600;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+
+.chip {
+  display: inline-block;
+  font-size: 11px; font-family: var(--mono);
+  padding: 1px 6px; margin: 1px 3px 1px 0;
+  border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.chip.flag { border-color: var(--status-serious); color: var(--text-primary); }
+.chip.reopened { border-color: var(--status-critical); color: var(--text-primary); font-weight: 600; }
+
+/* ═══ episode detail ═══════════════════════════════════════════════════ */
+
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; margin-bottom: 16px; }
+.field .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.field .v { font-family: var(--mono); font-size: 13px; }
+
+.money-table td.num { font-variant-numeric: tabular-nums; }
+.money-table .variance-bad { color: var(--status-critical); font-weight: 600; }
+.money-table .variance-ok { color: var(--text-muted); }
+
+details.evidence { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; background: var(--surface-1); }
+details.evidence > summary { cursor: pointer; padding: 7px 10px; font-size: 12.5px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+details.evidence pre {
+  margin: 0; padding: 10px; overflow-x: auto;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
+  background: var(--surface-2); border-top: 1px solid var(--border);
+  white-space: pre-wrap; word-break: break-all;
+}
+
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { border-left: 2px solid var(--border-strong); padding: 0 0 12px 14px; margin-left: 5px; position: relative; }
+.timeline li::before {
+  content: ''; position: absolute; left: -6px; top: 4px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
+}
+.timeline .when { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+
+.empty { color: var(--text-muted); font-size: 13px; padding: 14px 2px; }
+.error {
+  border: 1px solid var(--status-critical);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  padding: 10px 14px; margin-bottom: 16px;
+  font-size: 13px;
+}
+.banner {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--text-secondary);
+}
+.spinner { color: var(--text-muted); font-size: 12.5px; }
