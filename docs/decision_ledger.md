@@ -127,48 +127,57 @@ I proposed each of these and you did not object, so they were written into the d
 
 ---
 
-## Section C — Resolved
+## Section C — walked and closed
 
-Nothing here was ever raised in conversation; items had been decided by planning or reconciliation agents on their own authority. **Section C is now walked and closed**, except for the agent layer, which is deliberately deferred until the deterministic layer exists.
+**At a glance:** 15 decided · 2 dropped · 2 deferred · 3 still open
+
+| Status | Count | Which |
+|---|---|---|
+| ✅ Decided | 15 | C1–C15, C17 (minus C16) |
+| ❌ Dropped | 2 | C16, C19 |
+| ⏸️ Deferred | 2 | C20, C21 |
+| 🔴 Still open | 3 | C22, C23, C24 |
+
+Only **C23** needs you. C22 and C24 are mine to propose when there is something to test and describe.
 
 ### C.1 — Parameters
 
-| # | Item | Outcome |
-|---|---|---|
-| C1 | **Entity universe** | Approved. 12 drugs, 2 pharmacies (second unregistered so `UNREGISTERED_LOCATION` is generatable), 2 PBMs, 2 payers, 2 covered entities, 6 manufacturers, 6 prescribers, 40 patients |
-| C2 | **Drug price table** | Approved. Acquisition cost, contracted rate and 340B ceiling per NDC. Every expected amount derives from this |
-| C3 | **Defect injection rates** | Default taken, **tunable**. Only the ~20% trace-number drop is sourced; the rest are estimates, to be retuned after the first full run when it is visible whether the data is too clean or too broken |
-| C4 | **Seeding scheme** | Default taken. `blake2b(master, *path)`, derived per record. Technically forced -- builtin `hash()` is salted per process and would not reproduce |
-| C5 | **Repo layout** | Default taken. `src/recon/...`, generators as a separate entry point that never imports the DB layer |
-| C6 | **Money representation** | Default taken. Integer cents end to end. Technically forced -- float arithmetic gives every claim a phantom one-cent variance indistinguishable from real underpayment |
-| C7 | **Allocation logic** | Default taken. One splitter serving both the bank feed and the 340B rebate batches |
-| C8 | **Canonical filenames** | Default taken. Feeds under `feeds/`, ground truth under `truth/` |
+| # | Status | Item | Outcome |
+|---|---|---|---|
+| C1 | ✅ | **Entity universe** | Approved by you. 12 drugs, 2 pharmacies (second unregistered so `UNREGISTERED_LOCATION` is generatable), 2 PBMs, 2 payers, 2 covered entities, 6 manufacturers, 6 prescribers, 40 patients |
+| C2 | ✅ | **Drug price table** | Approved by you. Acquisition cost, contracted rate and 340B ceiling per NDC. Every expected amount derives from this |
+| C3 | ✅ | **Defect injection rates** | Default taken, **tunable**. Only the ~20% trace-number drop is sourced; the rest are estimates, to be retuned after the first full run |
+| C4 | ✅ | **Seeding scheme** | Default taken. `blake2b(master, *path)` per record. Technically forced — builtin `hash()` is salted per process and would not reproduce |
+| C5 | ✅ | **Repo layout** | Default taken. `src/recon/...`, generators as a separate entry point that never imports the DB layer |
+| C6 | ✅ | **Money representation** | Default taken. Integer cents end to end. Technically forced — floats give every claim a phantom one-cent variance indistinguishable from real underpayment |
+| C7 | ✅ | **Allocation logic** | Default taken. One splitter serving both the bank feed and the 340B rebate batches |
+| C8 | ✅ | **Canonical filenames** | Default taken. Feeds under `feeds/`, ground truth under `truth/` |
 
 ### C.2 — Rulings from the plan reconciliation
 
-| # | Item | Outcome |
-|---|---|---|
-| C9 | **Medical 340B join key** | Approved. `{provider_npi, ndc11, service_date}` -- a clinic-infused drug has no prescription, so no Rx number exists. Read/write-intensity optimisation of the supporting tables to follow |
-| C10 | **All generated names fictional** | Approved. Not optional -- the assignment forbids real client names in generated data |
-| C11 | **`277CA` acknowledgment record** added to the medical submissions file | Approved. Without it a clearinghouse rejection is indistinguishable on the wire from a claim still awaiting payment, and verdict B-01 is unreachable |
-| C12 | **340B feed stays JSON** | Approved. Consistent with A2 -- the feed's poverty is missing identifiers and no trace number, not the envelope |
-| C13 | **Settlement encoded via CLP02** | Approved. `"1"` settled; `"19"`/`"25"` money moved but the receivable not closed. Native field, per-claim, no extra file. Alternatives were all file-level and collided with the bank's own missing-trace defect. **The engine must mirror this read or A-06 never fires** |
-| C14 | **`allocation_code` rides in the bank `trn02` column** | Approved. That column already means "payer-assigned reference, when it survived", so rebate deposits fall under the same drop rule as everything else -- and drops that amount-plus-date cannot rescue become D-4 unmatched rebate by mechanism rather than by hand-placement |
-| C15 | **Two new 340B event types** -- `REBATE_REQUEST`, `MANUFACTURER_DECISION` | Approved. Without them C-03 and C-05 are identical on the wire, and a rejection cannot ride inside a payment batch |
-| C16 | **Malformed records (D-5)** | **Dropped entirely.** Checked against the assignment: the data requirement names "fully reconciled, partial payment, underpayment, reversal/recoupment, unmatched cash or rebate, denial, duplicate event, or late-arriving status" -- malformed records are **not** on that list. The only nearby mention is Section 2's *"show how you would handle schema versions, retries, duplicate delivery and late-arriving data"*, which is design-note prose rather than generated data. **D-5 was invented.** Nothing generates it, nothing tests it; a malformed row is simply discarded. Quarantine behaviour survives as one line in the design note |
-| C17 | **`pairs.json` as a live test oracle** | Approved. The coverage test fails if any of the 372 verdict pairs is unproduced, turning the state-space document into a check rather than a reference |
+| # | Status | Item | Outcome |
+|---|---|---|---|
+| C9 | ✅ | **Medical 340B join key** | Approved by you. `{provider_npi, ndc11, service_date}` — a clinic-infused drug has no prescription, so no Rx number exists. Read/write-intensity optimisation to follow |
+| C10 | ✅ | **All generated names fictional** | Approved by you. Not optional — the assignment forbids real client names in generated data |
+| C11 | ✅ | **`277CA` acknowledgment record** in the medical submissions file | Approved by you. Without it a clearinghouse rejection is indistinguishable on the wire from a claim awaiting payment, and verdict B-01 is unreachable |
+| C12 | ✅ | **340B feed stays JSON** | Approved by you. Consistent with A2 — the feed's poverty is missing identifiers and no trace number, not the envelope |
+| C13 | ✅ | **Settlement encoded via CLP02** | **You delegated; I picked this.** `"1"` settled; `"19"`/`"25"` money moved but receivable not closed. Native field, per-claim, no extra file. Alternatives were file-level and collided with the bank's own missing-trace defect. **The engine must mirror this read or A-06 never fires** |
+| C14 | ✅ | **`allocation_code` rides in the bank `trn02` column** | **You delegated; I picked this.** That column already means "payer-assigned reference, when it survived", so rebate deposits fall under the same drop rule — and drops that amount-plus-date cannot rescue become D-4 unmatched rebate by mechanism rather than hand-placement |
+| C15 | ✅ | **Two new 340B event types** — `REBATE_REQUEST`, `MANUFACTURER_DECISION` | Approved by you. Without them C-03 and C-05 are identical on the wire, and a rejection cannot ride inside a payment batch |
+| C16 | ❌ | **Malformed records (D-5)** | **Dropped.** Your call, checked against the assignment and confirmed. Its data requirement names "fully reconciled, partial payment, underpayment, reversal/recoupment, unmatched cash or rebate, denial, duplicate event, or late-arriving status" — malformed records are **not** on that list. The only nearby mention is Section 2's *"show how you would handle schema versions, retries, duplicate delivery and late-arriving data"*, which is design-note prose, not generated data. **D-5 was invented.** Nothing generates it, nothing tests it; a malformed row is discarded. Quarantine behaviour survives as one design-note line |
+| C17 | ✅ | **`pairs.json` as a live test oracle** | Approved by you. The coverage test fails if any of the 372 verdict pairs is unproduced |
 
 ### C.3 — Scope decisions
 
-| # | Item | Outcome |
-|---|---|---|
-| C18 | **The front end** | Scope handed over. A cursor control advancing through the 2025-07-01 to 2026-07-01 window, re-rendering the queues, plus the regenerate control below |
-| C19 | **Mock workflow / Epic feed** | **Dropped as a fifth input feed.** The generated dataset *is* the mock. Regeneration is a control in the UI that wipes the current data and rebuilds it, usable repeatedly rather than only for tests. **Parked, not dropped:** the Workflow Coordinator agent still needs somewhere to *write* a work item -- that is a table, not a feed, and it belongs with C20 |
-| C20 | **Agent layer** | **Deferred by agreement.** The deterministic layer and workflow get built first, so a working object exists and it is known exactly what data is available at each step. The agent layer is then designed against that reality rather than against a guess |
-| C21 | **Agent evaluation set** | Deferred -- depends on C20 |
-| C22 | **Tests for the reconciliation core** | Open. To be proposed alongside the engine |
-| C23 | **The design note** | **Open, and the one item that genuinely needs you.** 4-5 pages carrying architecture (20%), most of domain understanding (15%) and communication (10%). No dependency on any code -- draftable at any time, but it has to sound like you |
-| C24 | **README** | Open. Written last, once there is something to describe |
+| # | Status | Item | Outcome |
+|---|---|---|---|
+| C18 | ✅ | **The front end** | Scope handed to me. A cursor control advancing through the 2025-07-01 to 2026-07-01 window, re-rendering the queues, plus the regenerate control below |
+| C19 | ❌ | **Mock workflow / Epic feed** | **Dropped as a fifth input feed.** Your call. The generated dataset *is* the mock; regeneration is a UI control that wipes and rebuilds, usable repeatedly rather than only for tests. **Parked, not dropped:** the Workflow Coordinator still needs somewhere to *write* a work item — a table, not a feed, belonging with C20 |
+| C20 | ⏸️ | **Agent layer** | **Deferred by agreement.** Deterministic layer and workflow first, so the agent is designed against a working object rather than a guess |
+| C21 | ⏸️ | **Agent evaluation set** | Deferred — depends on C20 |
+| C22 | 🔴 | **Tests for the reconciliation core** | Open. **Mine to propose** alongside the engine |
+| C23 | 🔴 | **The design note** | Open. **The one item that needs you.** 4–5 pages carrying architecture (20%), most of domain understanding (15%) and communication (10%). No code dependency — draftable at any time, but it has to sound like you |
+| C24 | 🔴 | **README** | Open. **Mine**, written last once there is something to describe |
 
 ---
 
