@@ -1,6 +1,7 @@
 ---
 title: Generate combinatorial state spaces exhaustively; validate with an independent second pass
 date: 2026-09-12
+last_refreshed: 2026-09-13
 category: docs/solutions/best-practices
 module: reconciliation-state-space
 problem_type: best_practice
@@ -13,6 +14,7 @@ applies_when:
   - "A validator is written to check generated output against hand-authored rules"
 symptoms:
   - "Hand-counted state space (34 x 15 = 510) diverged from the generated space (33 x 16 = 528) by four states"
+  - "Two figures in this doc were themselves never measured when written: a claimed 60x frequency spread was actually 252x, and a case called unique was 36 configurations"
   - "Two documented states were structurally unreachable and never actually generated"
   - "Two valid in-flight states were silently missing due to inconsistent SLA-timing coverage across pipeline stages"
   - "One state was miscategorized across the coherence split, skewing the anomalous-pair count from 36 to 52"
@@ -41,6 +43,10 @@ A design doc for a post-claim pharmacy financial reconciliation engine hand-enum
 The implementation (`decision_tree/spec.py`, `build_tree.py`, `classify.py`, `verify.py`) generated **7,046** valid configuration paths out of **326,517,350,400** naive unconstrained combinations — 99.999998% eliminated as structurally impossible: settlements on unpaid claims, rebates the manufacturer never approved, cash verification for money nobody claimed to send, appeals on fully-paid claims.
 
 Collapsing those 7,046 configurations onto the hand-curated verdict names exposed four errors in the original hand-count and corrected the total to `33 × 16 = 528` (476 coherent + 52 anomalous). The implementation estimate did not move at all — the errors redistributed states across categories without changing how much code there was to write.
+
+> **Figures superseded, and the lesson strengthened.** A later design decision removed SLA thresholds from the model entirely, which changed every number above. The current tree is **4,224** configurations from **12,093,235,200** unconstrained, resolving to **31 × 12 = 372** verdict pairs (336 wholly coherent, 36 wholly anomalous, none mixed) and **50** rules. The guidance in this document is unchanged — only its illustrations moved.
+>
+> Two figures here were also **wrong when written**, and neither came from the generator. The spread was asserted as ~60× and measured later at **252×** (min 1, max 252 configurations per pair, with **99 of 372 pairs holding exactly one**). The compliance case called "1 configuration out of 7,046" is in fact **36 configurations across 16 pairs**; the genuinely rarest flags are X-6 at 8 configurations and X-4 at 9. A document arguing that hand-derived numbers drift had two hand-derived numbers in it. The fix is the same one it recommends: measure, do not assert.
 
 ## Guidance
 
@@ -117,7 +123,7 @@ Add a fourth whenever the space has more than one independent dimension: verify 
 
 First run: 15 flagged violations, all "cash verification on a rejected claim." The instinct is to trust the check that fires and go fix the generator.
 
-The check was wrong. It had assumed a point-of-sale-rejected claim can carry no cash at all — but the 340B rebate track runs off the *dispense* record, independent of the claim's adjudication. A rebate paid on a claim the payer rejected is real cash requiring verification, and that exact combination turned out to be the single highest-value compliance case in the system (1 configuration out of 7,046).
+The check was wrong. It had assumed a point-of-sale-rejected claim can carry no cash at all — but the 340B rebate track runs off the *dispense* record, independent of the claim's adjudication. A rebate paid on a claim the payer rejected is real cash requiring verification, and that exact combination turned out to be the highest-value compliance case in the system — asserted at the time as a single configuration in 7,046, measured later at 36 configurations across 16 verdict pairs.
 
 The validator had made the precise mistake the whole architecture exists to catch: assuming a claim's fate determines everything downstream of it. Because it was written independently, disagreeing with the generator surfaced the question at all. Had one person written both passes in one sitting, the shared assumption would have been invisible to both.
 
@@ -136,13 +142,13 @@ These are the default failure modes of enumerating anything long by hand, in any
 
 ### The number that mattered for planning did not move
 
-The doc-visible headline (510 → 528, +18) makes the estimate look significantly wrong. It was not. `34 + 15 = 49` and `33 + 16 = 49` are the same sum; plus 7 cross-cutting rules, that is 56 rules either way. The errors redistributed *which* states existed without changing *how many rules* implement them.
+The doc-visible headline (510 → 528, +18) makes the estimate look significantly wrong. It was not. `34 + 15 = 49` and `33 + 16 = 49` are the same sum; plus 7 cross-cutting rules, that is 56 rules either way. The errors redistributed *which* states existed without changing *how many rules* implement them. (The later SLA removal did move it, deliberately, to 50 — a scope decision rather than a correction.)
 
 When reporting a correction like this, separate "the enumerated count changed" from "the implementation cost changed." They are usually not the same claim, and only exhaustive generation lets you distinguish them.
 
 ### Uniform sampling over a generated space is not neutral
 
-Frequency across the 7,046 configurations ranged from 1,560 down to 1 — roughly a 60× spread, with the highest-value compliance case appearing exactly once. Sampling 50 cases uniformly would, with better than even odds, miss it entirely.
+Frequency is wildly non-uniform. Measured on the current tree, configurations per verdict pair range from **1 to 252** — a **252×** spread, with **99 of 372 pairs holding exactly one configuration**. The rarest cross-track flags are X-6 (8 configurations) and X-4 (9). Sampling 50 cases uniformly would miss most of the tail entirely.
 
 Any test-data or QA-sampling strategy built on an enumerated space must stratify over the *outcome* (verdict or state), not over raw configuration count, or the rarest and most important cases systematically vanish from every sample.
 
