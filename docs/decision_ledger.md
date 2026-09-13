@@ -22,12 +22,13 @@ Shortest path back into the work.
 
 | Order | Action | Why now |
 |---|---|---|
-| 1 | **Clear B7–B10** | Four items, all low-cost, none with a serious alternative. Ten minutes of yes/no |
-| 2 | **Ratify or overrule C.1 and C.2** | Seventeen agent-made decisions currently baked into the plans. C10 (fictional names) is not optional — the assignment forbids real client names in generated data |
-| 3 | **Redo the database design pass** | A26 made this a first-class task, and A23/A24 landed after the plans were written. The schema needs the eight key types, the partial indexes and the read/write split |
-| 4 | **Then implement Set A** | Foundation, orchestrator, four generators. The untracked code on disk is a starting point, not a finished one |
+| 1 | **Ratify or overrule C.1 and C.2** | Seventeen agent-made decisions currently baked into the plans. C10 (fictional names) is not optional — the assignment forbids real client names in generated data |
+| 2 | **Redo the database design pass** | A26 made this a first-class task, and A23/A24 landed after the plans were written. The schema needs the eight key types, the partial indexes and the read/write split |
+| 3 | **Then implement Set A** | Foundation, orchestrator, four generators. The untracked code on disk is a starting point, not a finished one |
 
-C.3 is mostly outside Set A and can wait — except **C23 (the design note)**, which carries roughly 40% of the grade and has no dependency on any code. It can be drafted in parallel at any time.
+**C.3 is deliberately deferred.** The deterministic layer and the workflow get built first, so that a working object exists and it is known exactly what data is available at each step. The agent layer is designed against that reality rather than against a guess — which also means C19–C22 cannot sensibly be answered yet.
+
+The exception is **C23 (the design note)**, which carries roughly 40% of the grade and has no dependency on any code. It can be drafted in parallel at any time.
 
 ---
 
@@ -92,6 +93,9 @@ Decided explicitly. Committed into `docs/architecture_decisions.md`, `docs/feed_
 | A16 | ✅ **Stack: Python backend, FastAPI API layer, React front end** | Recorded as Decisions 34–36 |
 | A27 | ✅ **`docs/glossary.md` is the vocabulary authority** | Linked from the head of every design document. It wins wherever another document is loose |
 | A28 | ✅ **Naming: `episode` in code, "claim financial episode" in prose, `claim` reserved for the payment request** | The object and the "claim object" are the same thing — this is purely naming. But *claim* already means something narrower and real: the 837 or B1 submission, which lives **inside** the episode. Using it for both gives you `claim.reimbursement_track.claim`. Prose keeps the assignment's own term so a reviewer sees familiar vocabulary |
+| A29 | ✅ **Episode disposition is a worst-wins rollup** of the two track statuses — `EXCEPTION > PENDING > CLOSED` | *Was B7.* Without it you must nominate one track to represent the episode, and you are wrong whenever the tracks disagree — 340B clawed back while the reimbursement is still in flight being the obvious case |
+| A30 | ✅ **`INSUFFICIENT_DATA` is a first-class reason code** | *Was B8.* Less optional than it looks: the assignment requires the agent to "say when the available data is insufficient." Without a deterministic code for it, that judgement moves to the LLM side of the boundary. Fires on unmatched recoupment, unattributable rebate cash, and correlated no-cash on both tracks |
+| A31 | ✅ **Lineage and audit trail are distinct mechanisms, both retained** | *Was B10, closed as descriptive rather than decided.* The audit trail is appended to the object over time; lineage is reconstructed by joining across tables, hop by hop, back to the source row. Neither is a choice — A25 put records outside the object linked by pointer, which forces lineage to be a join, and A8 made status append-only, which makes the audit trail the append log itself |
 
 ---
 
@@ -109,15 +113,17 @@ I proposed each of these and you did not object, so they were written into the d
 | B4 | Parked records plus a backward re-check | ✅ **Accepted** → now **A20**, with the indexed design added as **A24** |
 | B5 | Bank line resolves in two hops | ✅ **Accepted** → now **A21** |
 | B6 | Reopened is a flag, not a fourth disposition | ✅ **Accepted** → now **A22** |
+| B7 | Worst-wins rollup of track statuses | ✅ **Accepted** → now **A29** |
+| B8 | `INSUFFICIENT_DATA` as a reason code | ✅ **Accepted** → now **A30** |
+| B10 | Lineage and audit trail are distinct | ↩️ **Closed as descriptive** → recorded as **A31**. Not a decision; both follow from A25 and A8 |
 
 ### B.2 — Still outstanding
 
-| # | Proposal | Where it already appears | Cost of reversing |
-|---|---|---|---|
-| B7 | 🟡 **Episode disposition is a worst-wins rollup** of the two track statuses — `EXCEPTION > PENDING > CLOSED` | Decision 27 | Low. Explained in conversation but not yet confirmed. Without it you must pick one track's status to represent the episode, and you are wrong whenever the tracks disagree |
-| B8 | 🟡 **`INSUFFICIENT_DATA` is a first-class reason code** | Decision 25 | Low. But it is what drives the agent's required "here is precisely what is missing" behaviour |
-| B9 | 🟡 **Two profiles from one seed** — `demo` ~60 hand-stratified episodes, `full` ~1,500 covering all 372 verdict pairs | Decision 14, G2 plan | Low. A parameter rather than a decision |
-| B10 | 🟡 **Lineage and audit trail are different things**, both kept — lineage runs downward to source rows, audit trail runs across time | Decision 32 | Low |
+| # | Proposal | Status |
+|---|---|---|
+| B9 | ⏸️ **Two profiles from one seed** — `demo` ~60 hand-stratified episodes, `full` ~1,500 covering all 372 verdict pairs | **Deferred, not blocking.** A parameter (how many episodes per profile), not a design decision. Revisit when the generator exists and the real cost of each profile is known |
+
+**Section B is otherwise clear.** Nine of ten resolved: six accepted into Section A, two closed as descriptions of consequences rather than decisions, one deferred.
 
 ---
 
@@ -176,9 +182,9 @@ Forced by conflicts between the four plans. Each is defensible; none was agreed 
 | Four implementation plans + reconciliation | Committed — `833d19a` |
 | Decision ledger | Committed — `18428fd`, updated `be221a4` |
 | Glossary | Written, linked from five documents |
-| Section B walkthrough | **6 of 10 resolved.** B7, B8, B9, B10 outstanding |
+| Section B walkthrough | ✅ **Complete.** 9 of 10 resolved, B9 deferred as a parameter |
 | Database design pass | **Owed.** A26 made it a first-class task; A23 and A24 postdate the plans |
-| Section C walkthrough | Not started |
+| Section C walkthrough | **In progress** — C.1 and C.2 next; C.3 deferred until the deterministic layer exists |
 | Implementation | **Not started.** Held pending B and C |
 
 **One thing sitting untracked on disk.** A planning agent wrote roughly 5,300 lines of foundation code — config, money, seeded RNG, SQLite schema, DB layer, reference data, pricing — despite being instructed to plan only. It was removed from the commit because it implements C1, C2, C4, C5 and C6, which have not been ratified. It remains on disk under `src/` and `pyproject.toml`, untracked. **It also predates A23, A24 and A26**, so its schema does not carry the eight-key-type crosswalk design, the partial indexes, or the read/write split — it will need revision regardless of how Section C lands.
