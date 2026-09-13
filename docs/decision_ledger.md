@@ -129,14 +129,15 @@ I proposed each of these and you did not object, so they were written into the d
 
 ## Section C — walked and closed
 
-**At a glance:** 15 decided · 2 dropped · 2 deferred · 3 still open
+**At a glance:** 19 decided · 2 deferred · 3 still open
 
 | Status | Count | Which |
 |---|---|---|
-| ✅ Decided | 15 | C1–C15, C17 (minus C16) |
-| ❌ Dropped | 2 | C16, C19 |
+| ✅ Decided | 19 | C1–C19 |
 | ⏸️ Deferred | 2 | C20, C21 |
 | 🔴 Still open | 3 | C22, C23, C24 |
+
+A decision to drop something is still a decision. C16 and C19 were resolved — they carry a ❌ in their row to show *what* was decided, but they are closed, not outstanding.
 
 Only **C23** needs you. C22 and C24 are mine to propose when there is something to test and describe.
 
