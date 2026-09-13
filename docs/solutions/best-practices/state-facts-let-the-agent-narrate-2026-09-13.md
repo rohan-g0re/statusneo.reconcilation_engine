@@ -85,6 +85,44 @@ if _UNPROJECTED:
 
 A gap should fail where it is introduced, not evaporate at runtime.
 
+### Mark which facts carry the story, and let one object serve both readings
+
+Dropping absent fields is not enough on its own. A record can carry every field it should and still be unreadable, because identity and outcome are interleaved: an ICN, a covered-entity id and a wholesaler invoice number sit between the reader and the word `QUALIFIED`.
+
+So each projection declares a second, smaller list — the subset that says *what happened* rather than *which thing it happened to* — and each event publishes the keys of that subset which are actually present:
+
+```python
+Projection(
+    body=("event_type", "qualification_status", "disqualification_reason",
+          "covered_entity_id", "hin", "wholesaler_invoice_number"),
+    simple=("qualification_status", "disqualification_reason"),
+)
+```
+
+Two rules make this work rather than merely shrink things.
+
+**The split belongs server-side, not in the view.** A filter implemented in the front end is invisible to every other consumer — and when the primary consumer is an agent, it wants the short view for the same reason a person does. One object, two readings, no second endpoint to keep in sync. This also happens to be the pattern the tool-design literature recommends independently: a response-detail knob, where the concise form costs roughly a third of the tokens of the full one.
+
+**A status discriminator is what makes a null safe to drop.** `disqualification_reason` being null means *qualified* — genuine information. It is only safe to omit because `qualification_status` is always present on that record and states the outcome positively. Before you drop a null, check that something else in the projection still carries what its absence meant. Where nothing does, the field stays.
+
+The counter-case is worth stating too, because it is the one that looks wrong and is right: an acknowledgment carrying both `accepted: true` and `stc12_free_form: "ACCEPTED FOR PROCESSING"` should surface only the second. The free text reads correctly in both outcomes and carries the reason on a rejection; printing the boolean beside it states the same fact twice. Fewer fields, strictly more information.
+
+### Reference the source; do not embed it
+
+Lineage has three levels and they are not the same thing.
+
+| Level | Answers | Cost |
+|---|---|---|
+| **Pointer** | where did this come from | a few fields per event |
+| **Payload** | what did the source literally say | hundreds of chars per record |
+| **Derivation** | which fields, by what rule, produced *this number* | a link table |
+
+Put the pointer on every event — file, line, record id — and serve the payload from a separate call keyed on it. A raw feed line runs several hundred characters and an episode has a dozen of them; inlining every payload multiplies the cost of every read to carry something almost no question needs. Real systems reference documents and fetch them on demand, and the pointer already in each event makes the fetch one hop.
+
+Store the payload verbatim with a hash, and make the record immutable at the database level rather than by convention. Then "is this really what arrived" is a checkable claim rather than an assurance.
+
+Derivation is the level most systems skip, and it is the one an agent actually needs. A verdict linked to *every record visible at the time* answers "what could the engine see," not "what did the engine use" — and handed to a model, every record looks causal. The failure mode is a real citation attached to a false cause, which no citation check can catch.
+
 ### A code value is a slot, not a template
 
 This is the decision that governs how many templates any templating scheme needs. If the reference data already carries a description for each code — and for published vocabularies like CARC, RARC or claim-status codes it does, written by the standards body rather than by you — then `"{code}: {description}"` is **one** template with two slots, not one template per code.

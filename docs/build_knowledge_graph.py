@@ -729,9 +729,110 @@ def wave_9_state_do_not_narrate():
     R("State, do not narrate", "depends on", "Deterministic boundary")
 
 
+# ===========================================================================
+# WAVE 10 -- the agent layer, designed
+#
+# The deterministic layer is finished, so C20 (the agent layer) and C21 (its
+# evaluation set) are no longer deferred.  This wave records the architecture
+# that was settled, and the research that settled it -- roughly a dozen parallel
+# passes over the harness-engineering, LLM-as-judge, abstention, structured-output
+# and healthcare-RCM literature.  Almost every finding here contradicted an
+# earlier plan, which is why they are worth keeping.
+# ===========================================================================
+
+def wave_10_agent_layer():
+
+    # --- corrections ---------------------------------------------------------
+
+    UNOBS("Agent layer",
+          "Leaning toward a plain tool-calling loop over LangGraph or CrewAI")
+    OBS("Agent layer",
+        "SETTLED: a custom harness in plain Python, roughly 150 lines, over an OpenAI-compatible client. No framework",
+        "The deciding fact is that NO surveyed harness ships an eval loop -- Pi, DeepSeek Harness, Prime Intellect's verifiers and PyHarness were all checked and none has any evaluator, critic, judge or scoring abstraction",
+        "Harnesses ship loop STRUCTURE. The eval loop is ours to write whatever sits underneath, so the framework choice only decides plumbing around a thing we are building anyway",
+        "Pi and DeepSeek Harness are TypeScript coding-agent harnesses; adopting either means a sidecar and RPC to Python for every database call",
+        "PROVENANCE: user decided, after asking for the three options to be ranked")
+
+    OBS("Episode dossier",
+        "Two readings of one object: each projection declares a `simple` subset, and every event publishes `essential` -- the keys of that subset actually present",
+        "The split lives in Python rather than the front end because the agent wants the short view for the same reason a person does, and a React-side filter would be invisible to it",
+        "Lineage level two is a separate call: GET /api/record/{raw_id} returns the verbatim source line plus payload and file hashes, rather than inlining payloads no question needs")
+
+    OBS("Build state",
+        "The dashboard is a two-column layout: queues on the left, one sticky episode panel on the right that survives scrolling and cursor moves",
+        "Light mode only, unconditionally -- the adaptive OS-theme palette is gone")
+
+    # --- the architecture ----------------------------------------------------
+
+    E("Proposer and Evaluator", "Mechanism",
+      "The two agents inside the Workflow Coordinator harness. The Proposer suggests a next action; the Evaluator grades it",
+      "Both have tool access and both are grounded in structured data -- the Evaluator can query the database to verify a claim rather than only reading the Proposer's text",
+      "The Evaluator NEVER sees the Proposer's reasoning trace. Same inputs, fresh trace",
+      "PROVENANCE: user decided the two-agent split and named the roles; the zero-shared-context rule is an agent default taken from Cognition's measured result",
+      "Cognition reversed their own position on this. 'Don't Build Multi-Agents' attacks parallel WRITERS whose artifacts must be merged; their follow-up endorses exactly this shape -- 'writes stay single-threaded and the additional agents contribute intelligence rather than actions'",
+      "Their review agent works BETTER with zero shared context, because a shorter context detects more: stale framing from the first attempt biases the second pass into agreeing")
+
+    E("Checklist, not a score", "Mechanism",
+      "The Evaluator grades a checklist of items rather than emitting a single confidence number. Ticks against threshold is the gate",
+      "PROVENANCE: user decided, self-correcting from an earlier instruction that the Evaluator should emit the score directly",
+      "It converges with OpenAI's HealthBench, which grades physician-written criteria independently -- met earns full points, unmet earns zero, score is earned over possible, across 48,562 criteria",
+      "This resolves the apparent tension between 'the Evaluator scores it' and 'Python computes it': the Evaluator judges each item, the harness counts the ticks. One mechanism, not two",
+      "Verbalised confidence is the weakest signal in every study that measured it -- the ranking is logprobs, then sampling-consistency, then self-rating, and 'Wired for Overconfidence' locates a Confidence Mover Circuit tied to RLHF",
+      "Asking for confidence is asking the model to grade its own homework; asking for a quote is asking it to show the homework")
+
+    E("Threshold hooks", "Mechanism",
+      "What the harness does with the Evaluator's output, which is the only place its verdict is consumed",
+      "BELOW threshold: the Evaluator's REASON goes back to the Proposer, which researches again from the documents rather than re-arguing its previous position",
+      "ABOVE threshold: the Evaluator's output is discarded entirely and the Proposer's next steps become the prospective work item",
+      "PROVENANCE: user decided both branches",
+      "The re-prompt being aimed at a stated gap rather than blind is the one idea worth copying from OpenHands' Goal Completion Loop, whose GoalVerdict carries a `missing` field that drives the next iteration")
+
+    E("The ceiling is checked first", "Decision",
+      "The iteration cap is evaluated structurally before the semantic gate, never inside it",
+      "CrewAI has an open bug (#3847) where handle_max_iterations_exceeded prepares a forced answer at the ceiling and later model calls silently overwrite it, so the loop does not reliably stop -- because the cap check is not structurally prior",
+      "Four distinct outcomes, never one boolean: complete, insufficient_data, stalled, capped. Collapsing them loses the difference between 'this cannot be resolved from the available documents', which is an answer, and 'we ran out of budget', which is a failure",
+      "Systems with no guard at all are the cautionary set: DeepSeek Harness states it has no built-in turn budget, and OpenCode's core carries documented real infinite-loop bugs plus a third-party anti-loop plugin",
+      "Even Claude Code's stop_hook_active is a convention hook authors are asked to honour, not a cap the harness enforces")
+
+    # --- findings that contradicted a plan -----------------------------------
+
+    E("Reasoning models abstain worse", "Trap",
+      "AbstentionBench (20 datasets, 35k+ queries) found reasoning fine-tuning costs an average 24% of abstention rate versus non-reasoning counterparts, and scaling model size barely helps",
+      "So a thinking model is MORE likely to confidently answer the unanswerable -- the exact failure the assignment grades, since it requires the agent to say when data is insufficient",
+      "Extended thinking on the Proposer is therefore a risk to measure, not a free upgrade")
+
+    E("Field order beats everything", "Trap",
+      "Reasoning-first versus answer-first in a structured output schema is worth roughly 60 percentage points: GPT-4o-mini on GSM8K scored 94.20% with reasoning first and 31.80% with the answer first",
+      "The paper that popularised 'structured output hurts reasoning' contained its own refutation: 100% of its JSON-mode responses placed the answer key before the reason key. It was never token masking, it was ordering",
+      "pydantic.BaseModel preserves field declaration order into model_json_schema(), so this is a one-line property of how the model is declared",
+      "Related trap -- ENUM COLLAPSE: when the decoder masks the model's preferred token it falls back to the most schema-legal common option, so a status field can return the modal value ~11% more often under constraint while remaining 100% schema-valid")
+
+    E("A human gate can be worthless", "Learning",
+      "Cigna's PXDX had a human in the loop and is being litigated as unlawful rubber-stamping: doctors batch-denied without opening files, 300,000+ claims in two months averaging 1.2 seconds each",
+      "So the design rule is not 'add an approval step'. It is: show the reviewer the underlying evidence rather than the conclusion, make the recommendation EDITABLE, track override rate as a first-class metric, and alarm on approval latency",
+      "The editable recommendation is a safety property rather than a convenience -- a reviewer who can only approve or reject is ratifying, while one who can correct the action is judging",
+      "The diff between proposed and accepted is also the sharpest error signal available: unlike appeal outcomes it arrives immediately and is not contestation-biased",
+      "UnitedHealth's nH Predict is the matching trap on metrics: roughly 90% of appealed denials were reversed, but only 0.2% were ever appealed. A low override rate can mean the friction to challenge is high, not that the system is right",
+      "Candid Health independently reached the same architecture -- a deterministic rules engine for the financial-correctness path, with LLMs only suggesting new rules")
+
+    # --- relations -----------------------------------------------------------
+
+    R("Proposer and Evaluator", "is bounded by", "The ceiling is checked first")
+    R("Proposer and Evaluator", "scores with", "Checklist, not a score")
+    R("Threshold hooks", "consumes", "Checklist, not a score")
+    R("Threshold hooks", "feeds back into", "Proposer and Evaluator")
+    R("Proposer and Evaluator", "implements", "Agent layer")
+    R("Proposer and Evaluator", "reads", "Episode dossier")
+    R("Reasoning models abstain worse", "constrains", "Proposer and Evaluator")
+    R("Field order beats everything", "constrains", "Proposer and Evaluator")
+    R("A human gate can be worthless", "constrains", "Agent layer")
+    R("A human gate can be worthless", "depends on", "Deterministic boundary")
+    R("Checklist, not a score", "avoids", "A docstring is not a test")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
-         wave_8_implementation, wave_9_state_do_not_narrate]
+         wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer]
 
 
 def main():

@@ -43,10 +43,32 @@ no error and no trace. The memory server is a **read** interface in this project
 </critical_requirement>
 
 <critical_requirement>
-**Phase 1 is authorised for `docs/solutions/` only.** `docs/decision_ledger.md`,
-`START_HERE.md` and `docs/architecture_decisions.md` carry a standing no-touch rule.
-If they are stale, **report it and record the staleness in the graph** — do not edit
-them. That is the user's call, not the command's.
+**The graph is a RUNTIME DEPENDENCY, not documentation.** The agent layer's grounding
+documents are derived from `docs/knowledge_graph.jsonl` rather than authored as
+markdown. So a wave that removes or renames an entity the Coordinator's evaluator
+grounds against can break the agent layer, silently, at the next rebuild.
+
+Consequences for phase 2:
+
+- Before `UNOBS`-ing anything, grep `src/recon/agents/` for the entity name and for
+  the observation text. An observation that some scorer reads is load-bearing code,
+  not prose.
+- Prefer adding a correcting observation over removing the original when the entity is
+  grounding material — the agent needs to know what changed, not just what is true now.
+- After every rebuild, run the agent layer's grounding tests. A green graph build is
+  not evidence the grounding still resolves.
+</critical_requirement>
+
+<critical_requirement>
+**Phase 1 covers `docs/solutions/` AND the living design documents** — currently
+`docs/agent_layer_design.md`, `docs/agent_layer_readiness.md` and
+`docs/remaining_work.md`. Those go stale faster than the learnings do, because they
+describe work in flight rather than work finished. Check each against the code the same
+way, and against decisions made since they were written.
+
+`docs/decision_ledger.md`, `START_HERE.md` and `docs/architecture_decisions.md` keep
+their standing no-touch rule. If they are stale, **report it and record the staleness
+in the graph** — do not edit them. That is the user's call, not the command's.
 </critical_requirement>
 
 ---
