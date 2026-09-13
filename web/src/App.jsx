@@ -23,7 +23,6 @@ export default function App() {
   const [feeds, setFeeds] = useState(null)
   const [busy, setBusy] = useState(false)
   const [dossierBusy, setDossierBusy] = useState(false)
-  const episodeRef = useRef(null)
   const [error, setError] = useState(null)
 
   // --- bootstrap ---------------------------------------------------------
@@ -104,11 +103,10 @@ export default function App() {
       .then((payload) => {
         if (!live) return
         setDossier(payload)
-        // Bring it into view. The queue can be hundreds of rows tall, so the episode panel sits well
-        // below the fold — clicking a row looked like it did nothing at all, even though the row
-        // highlighted and the dossier rendered perfectly a few thousand pixels down the page.
-        // A selection the user cannot see is the same as no selection.
-        episodeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // No scrollIntoView here. The dossier now lives in a sticky right-hand column that is
+        // always on screen, and this effect re-runs on every cursor tick (the dossier refetches at
+        // the new cursor) — a scroll tied to that would yank the page on every drag of the slider,
+        // not just when the selected episode actually changes.
       })
       .catch((exc) => {
         if (!live) return
@@ -215,92 +213,98 @@ export default function App() {
         </div>
       ) : null}
 
-      <section className="panel">
-        <h2>Replay cursor</h2>
-        <p className="hint">
-          The engine processes records whose arrival time is at or before this cursor. Moving it
-          backwards reproduces the answer as it stood then — the same code path in both directions,
-          which is why the audit question needs no separate feature.
-        </p>
-        <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
-      </section>
+      <div className="layout-grid">
+        <div className="layout-left">
+          <section className="panel">
+            <h2>Replay cursor</h2>
+            <p className="hint">
+              The engine processes records whose arrival time is at or before this cursor. Moving it
+              backwards reproduces the answer as it stood then — the same code path in both directions,
+              which is why the audit question needs no separate feature.
+            </p>
+            <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
+          </section>
 
-      <section className="panel">
-        <h2>Queues at this cursor</h2>
-        <p className="hint">
-          Three dispositions, because “what do I do with this?” has three answers. A queue is a
-          query over the verdict log, not a table things are moved into — which is why it can be
-          asked at any cursor and why deleting the log loses nothing.
-        </p>
-        <QueueTiles overview={overview} selected={disposition} onSelect={selectDisposition} />
-      </section>
+          <section className="panel">
+            <h2>Queues at this cursor</h2>
+            <p className="hint">
+              Three dispositions, because “what do I do with this?” has three answers. A queue is a
+              query over the verdict log, not a table things are moved into — which is why it can be
+              asked at any cursor and why deleting the log loses nothing.
+            </p>
+            <QueueTiles overview={overview} selected={disposition} onSelect={selectDisposition} />
+          </section>
 
-      <section className="panel">
-        <h2>{disposition} queue</h2>
-        <QueueTable
-          rows={rows}
-          orderBy={orderBy}
-          onOrderBy={setOrderBy}
-          selected={selected}
-          onSelect={setSelected}
-          busy={busy}
-        />
-      </section>
+          <section className="panel">
+            <h2>{disposition} queue</h2>
+            <QueueTable
+              rows={rows}
+              orderBy={orderBy}
+              onOrderBy={setOrderBy}
+              selected={selected}
+              onSelect={setSelected}
+              busy={busy}
+            />
+          </section>
 
-      <section className="panel" id="episode" ref={episodeRef} data-testid="episode-panel">
-        <h2>The episode, end to end</h2>
-        <p className="hint">
-          One claim, everything that happened to it, in the order we learned it — the claim filed,
-          what the payer said, when the money moved, how the 340B rebate went, and every point at
-          which the verdict changed. This is the same object the agent layer receives in a single
-          call, and nothing in it was written by a model: every line is composed from the records.
-        </p>
-        <EpisodeDossier dossier={dossier} busy={dossierBusy} />
-      </section>
+          <section className="panel">
+            <h2>Feed-level exceptions</h2>
+            <p className="hint">
+              Properties of ingestion rather than of any claim, which is why they are not multiplied into
+              the episode state space. Each one is a query, not a stored flag.
+            </p>
+            <FeedExceptions data={feeds} />
+          </section>
 
-      <section className="panel">
-        <h2>Feed-level exceptions</h2>
-        <p className="hint">
-          Properties of ingestion rather than of any claim, which is why they are not multiplied into
-          the episode state space. Each one is a query, not a stored flag.
-        </p>
-        <FeedExceptions data={feeds} />
-      </section>
+          {overview ? (
+            <section className="panel">
+              <h2>Verdict distribution</h2>
+              <p className="hint">
+                Fifty deterministic rules generate 372 reachable verdict pairs compositionally — the
+                engine resolves each track independently and then annotates, rather than enumerating
+                combinations.
+              </p>
+              <div className="table-wrap">
+                <table data-testid="verdict-distribution">
+                  <thead>
+                    <tr>
+                      <th>Reimbursement</th>
+                      <th>Rebate</th>
+                      <th className="num">Episodes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.verdict_pairs.map((pair) => (
+                      <tr key={`${pair.reimbursement}|${pair.rebate}`}>
+                        <td>
+                          <span className="verdict-code">{pair.reimbursement}</span>
+                        </td>
+                        <td>
+                          <span className="verdict-code">{pair.rebate}</span>
+                        </td>
+                        <td className="num">{pair.episodes}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : null}
+        </div>
 
-      {overview ? (
-        <section className="panel">
-          <h2>Verdict distribution</h2>
-          <p className="hint">
-            Fifty deterministic rules generate 372 reachable verdict pairs compositionally — the
-            engine resolves each track independently and then annotates, rather than enumerating
-            combinations.
-          </p>
-          <div className="table-wrap">
-            <table data-testid="verdict-distribution">
-              <thead>
-                <tr>
-                  <th>Reimbursement</th>
-                  <th>Rebate</th>
-                  <th className="num">Episodes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {overview.verdict_pairs.map((pair) => (
-                  <tr key={`${pair.reimbursement}|${pair.rebate}`}>
-                    <td>
-                      <span className="verdict-code">{pair.reimbursement}</span>
-                    </td>
-                    <td>
-                      <span className="verdict-code">{pair.rebate}</span>
-                    </td>
-                    <td className="num">{pair.episodes}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
+        <div className="layout-right">
+          <section className="panel" id="episode" data-testid="episode-panel">
+            <h2>The episode, end to end</h2>
+            <p className="hint">
+              One claim, everything that happened to it, in the order we learned it — the claim filed,
+              what the payer said, when the money moved, how the 340B rebate went, and every point at
+              which the verdict changed. This is the same object the agent layer receives in a single
+              call, and nothing in it was written by a model: every line is composed from the records.
+            </p>
+            <EpisodeDossier dossier={dossier} busy={dossierBusy} />
+          </section>
+        </div>
+      </div>
     </div>
   )
 }

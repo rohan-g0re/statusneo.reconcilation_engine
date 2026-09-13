@@ -95,6 +95,39 @@ header.masthead {
 }
 .panel > .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; max-width: 78ch; }
 
+/* ═══ two-column layout ════════════════════════════════════════════════ */
+/* Left: everything you scroll through while working a queue. Right: the one episode you have
+ * open, pinned so dragging the cursor or scrolling the queue never loses it off-screen. Below
+ * ~1100px there isn't room for a legible right column, so it drops back to the single stacked
+ * layout with the dossier at the bottom. */
+
+.layout-grid {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  align-items: start;
+  gap: 18px;
+}
+.layout-left { min-width: 0; }
+.layout-right {
+  position: sticky;
+  top: 20px;
+  min-width: 0;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+.layout-right .panel { margin-bottom: 0; }
+
+@media (max-width: 1100px) {
+  .layout-grid { grid-template-columns: 1fr; }
+  .layout-right {
+    position: static;
+    top: auto;
+    max-height: none;
+    overflow-y: visible;
+  }
+  .layout-right .panel { margin-bottom: 18px; }
+}
+
 /* ═══ cursor scrubber ══════════════════════════════════════════════════ */
 
 .scrubber { display: flex; flex-direction: column; gap: 10px; }
@@ -107,6 +140,13 @@ header.masthead {
   min-width: 11ch;
 }
 .scrubber .ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); }
+.scrubber .step-btn {
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  padding: 6px 10px;
+  min-width: 34px;
+}
 
 button {
   font: inherit;
@@ -353,6 +393,11 @@ details.evidence pre {
  * sit at 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the
  * meaning, so the label goes back to a legible ink. */
 .dossier-kind { color: var(--text-secondary) !important; }
+
+/* The timeline gutter holds a date and nothing else, and must never push into the facts
+ * column. Belt and braces after a long tag overflowed it in the narrower right-hand panel. */
+.dossier-when { overflow: hidden; }
+.dossier-when time { overflow-wrap: anywhere; }
 
 /* #74736d on --surface-2 measures 4.02:1, below the 4.5:1 body-text floor. Chips and small labels
  * sit on surface-2 constantly, so muted ink is darkened for the light theme only; the dark theme's

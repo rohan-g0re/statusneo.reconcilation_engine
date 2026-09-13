@@ -326,14 +326,16 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
           const dot = TAG_DOT[event.tag] ?? 'var(--border-strong)'
           return (
             <li key={index} style={{ '--dot': dot }} data-testid={`event-${event.tag}`}>
+              {/* Date only. The raw tag used to sit here too, but the gutter is fixed-width and
+                  long tags (MEDICAL_ACKNOWLEDGMENT, PROVIDER_LEVEL_ADJUSTMENT) overflowed into the
+                  facts column once the dossier moved into the narrower right-hand panel. It was
+                  redundant anyway — the headline is the same tag, humanised — so the exact value
+                  lives on the headline's title and in the event's data-testid. */}
               <div className="dossier-when">
                 <time dateTime={event.at}>{event.at.slice(0, 10)}</time>
-                <span className="dossier-kind" title={event.tag}>
-                  {event.tag}
-                </span>
               </div>
               <div className="dossier-body">
-                <div className="dossier-headline">
+                <div className="dossier-headline" title={event.tag}>
                   {humanizeTag(event.tag)}
                   {event.late ? (
                     <span className="chip" style={{ marginLeft: 6 }} title="Arrival lagged the event">

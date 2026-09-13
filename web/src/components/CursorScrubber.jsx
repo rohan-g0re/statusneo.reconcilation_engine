@@ -17,11 +17,28 @@ export default function CursorScrubber({ bounds, cursor, onChange, busy }) {
 
   const dateAt = (days) => new Date(start.getTime() + days * 86400000).toISOString().slice(0, 10)
 
+  // One day at a time, in either direction — the point is to step through the window and watch
+  // what actually changed between two adjacent days, not to jump to an endpoint.
+  const stepDay = (delta) => {
+    const nextOffset = Math.max(0, Math.min(totalDays, offset + delta))
+    onChange(cursorFromDate(dateAt(nextOffset)))
+  }
+
   return (
     <div className="scrubber">
       <div className="row">
         <label htmlFor="cursor-range" style={{ fontWeight: 650 }}>Cursor</label>
         <output className="readout" data-testid="cursor-readout">{dateFromCursor(cursor)}</output>
+        <button
+          className="step-btn"
+          data-testid="cursor-prev-day"
+          onClick={() => stepDay(-1)}
+          disabled={busy || offset <= 0}
+          title="Step back one day"
+          aria-label="Step cursor back one day"
+        >
+          ◀
+        </button>
         <input
           id="cursor-range"
           data-testid="cursor-range"
@@ -34,12 +51,14 @@ export default function CursorScrubber({ bounds, cursor, onChange, busy }) {
           onChange={(event) => onChange(cursorFromDate(dateAt(Number(event.target.value))))}
         />
         <button
-          data-testid="cursor-end"
-          onClick={() => onChange(bounds.max)}
-          disabled={busy || cursor === bounds.max}
-          title="Jump to the end of the window, where every record has arrived"
+          className="step-btn"
+          data-testid="cursor-next-day"
+          onClick={() => stepDay(1)}
+          disabled={busy || offset >= totalDays}
+          title="Step forward one day"
+          aria-label="Step cursor forward one day"
         >
-          Latest
+          ▶
         </button>
       </div>
       <div className="ends">
