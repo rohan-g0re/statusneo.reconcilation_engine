@@ -402,7 +402,7 @@ Orthogonal to episode state. These are properties of *ingestion*, not of a claim
 | **D-2** | Late-arriving / out-of-order record | A bank deposit lands before the remittance that explains it                          | Not an unmatched deposit — it becomes matchable once the later record arrives; the engine must be re-runnable |
 | **D-3** | Orphan bank deposit                 | Cash received with no linkable claim, rebate or remittance                           | Not revenue we can recognize; may be a crosswalk failure rather than genuinely unattributable                  |
 | **D-4** | Orphan / unmatched rebate           | Rebate cash or a rebate event that cannot be tied to any qualified dispense in any other feed | Not a windfall — cash held without provenance is audit exposure. Absorbs what an earlier draft filed as episode state C-12; an unattributable rebate has no episode to be a state *of* |
-| **D-5** | Malformed or unparseable record     | Schema version mismatch, missing required field, bad type                            | Must be quarantined with lineage intact, never silently dropped                                                |
+| **D-5** | Malformed or unparseable record — ⚠️ **not generated** | Schema version mismatch, missing required field, bad type | **Dropped from the dataset (C16).** Checked against the assignment: its data requirement names eight edge cases and malformed records is not among them. The only nearby text is a design-note question about schema versions and retries — prose, not generated data. Quarantine survives as production behaviour described in the design note; nothing generates or tests it here |
 | **D-6** | Crosswalk miss                      | Claim exists in one feed; the corresponding identifier cannot be resolved in another | The claim is not necessarily missing — the*mapping* failed. Different fix, different owner                  |
 | **D-7** | Lump-deposit allocation residual    | A single ACH covers N claims; allocated amounts do not sum to the deposit total      | The deposit is not wrong; the allocation is incomplete. Residual must be tracked, not absorbed                 |
 
@@ -460,7 +460,7 @@ A real 835 carries hundreds of claim-adjustment and remittance-advice reason cod
 
 Adding a fifth PBM is rows. Adding a payer that does **capitation** or **bundled payments** is not — neither is fee-for-service, so there is no expected-per-claim amount to reconcile against and the entire expected-vs-actual frame does not apply. Interim payments and split-billing have the same problem.
 
-The containment mechanism: adapters map into a **closed** canonical event vocabulary. An event that does not map is quarantined as D-5 with its lineage intact, never coerced into the nearest-looking slot. New *codes* are configuration; new *semantics* are a canonical-model change, and the system should refuse to guess which it is looking at.
+The containment mechanism: adapters map into a **closed** canonical event vocabulary. An event that does not map is quarantined with its lineage intact, never coerced into the nearest-looking slot — production behaviour described in the design note, not something this prototype generates (C16). New *codes* are configuration; new *semantics* are a canonical-model change, and the system should refuse to guess which it is looking at.
 
 That boundary is worth stating explicitly in the walkthrough. Claiming a design absorbs anything is weaker than showing where it stops and how it fails safe when it gets there.
 

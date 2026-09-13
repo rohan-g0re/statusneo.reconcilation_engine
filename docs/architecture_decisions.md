@@ -288,7 +288,7 @@ Real timing rules do exist in the industry — Medicare's 30-day payment ceiling
 
 1. **Rules must be parameterized, or the claim is false in practice.** A literal threshold (`if age_days > 30`) forks per payer the moment a second payer needs a different value; the same rule expressed as a config lookup (`sla_for(tenant, source, pathway)`) does not. This is what makes SLA removal (Decision 19) not merely a modelling preference but a scaling precondition.
 2. **Row growth is large and is the highest-maintenance surface.** A real 835 carries hundreds of CARC/RARC codes per payer. "Configuration rather than one-off code" is a claim that config rows are cheap to add and reviewable in bulk, not a claim that the config itself is trivial.
-3. **A genuinely new event *semantics* does add states.** Adding a fifth PBM is rows; adding a payer that does capitation or bundled payments is not, because fee-for-service's expected-per-claim frame doesn't apply to either. The containment mechanism is that adapters map into a *closed* canonical event vocabulary, and anything that doesn't map is quarantined (as a D-5 malformed-record exception) with lineage intact, never coerced into the nearest-looking slot. New codes are configuration; new semantics are a canonical-model change, and the system should refuse to guess which one it's looking at.
+3. **A genuinely new event *semantics* does add states.** Adding a fifth PBM is rows; adding a payer that does capitation or bundled payments is not, because fee-for-service's expected-per-claim frame doesn't apply to either. The containment mechanism is that adapters map into a *closed* canonical event vocabulary, and anything that doesn't map is quarantined with lineage intact, never coerced into the nearest-looking slot. Quarantine is described in the design note as production behaviour; **nothing in this prototype generates a malformed record** (see C16). New codes are configuration; new semantics are a canonical-model change, and the system should refuse to guess which one it's looking at.
 
 ---
 
@@ -390,7 +390,6 @@ Rulings made when the four parallel implementation plans were reconciled. Full r
 | D-2 late arrival | 8% of episodes, one record each | `received_at` shifted +7..45 days; event dates untouched |
 | D-3 orphan bank deposit | ~2% of bank rows | synthesized by the realizer |
 | D-4 orphan rebate | ~2% of rebate dispense lines | plus the emergent Decision 42 path |
-| D-5 malformed record | 0.5%, `full` only, never `demo` | injected **centrally, post-write**, by the orchestrator corrupting emitted lines — a malformed record is a transport accident, not something a payer emits; generators stay provably well-formed |
 | D-6 crosswalk miss | emergent | from TRN drops + identifier drift; recorded in ground truth `expected_links` |
 | D-7 allocation residual | unreferenced `FB` on 5% of otherwise-clean remittances; 100% of recoupments net via PLB | |
 | Rx identifier drift | 6% of 340B-bearing episodes | orchestrator assigns a `rx_number_rendering` directive to **exactly one feed** per episode (pharmacy 835 zero-padded is the canonical case); generators render as directed, never drift independently |
