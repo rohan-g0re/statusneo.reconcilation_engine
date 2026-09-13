@@ -396,3 +396,59 @@ def test_a_reopening_is_narrated_when_one_happened(client):
 
 def test_an_unknown_episode_has_no_dossier(client):
     assert client.get("/api/episode/E-999999/dossier").status_code == 404
+
+
+# ═══ regeneration: reproducible by default, fresh on request ════════════════
+
+
+def test_a_new_seed_produces_a_genuinely_different_dataset(client):
+    """"Fresh data" and "reproducible data" are the same mechanism with a different argument.
+
+    Omit the seed and the rebuild is byte-identical, which is what makes the manifest's per-feed
+    hashes mean anything. Pass one and you get a different dataset of the same shape — still
+    reproducible from *that* seed. Neither is traded away for the other.
+    """
+    baseline = client.post("/api/regenerate?profile=demo").json()
+    reseeded = client.post("/api/regenerate?profile=demo&seed=777001").json()
+
+    assert reseeded["master_seed"] == 777001
+    assert reseeded["episodes"] == baseline["episodes"], "same shape, different content"
+    assert reseeded["feed_sha256"] != baseline["feed_sha256"], (
+        "a new seed must actually change the feeds"
+    )
+    # Every single feed should differ, not just one.
+    for filename, digest in reseeded["feed_sha256"].items():
+        assert digest != baseline["feed_sha256"][filename], f"{filename} did not change"
+
+    # And the same seed twice is identical again — the new dataset is itself reproducible.
+    again = client.post("/api/regenerate?profile=demo&seed=777001").json()
+    assert again["feed_sha256"] == reseeded["feed_sha256"]
+
+    # Leave the client on the published seed so later tests see the expected dataset.
+    client.post("/api/regenerate?profile=demo")
+
+
+def test_a_reseeded_dataset_is_still_a_working_dataset(client):
+    """A different seed must not quietly produce a degenerate dataset.
+
+    Reproducibility would be worthless if "different" meant "broken" — the reseeded data has to
+    reach all three queues and still carry the defects the design promises.
+    """
+    client.post("/api/regenerate?profile=demo&seed=424242")
+    try:
+        overview = client.get("/api/overview").json()
+        counts = {k: v["episodes"] for k, v in overview["by_disposition"].items()}
+        assert sum(counts.values()) == 60
+        assert all(count > 0 for count in counts.values()), (
+            f"a reseeded dataset reached only {counts}"
+        )
+        exceptions = client.get("/api/queue/EXCEPTION?limit=200").json()["episodes"]
+        assert exceptions
+        assert any(row["reason_codes"] for row in exceptions)
+    finally:
+        client.post("/api/regenerate?profile=demo")
+
+
+def test_a_nonsense_seed_is_refused(client):
+    assert client.post("/api/regenerate?profile=demo&seed=-1").status_code == 422
+    assert client.post("/api/regenerate?profile=demo&seed=0").status_code == 422

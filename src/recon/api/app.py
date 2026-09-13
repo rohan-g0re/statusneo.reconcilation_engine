@@ -293,12 +293,35 @@ def create_app(settings: Settings | None = None):
             return service.feed_exceptions(conn, resolve_cursor(cursor))
 
     @app.post("/api/regenerate")
-    def regenerate(profile: str = Query("demo")) -> dict[str, Any]:
-        """Wipe and rebuild from the seed.
+    def regenerate(
+        profile: str = Query("demo"),
+        seed: int | None = Query(
+            None,
+            description=(
+                "Master seed. Omit to rebuild the published dataset byte for byte; pass a new "
+                "value for a genuinely different one."
+            ),
+        ),
+    ) -> dict[str, Any]:
+        """Wipe and rebuild the whole dataset.
 
-        Usable repeatedly rather than only once, which is what makes it a demo control instead of a
-        test fixture (Decision C19). The same seed gives the same dataset, so this doubles as a live
-        reproducibility check.
+        Always a real rebuild — the feeds are regenerated, reloaded, re-crosswalked and
+        re-reconciled from nothing. What ``seed`` controls is whether the result is *new*.
+
+        **Omit it** and the rebuild is byte-identical to the last one. That is the point rather
+        than a limitation: ``manifest.json`` publishes a SHA-256 per feed, and those hashes only
+        mean something if the same seed, window and reference data reproduce the same bytes. Run
+        it twice, compare the manifests, and you have checked reproducibility rather than claimed
+        it.
+
+        **Pass one** and you get a different dataset of the same shape — different claims,
+        different amounts, different defects landing on different episodes — which is itself
+        reproducible from that seed. So "fresh data" and "reproducible data" are the same
+        mechanism with a different argument, not a trade-off.
+
+        The seed arrives as an *input*, deliberately. Nothing inside the generator reads a clock
+        (Decision 18): a generator that invented its own seed could never be replayed, and the
+        cursor's whole meaning depends on the timeline being fixed before anything reads it.
         """
         try:
             target = Profile(profile)
@@ -306,8 +329,21 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(
                 status_code=422, detail=f"unknown profile {profile!r}; expected demo or full"
             ) from None
+        if seed is not None and not 0 < seed < 2**63:
+            raise HTTPException(
+                status_code=422, detail=f"seed must be a positive integer, got {seed}"
+            )
+
         current: Settings = app.state.settings
-        app.state.settings = current.for_profile(target)
-        return build_dataset(app.state.settings, rebuild=True)
+        rebuilt = current.for_profile(target)
+        if seed is not None:
+            from dataclasses import replace
+
+            rebuilt = replace(rebuilt, master_seed=seed)
+        app.state.settings = rebuilt
+
+        result = build_dataset(app.state.settings, rebuild=True)
+        result["master_seed"] = app.state.settings.master_seed
+        return result
 
     return app

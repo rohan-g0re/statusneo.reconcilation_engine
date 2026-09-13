@@ -40,7 +40,7 @@ from typing import Any, Iterator, Sequence
 
 from recon.domain.enums import BenefitType
 from recon.reference import drugs, entities, patients
-from recon.rng import rng_for, stable_choice
+from recon.rng import derive_seed, rng_for, stable_choice
 
 __all__ = [
     "LeafCatalogue",
@@ -459,17 +459,39 @@ def _quantity_units(rng: random.Random, drug) -> int:
     return vials * per_vial
 
 
+def _run_offset(master_seed: int, profile_name: str, namespace: str, span: int) -> int:
+    """A per-run base for an identifier series, derived from the seed.
+
+    Claim identifiers have to satisfy two things at once, and an earlier version satisfied only the
+    first: **unique within a run**, and **different between runs with different seeds**.
+
+    ``ENC-{88000 + sequence}-01`` and ``7_000_000 + sequence * 7`` were both functions of the
+    sequence number alone, so every seed produced the same claim numbers. Two supposedly independent
+    datasets shared claim identities — which would make any comparison between them quietly
+    meaningless, and would be baffling to anyone who regenerated expecting fresh data.
+
+    Offsetting the whole series by a seed-derived base fixes that without touching uniqueness: the
+    within-run spacing still guarantees no two episodes collide.
+    """
+    return derive_seed(master_seed, profile_name, namespace) % span
+
+
 def _mint_rx_number(master_seed: int, profile_name: str, sequence: int) -> str:
     """A pharmacy-assigned Rx number: numeric, <= 12 digits, unique per episode.
 
     Minted by the orchestrator rather than the PBM generator because it is a value that
     genuinely crosses systems — the pharmacy assigns it, and both the PBM and the TPA
     quote it back (Decision 44's crossing matrix).
+
+    Spaced seven apart with up to six of jitter, so no two sequences can land on the same number
+    however the jitter falls.
     """
+    base = 100_000_000 + _run_offset(master_seed, profile_name, "rx-run", 800_000_000)
     rng = rng_for(master_seed, profile_name, "rx", sequence)
-    return str(7_000_000 + sequence * 7 + rng.randint(0, 6))
+    return str(base + sequence * 7 + rng.randint(0, 6))
 
 
 def _mint_clm01(master_seed: int, profile_name: str, sequence: int) -> str:
     """A provider-assigned patient control number: alphanumeric, <= 20 chars."""
-    return f"ENC-{88_000 + sequence:05d}-01"
+    base = _run_offset(master_seed, profile_name, "clm01-run", 900_000)
+    return f"ENC-{100_000 + base:06d}-{sequence:05d}"

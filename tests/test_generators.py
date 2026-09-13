@@ -1160,3 +1160,42 @@ def test_a_tpa_reversal_goes_on_the_wire_as_a_negative_quantity(full_result):
             f"reversal {payload['record_id']} carries a non-negative quantity "
             f"{payload['quantity_dispensed']}"
         )
+
+
+def test_a_different_seed_still_covers_all_372_verdict_pairs(tmp_path):
+    """Coverage is a property of the *design*, not of one lucky seed.
+
+    The full profile reserves one episode per verdict pair before filling the remainder, so the
+    guarantee should hold for any seed. If it only held for the published one, the stratification
+    would be a coincidence rather than a mechanism — and the coverage test would be measuring luck.
+    """
+    settings = load_settings("full", data_dir=tmp_path, master_seed=987_654_321)
+    result = generate(settings)
+
+    produced = {
+        tuple(key.split("|")) for key in result.ground_truth["verdict_pair_counts"]
+    }
+    missing = verdicts.REACHABLE_PAIRS - produced
+    assert not missing, (
+        f"seed 987654321 missed {len(missing)} verdict pairs: {sorted(missing)[:8]}"
+    )
+    assert result.ground_truth["master_seed"] == 987_654_321
+
+
+def test_a_different_seed_changes_the_content_but_not_the_shape(tmp_path):
+    """Different claims, different amounts, different defects — same structure."""
+    published = generate(load_settings("demo", data_dir=tmp_path / "a"))
+    reseeded = generate(load_settings("demo", data_dir=tmp_path / "b", master_seed=13_579))
+
+    assert published.episode_count == reseeded.episode_count
+
+    def natural_keys(result):
+        return {
+            value
+            for episode in result.ground_truth["episodes"]
+            for value in episode["natural_keys"].values()
+        }
+
+    assert not (natural_keys(published) & natural_keys(reseeded)), (
+        "two seeds produced overlapping claim identities; the seed is not reaching the minting"
+    )

@@ -125,11 +125,11 @@ export default function App() {
     }
   }, [selected, cursor])
 
-  const regenerate = async (profile) => {
+  const regenerate = async (profile, seed) => {
     setBusy(true)
     setError(null)
     try {
-      await api.regenerate(profile)
+      await api.regenerate(profile, seed)
       const payload = await api.meta()
       setMeta(payload)
       setSelected(null)
@@ -170,7 +170,9 @@ export default function App() {
             {meta ? (
               <>
                 {' '}
-                Profile <code>{meta.profile}</code>, engine <code>{meta.engine_version}</code>.
+                Profile <code>{meta.profile}</code>, seed{' '}
+                <code data-testid="seed">{meta.stored?.master_seed ?? '—'}</code>, engine{' '}
+                <code>{meta.engine_version}</code>.
               </>
             ) : null}
           </div>
@@ -179,11 +181,30 @@ export default function App() {
           <span className="sub" data-testid="totals">
             {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
           </span>
-          <button data-testid="regen-demo" onClick={() => regenerate('demo')} disabled={busy}>
-            Regenerate demo
+          <button
+            data-testid="regen-demo"
+            onClick={() => regenerate('demo')}
+            disabled={busy}
+            title="Rebuild the published dataset. Same seed, so byte-for-byte identical — which is how you check reproducibility rather than take it on trust."
+          >
+            Rebuild demo
           </button>
-          <button data-testid="regen-full" onClick={() => regenerate('full')} disabled={busy}>
-            Regenerate full
+          <button
+            data-testid="regen-full"
+            onClick={() => regenerate('full')}
+            disabled={busy}
+            title="Rebuild the 1,500-episode profile from the published seed."
+          >
+            Rebuild full
+          </button>
+          <button
+            data-testid="regen-new-seed"
+            className="primary"
+            onClick={() => regenerate(meta?.profile ?? 'demo', api.freshSeed())}
+            disabled={busy}
+            title="A different dataset of the same shape — new claims, new amounts, defects landing on different episodes. Reproducible from its own seed."
+          >
+            New data
           </button>
         </div>
       </header>

@@ -32,11 +32,20 @@ export const api = {
   // One call, one episode, its entire history — the same payload the agent layer receives.
   dossier: (episodeId, cursor) => get(`/episode/${episodeId}/dossier`, { cursor }),
   feedExceptions: (cursor) => get('/feed-exceptions', { cursor }),
-  regenerate: async (profile) => {
-    const response = await fetch(`/api/regenerate?profile=${profile}`, { method: 'POST' })
+  // `seed` omitted rebuilds the published dataset byte for byte; a seed gives a genuinely
+  // different one. The seed is chosen HERE, at the edge — nothing inside the generator reads a
+  // clock, because a generator that invented its own seed could never be replayed.
+  regenerate: async (profile, seed) => {
+    const query = new URLSearchParams({ profile })
+    if (seed !== undefined && seed !== null) query.set('seed', String(seed))
+    const response = await fetch(`/api/regenerate?${query}`, { method: 'POST' })
     if (!response.ok) throw new Error(`regenerate failed: ${response.status}`)
     return response.json()
   },
+
+  // A fresh seed for "give me different data". Derived from the clock on the client, which is the
+  // one place a wall-clock reading is harmless.
+  freshSeed: () => (Date.now() % 100_000_000) + 1,
 }
 
 // Money is integer cents end to end, and it stays integer until the moment it is displayed.
