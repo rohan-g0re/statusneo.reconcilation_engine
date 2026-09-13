@@ -16,6 +16,21 @@ Status legend: **✅ settled** · **🟡 proposed, awaiting confirmation** · **
 
 ---
 
+## Next actions
+
+Shortest path back into the work.
+
+| Order | Action | Why now |
+|---|---|---|
+| 1 | **Clear B7–B10** | Four items, all low-cost, none with a serious alternative. Ten minutes of yes/no |
+| 2 | **Ratify or overrule C.1 and C.2** | Seventeen agent-made decisions currently baked into the plans. C10 (fictional names) is not optional — the assignment forbids real client names in generated data |
+| 3 | **Redo the database design pass** | A26 made this a first-class task, and A23/A24 landed after the plans were written. The schema needs the eight key types, the partial indexes and the read/write split |
+| 4 | **Then implement Set A** | Foundation, orchestrator, four generators. The untracked code on disk is a starting point, not a finished one |
+
+C.3 is mostly outside Set A and can wait — except **C23 (the design note)**, which carries roughly 40% of the grade and has no dependency on any code. It can be drafted in parallel at any time.
+
+---
+
 ## Section A — Settled
 
 Decided explicitly. Committed into `docs/architecture_decisions.md`, `docs/feed_formats.md` and `docs/reconciliation_state_space.md`. The implementation plans may rely on these.
@@ -76,6 +91,7 @@ Decided explicitly. Committed into `docs/architecture_decisions.md`, `docs/feed_
 | A15 | ✅ **SQLite for persistence** | |
 | A16 | ✅ **Stack: Python backend, FastAPI API layer, React front end** | Recorded as Decisions 34–36 |
 | A27 | ✅ **`docs/glossary.md` is the vocabulary authority** | Linked from the head of every design document. It wins wherever another document is loose |
+| A28 | ✅ **Naming: `episode` in code, "claim financial episode" in prose, `claim` reserved for the payment request** | The object and the "claim object" are the same thing — this is purely naming. But *claim* already means something narrower and real: the 837 or B1 submission, which lives **inside** the episode. Using it for both gives you `claim.reimbursement_track.claim`. Prose keeps the assignment's own term so a reviewer sees familiar vocabulary |
 
 ---
 
@@ -158,9 +174,10 @@ Forced by conflicts between the four plans. Each is defensible; none was agreed 
 |---|---|
 | Design documents | Committed — `cfeb73b` |
 | Four implementation plans + reconciliation | Committed — `833d19a` |
-| Decision ledger | Committed — `18428fd` |
+| Decision ledger | Committed — `18428fd`, updated `be221a4` |
 | Glossary | Written, linked from five documents |
 | Section B walkthrough | **6 of 10 resolved.** B7, B8, B9, B10 outstanding |
+| Database design pass | **Owed.** A26 made it a first-class task; A23 and A24 postdate the plans |
 | Section C walkthrough | Not started |
 | Implementation | **Not started.** Held pending B and C |
 
