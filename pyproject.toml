@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recon"
+version = "0.1.0"
+description = "Specialty-pharmacy reconciliation prototype: synthetic feeds, deterministic engine, agent layer."
+requires-python = ">=3.11"
+# The base install has ZERO runtime dependencies. That is what makes the
+# "dependency-light deterministic core" (Decision 34) a fact about this manifest
+# rather than a claim in prose. Anything heavier goes in an optional extra.
+dependencies = []
+
+[project.optional-dependencies]
+api = ["fastapi", "uvicorn", "pydantic"]
+agent = ["anthropic"]
+dev = ["pytest"]
+
+[project.scripts]
+recon = "recon.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+recon = ["db/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error"]
