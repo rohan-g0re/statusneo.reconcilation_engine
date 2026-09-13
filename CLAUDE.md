@@ -184,6 +184,17 @@ Global Instructions
   extensively and report back. Use Haiku only for reading/scanning — never for writing, editing, planning, or reasoning.
   Synthesize their findings yourself, then answer.
 
+  Project Entry Point
+
+  START_HERE.md at the repo root is the handoff document for this project. It
+  carries the domain primer, the current build state, the reading order for the
+  design documents, the build order, and the known traps. Read it before doing
+  anything else in this repository.
+
+  docs/decision_ledger.md records every decision with provenance -- which were
+  approved by the user, which were delegated, and which are agent defaults.
+  docs/glossary.md is the vocabulary authority.
+
   Documented Solutions
 
   docs/solutions/ — documented solutions to past problems (bugs, best practices,
