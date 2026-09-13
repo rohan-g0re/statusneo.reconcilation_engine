@@ -1,5 +1,7 @@
 # Decision Tree — Findings
 
+> **Vocabulary:** *claim*, *episode*, *track*, *record*, *verdict*, *disposition* and *reason code* are defined once in [`glossary.md`](../docs/glossary.md). That file wins wherever this one is loose.
+
 Programmatic construction of every valid path through the reconciliation state
 space. Every choice at every depth is validated against the choices above it, so
 invalid combinations are **never generated** rather than generated and filtered.

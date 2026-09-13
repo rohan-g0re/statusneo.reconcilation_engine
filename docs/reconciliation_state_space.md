@@ -1,5 +1,7 @@
 # Reconciliation State Space — Brute-Force Enumeration
 
+> **Vocabulary:** *claim*, *episode*, *track*, *record*, *verdict*, *disposition* and *reason code* are defined once in [`glossary.md`](glossary.md). That file wins wherever this one is loose.
+
 **Purpose.** Enumerate every reconciliation outcome the deterministic engine can encounter, so we know the real scale of the problem before writing code. Every possibility listed here must also be narratable by the agent layer.
 
 **Scope.** Happy path + all failure modes within the assignment's four feeds. Multi-tenancy and multi-source scale are deliberately excluded and parked in Section 7.

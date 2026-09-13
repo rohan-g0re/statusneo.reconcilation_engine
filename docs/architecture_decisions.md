@@ -1,5 +1,7 @@
 # Architecture Decisions — Post-Claim Pharmacy Financial Reconciliation
 
+> **Vocabulary:** *claim*, *episode*, *track*, *record*, *verdict*, *disposition* and *reason code* are defined once in [`glossary.md`](glossary.md). That file wins wherever this one is loose.
+
 **Purpose.** This is the decision record for the take-home prototype. It captures every architectural decision reached during design, with the reasoning behind it, so none of it has to be re-derived and so each one can be defended standalone in a 20-30 minute technical walkthrough. Companion documents: [`reconciliation_state_space.md`](./reconciliation_state_space.md) (the state-space enumeration these decisions produced) and [`feed_formats.md`](./feed_formats.md) (what each generator actually emits).
 
 **Headline numbers, as of this decision set.**
