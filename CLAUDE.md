@@ -218,6 +218,33 @@ Global Instructions
   /complete_compound runs both halves of compounding in one pass: the
   docs/solutions refresh, then this session's decisions into the graph.
 
+  THE GRAPH IS A RUNTIME DEPENDENCY, not only documentation. The agent layer's
+  grounding rules are derived from knowledge_graph.jsonl rather than authored as
+  markdown, so removing or renaming an entity the evaluator grounds against can
+  break the agent layer silently at the next rebuild. Grep src/recon/agents/
+  before any UNOBS, and run the grounding tests after any rebuild -- a green
+  graph build is not evidence the grounding still resolves.
+
+  Agent layer
+
+  The only assignment component not yet built. Read these three, in order,
+  before touching it:
+
+  - docs/agent_layer_design.md -- the architecture. Two agents (Proposer and
+    Evaluator) inside a custom ~150-line Python harness over an
+    OpenAI-compatible client. The loop, the checklist, the four outcomes, the
+    tools, the human gate, the UI surface, and what we deliberately are not
+    doing. Every claim is cited; where sources conflict the conflict is stated.
+  - docs/agent_layer_readiness.md -- what the agent already has. Short answer:
+    the data is done, the plumbing is not. The episode dossier is one call and
+    returns everything; INSUFFICIENT_DATA is genuinely emitted by the engine;
+    queue rows already carry age and variance for ranking.
+  - docs/remaining_work.md -- what is left across the whole project, and which
+    decisions are still owed by the user.
+
+  Wave 10 of the knowledge graph records the decisions with provenance --
+  four user decisions, the rest agent defaults marked as such.
+
   docs/decision_ledger.md records every decision with provenance -- which were
   approved by the user, which were delegated, and which are agent defaults.
   docs/glossary.md is the vocabulary authority.

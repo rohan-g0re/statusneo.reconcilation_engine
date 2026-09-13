@@ -284,6 +284,51 @@ Every layer is replaceable in isolation and none of them is a dependency we do n
 
 ---
 
+## 8.6 The surface
+
+The dashboard does not change. Everything below is a separate screen, reached deliberately, because the agent layer is the acceleration path for open and exception cases — not a replacement for the housekeeping view that already works.
+
+### Entry
+
+The episode panel on the dashboard gains one control: **Inspect using AI**. It opens a new tab at `/analyse/{episode_id}`. Nothing about the dashboard's behaviour changes; the button is the only addition.
+
+### The analysis screen
+
+Two columns, same split as the dashboard.
+
+**Left — the same episode timeline**, reusing the existing component. The reviewer must be able to see the evidence while reading the recommendation. This is structural, not cosmetic: it is what stops the approval being a rubber stamp (§7).
+
+**Right — two actions, run in order.**
+
+**`Explain`** runs the Exception Investigator. Single pass with tool calls. Output is prose with inline citations, every factual claim carrying a pointer back to a timeline event or source record. This is the one place the agent layer writes English — and it is the agent's job, which is precisely why the deterministic layer does not do it (§3 of the state-facts learning).
+
+**`Decide next steps`** runs the Workflow Coordinator harness. The loop streams as it runs — iteration number, each tool call, each checklist item as it is ticked, the score, the gate decision. A spinner would hide the one thing worth showing: a reviewer who watches the loop reason is a reviewer who can judge whether to trust it.
+
+The result renders as a proposed work item, and it is **editable** — action, artifacts, rationale. Then **`Add to-do`** commits it.
+
+That button is the human gate. It is the only write path in the entire agent layer.
+
+### The to-do list
+
+Its own section, deliberately not prominent on the dashboard. The dashboard answers "what is the state of the book"; the to-do list answers "what am I doing about it". Different questions, different screens.
+
+A work item carries **what is needed to act, and nothing else**: the action, a short rationale, the concrete artifacts required (form numbers, document names, identifiers to quote), and a link back to the episode. It does not restate the timeline — anyone who wants the story clicks through to the episode that has it.
+
+### What the four outcomes look like
+
+The loop has four terminal states (§2) and each renders differently, because collapsing them into "it worked / it didn't" destroys the distinction that matters most:
+
+| Outcome | What the reviewer sees |
+|---|---|
+| `complete` | The proposed work item, editable, with the checklist shown |
+| `insufficient_data` | **What specifically is missing**, named — the `NOT_ADDRESSED` criteria. Not an apology |
+| `stalled` | The best candidate, plus the fact that it stopped improving |
+| `capped` | The best candidate, plus the budget note |
+
+`insufficient_data` is a **successful outcome**, not a failure, and the UI should not style it as an error. The assignment requires the agent to say when the data is insufficient; a system that only ever renders confident recommendations has failed that requirement silently.
+
+---
+
 ## 9. Deliberately not doing
 
 - **A framework.** Pi, DeepSeek Harness, Claude Code, Codex, Goose are coding-agent harnesses — TypeScript, filesystem tools, terminal UIs. Adopting one means a TS sidecar and RPC to Python for every tool call, for a loop that is ~150 lines. None of them ships an evaluator anyway: four sources checked, four without any scoring abstraction.
