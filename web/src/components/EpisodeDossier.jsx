@@ -11,22 +11,77 @@ import { formatMoney } from '../api.js'
 // It is also exactly the payload the agent layer receives. Whatever a person can see here, the agent
 // gets in one call — and nothing in it was invented by a model: every line is composed in Python
 // from fields the records carry.
+//
+// Timeline events carry no prose. Each one is a TAG (what kind of thing happened) and FACTS (that
+// record's own fields, carried verbatim, with absent ones omitted). This view renders both
+// generically — it never special-cases a tag's field list, because the whole point of `facts` is
+// that its key set states what the record has, and a new field should render without a code change
+// here.
 
-const KIND_STYLE = {
-  CLAIM: { dot: 'var(--accent)', label: 'Claim' },
-  ACKNOWLEDGMENT: { dot: 'var(--accent)', label: 'Clearinghouse' },
-  REMITTANCE: { dot: 'var(--status-warning)', label: 'Remittance' },
-  CASH: { dot: 'var(--status-good)', label: 'Cash' },
-  REBATE: { dot: 'var(--track-rebate)', label: '340B' },
-  CLAWBACK: { dot: 'var(--status-serious)', label: 'Clawback' },
-  REVERSAL: { dot: 'var(--status-serious)', label: 'Reversal' },
-  VERDICT: { dot: 'var(--status-critical)', label: 'Verdict' },
+const TAG_DOT = {
+  PHARMACY_CLAIM: 'var(--accent)',
+  PHARMACY_REVERSAL: 'var(--status-serious)',
+  REMITTANCE: 'var(--status-warning)',
+  REMITTANCE_CLAIM_LINE: 'var(--status-warning)',
+  PROVIDER_LEVEL_ADJUSTMENT: 'var(--status-warning)',
+  MEDICAL_SUBMISSION: 'var(--accent)',
+  MEDICAL_ACKNOWLEDGMENT: 'var(--accent)',
+  TPA_QUALIFICATION: 'var(--track-rebate)',
+  TPA_REBATE_REQUEST: 'var(--track-rebate)',
+  TPA_MANUFACTURER_DECISION: 'var(--track-rebate)',
+  TPA_REVERSAL: 'var(--status-serious)',
+  REBATE_BATCH: 'var(--track-rebate)',
+  REBATE_DISPENSE_LINE: 'var(--track-rebate)',
+  BANK_TRANSACTION: 'var(--status-good)',
+  CASH: 'var(--status-good)',
+  VERDICT: 'var(--status-critical)',
 }
 
 const DISPOSITION_COLOR = {
   CLOSED: 'var(--status-good)',
   PENDING: 'var(--status-warning)',
   EXCEPTION: 'var(--status-critical)',
+}
+
+// REMITTANCE_CLAIM_LINE -> "Remittance claim line". Prominent and skimmable; the raw tag is still
+// shown verbatim alongside it (see the timeline render below) so nothing is lost for anyone who
+// wants the exact identifier.
+function humanizeTag(tag) {
+  const lower = String(tag).toLowerCase().replace(/_/g, ' ')
+  return lower.charAt(0).toUpperCase() + lower.slice(1)
+}
+
+// clp02_claim_status_code -> "CLP02 claim status code". EDI segment identifiers (a short letter
+// run followed by digits, e.g. clp02, svc01, stc12) are kept upper-case because that is how they
+// are written everywhere else in this domain; every other word is left as a normal word, with only
+// the first one capitalised.
+function humanizeKey(key) {
+  return String(key)
+    .split('_')
+    .map((word, index) => {
+      if (/^[a-z]{2,4}\d{1,2}$/i.test(word)) return word.toUpperCase()
+      if (index === 0) return word.charAt(0).toUpperCase() + word.slice(1)
+      return word
+    })
+    .join(' ')
+}
+
+// A `_cents` suffix is a formatting instruction, not part of the label — "amount_cents" is just
+// "Amount" once it is rendered as money.
+function labelForKey(key) {
+  if (key.endsWith('_cents')) {
+    const base = key.slice(0, -'_cents'.length)
+    return base ? humanizeKey(base) : 'Amount'
+  }
+  return humanizeKey(key)
+}
+
+function isArrayOfObjects(value) {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => item !== null && typeof item === 'object' && !Array.isArray(item))
+  )
 }
 
 function Money({ cents, muted }) {
@@ -39,6 +94,112 @@ function Money({ cents, muted }) {
     >
       {formatMoney(cents)}
     </span>
+  )
+}
+
+// A single scalar fact value. Never prints `undefined`, `null`, or `[object Object]` — anything
+// that is still an object or array at this point (a shape no tag currently produces, but facts are
+// carried verbatim from records this view does not control) falls back to JSON rather than the
+// default string coercion.
+function FactScalar({ value, cents }) {
+  if (value === null || value === undefined) return <span className="mono">—</span>
+  if (typeof value === 'boolean') return <span className="mono">{value ? 'yes' : 'no'}</span>
+  if (cents && typeof value === 'number') return <Money cents={value} />
+  if (typeof value === 'object') return <span className="mono">{JSON.stringify(value)}</span>
+  return <span className="mono">{String(value)}</span>
+}
+
+// One fact's value, rendered by shape rather than by name — this is what lets a tag's field list
+// vary freely without a matching change here.
+function FactValue({ factKey, value }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="mono">—</span>
+
+    if (isArrayOfObjects(value)) {
+      // adjustments, service_lines, and anything else shaped like a small line-item table.
+      const columns = Array.from(new Set(value.flatMap((row) => Object.keys(row))))
+      return (
+        <div className="table-wrap fact-nested">
+          <table>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column}>{labelForKey(column)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {value.map((row, index) => (
+                <tr key={index}>
+                  {columns.map((column) => (
+                    <td key={column}>
+                      <FactScalar value={row[column]} cents={column.endsWith('_cents')} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+
+    // reason_codes, reject_codes, cross_track_flags, and any other array of primitives.
+    return (
+      <span>
+        {value.map((item, index) => (
+          <span className="chip" key={index}>
+            {item !== null && typeof item === 'object' ? JSON.stringify(item) : String(item)}
+          </span>
+        ))}
+      </span>
+    )
+  }
+
+  if (value !== null && typeof value === 'object') {
+    // A single nested record — e.g. the PBM path's singular `service_line`, where the medical path
+    // carries a plural `service_lines` list instead.
+    const entries = Object.entries(value).filter(([, v]) => v !== null && v !== undefined)
+    if (entries.length === 0) return <span className="mono">—</span>
+    return (
+      <div className="fact-object">
+        {entries.map(([childKey, childValue]) => (
+          <div className="fact-object-row" key={childKey}>
+            <span className="fact-object-key mono">{labelForKey(childKey)}</span>
+            <FactScalar value={childValue} cents={childKey.endsWith('_cents')} />
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return <FactScalar value={value} cents={factKey.endsWith('_cents')} />
+}
+
+function FactRow({ factKey, value }) {
+  const wide = isArrayOfObjects(value) || (value !== null && typeof value === 'object' && !Array.isArray(value))
+  return (
+    <div className={wide ? 'dossier-fact wide' : 'dossier-fact'}>
+      <dt>{labelForKey(factKey)}</dt>
+      <dd>
+        <FactValue factKey={factKey} value={value} />
+      </dd>
+    </div>
+  )
+}
+
+// `facts` renders generically: whatever keys a record's projection kept, in the order the API sent
+// them. Absent fields are already dropped server-side, so every key here is one worth showing.
+function FactsList({ facts }) {
+  if (!facts || typeof facts !== 'object') return null
+  const entries = Object.entries(facts).filter(([, value]) => value !== null && value !== undefined)
+  if (entries.length === 0) return null
+  return (
+    <dl className="dossier-facts">
+      {entries.map(([key, value]) => (
+        <FactRow key={key} factKey={key} value={value} />
+      ))}
+    </dl>
   )
 }
 
@@ -162,31 +323,25 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
 
       <ol className="dossier-timeline" data-testid="dossier-timeline">
         {timeline.map((event, index) => {
-          const style = KIND_STYLE[event.kind] ?? { dot: 'var(--border-strong)', label: event.kind }
+          const dot = TAG_DOT[event.tag] ?? 'var(--border-strong)'
           return (
-            <li key={index} style={{ '--dot': style.dot }} data-testid={`event-${event.kind}`}>
+            <li key={index} style={{ '--dot': dot }} data-testid={`event-${event.tag}`}>
               <div className="dossier-when">
                 <time dateTime={event.at}>{event.at.slice(0, 10)}</time>
-                <span className="dossier-kind" style={{ color: style.dot }}>
-                  {style.label}
+                <span className="dossier-kind" title={event.tag}>
+                  {event.tag}
                 </span>
               </div>
               <div className="dossier-body">
                 <div className="dossier-headline">
-                  {event.headline}
-                  {event.amount_cents !== null && event.amount_cents !== undefined ? (
-                    <>
-                      {' '}
-                      <Money cents={event.amount_cents} />
-                    </>
-                  ) : null}
+                  {humanizeTag(event.tag)}
                   {event.late ? (
                     <span className="chip" style={{ marginLeft: 6 }} title="Arrival lagged the event">
                       late-arriving
                     </span>
                   ) : null}
                 </div>
-                <div className="dossier-detail">{event.detail}</div>
+                <FactsList facts={event.facts} />
                 <div className="dossier-provenance">
                   {event.occurred_on && event.occurred_on !== event.at.slice(0, 10) ? (
                     <span title="The event happened on this date; we learned of it later">

@@ -317,19 +317,55 @@ def test_the_timeline_runs_in_the_order_we_learned_things(client):
 def test_the_timeline_tells_the_whole_story(client):
     """A rich episode should show the claim, the money, the rebate and the verdicts."""
     payload = _richest_dossier(client)
-    kinds = {event["kind"] for event in payload["timeline"]}
-    assert "CLAIM" in kinds, "the claim being filed is where every story starts"
-    assert "VERDICT" in kinds, "and what we concluded belongs on the same timeline"
-    assert kinds & {"CASH", "REMITTANCE"}, "money has to appear somewhere"
+    tags = {event["tag"] for event in payload["timeline"]}
+    assert tags & {"PHARMACY_CLAIM", "MEDICAL_SUBMISSION"}, (
+        "the claim being filed is where every story starts"
+    )
+    assert "VERDICT" in tags, "and what we concluded belongs on the same timeline"
+    assert tags & {"CASH", "REMITTANCE", "REMITTANCE_CLAIM_LINE"}, "money has to appear somewhere"
     for event in payload["timeline"]:
-        assert event["headline"], "every event needs a sentence a person can read"
+        assert event["facts"], f"every event must carry facts; {event['tag']} carried none"
+
+
+def test_the_timeline_states_facts_and_never_narrates(client):
+    """The deterministic layer states; the agent layer explains.
+
+    Prose here would be a capability claim the code cannot keep: it can only describe branches
+    somebody wrote out, so new data falls through to nothing.  Guard the contract directly --
+    no event carries a sentence, and every fact value is a scalar or a structure read from a
+    record, never composed English.
+    """
+    payload = _richest_dossier(client)
+    for event in payload["timeline"]:
+        assert "headline" not in event and "detail" not in event, (
+            f"{event['tag']} is carrying prose again"
+        )
+        for key, value in event["facts"].items():
+            if isinstance(value, str):
+                # Codes, dates, ids and statuses -- never a sentence. The giveaway is prose
+                # punctuation and length, not word count alone (payer names have spaces).
+                assert len(value) < 120, f"{event['tag']}.{key} looks like a sentence: {value!r}"
+                assert not value.endswith("."), f"{event['tag']}.{key} ends like prose: {value!r}"
+
+
+def test_every_record_kind_has_a_projection():
+    """A kind with no projection used to vanish from the timeline with no error at all.
+
+    Four of them did, for the entire life of the previous implementation.  The module raises on
+    import if one is missing, so this test is really asserting that the guard is still wired.
+    """
+    from recon.api import dossier
+    from recon.domain.enums import RecordKind
+
+    missing = set(RecordKind) - set(dossier._PROJECTIONS)
+    assert not missing, f"these record kinds would silently disappear: {sorted(missing)}"
 
 
 def test_verdicts_appear_as_transitions_not_as_samples(client):
     """A monthly-evaluated episode has a dozen identical verdict rows; showing all of them buries
     the two that matter."""
     payload = _richest_dossier(client)
-    verdict_events = [e for e in payload["timeline"] if e["kind"] == "VERDICT"]
+    verdict_events = [e for e in payload["timeline"] if e["tag"] == "VERDICT"]
     assert verdict_events, "at least the first verdict should be shown"
     assert len(verdict_events) < len(payload["verdict_log"]), (
         "the timeline should summarise the verdict log, not reprint it"
@@ -375,8 +411,12 @@ def test_the_dossier_reports_money_the_engine_computed(client):
         assert payload["economics"][field] == detail["verdict"][field]
 
 
-def test_a_reopening_is_narrated_when_one_happened(client):
-    """The case the model makes most of: an episode that had settled and came undone."""
+def test_a_reopening_is_marked_on_the_timeline_when_one_happened(client):
+    """The case the model makes most of: an episode that had settled and came undone.
+
+    Reopened is a flag rather than a fourth disposition, so it surfaces as a fact on the verdict
+    transition, not as its own tag.
+    """
     reopened = None
     for disposition in ("EXCEPTION", "PENDING"):
         for row in client.get(f"/api/queue/{disposition}?limit=200").json()["episodes"]:
@@ -388,10 +428,13 @@ def test_a_reopening_is_narrated_when_one_happened(client):
     if reopened is None:
         pytest.skip("this dataset contains no reopened episode")
 
-    headlines = [e["headline"] for e in reopened["timeline"] if e["kind"] == "VERDICT"]
-    assert any("Reopened" in headline for headline in headlines), (
-        f"a reopened episode must say so on its timeline; got {headlines}"
-    )
+    verdicts = [e["facts"] for e in reopened["timeline"] if e["tag"] == "VERDICT"]
+    reopenings = [f for f in verdicts if f["transition"] == "REOPENED"]
+    assert reopenings, f"a reopened episode must say so on its timeline; got {verdicts}"
+    for facts in reopenings:
+        assert facts["reopened_from"] in ("CLOSED", "PENDING"), (
+            "a reopening has to name the disposition it came back from"
+        )
 
 
 def test_an_unknown_episode_has_no_dossier(client):

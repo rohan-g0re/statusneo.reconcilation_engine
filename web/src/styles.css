@@ -297,12 +297,39 @@ details.evidence pre {
 }
 .dossier-provenance .mono { font-family: var(--mono); }
 
+/* A timeline event's `facts` — a tag's fields, carried verbatim and rendered generically. Simple
+ * scalars sit in a dense label/value grid; anything shaped like a record (an object) or a line-item
+ * list (an array of objects) spans the full width instead of being squeezed into one column. */
+.dossier-facts {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 6px 18px; margin: 2px 0 6px; max-width: 82ch;
+}
+.dossier-fact { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dossier-fact.wide { grid-column: 1 / -1; max-width: none; }
+.dossier-fact dt {
+  margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.dossier-fact dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+
+.fact-nested { margin: 2px 0 0; max-width: 82ch; }
+.fact-nested table th, .fact-nested table td { padding: 4px 8px; font-size: 11.5px; white-space: normal; }
+
+.fact-object {
+  display: flex; flex-direction: column; gap: 2px;
+  border: 1px dashed var(--border-strong); border-radius: 6px;
+  padding: 5px 8px; margin-top: 1px; max-width: 82ch;
+}
+.fact-object-row { display: flex; gap: 8px; font-size: 12px; }
+.fact-object-key { color: var(--text-muted); min-width: 14ch; flex: 0 0 auto; }
+
 @media (max-width: 640px) {
   .dossier-timeline li { grid-template-columns: 1fr; gap: 2px; }
   .dossier-timeline li::before { display: none; }
   .dossier-when { text-align: left; display: flex; gap: 10px; align-items: baseline; }
   .dossier-when::after { display: none; }
   .dossier-body { padding-left: 0; }
+  .dossier-facts { grid-template-columns: 1fr; }
 }
 
 /* ═══ fixes from the UI review ═════════════════════════════════════════ */

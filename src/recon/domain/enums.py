@@ -97,6 +97,14 @@ class RecordKind(StrEnum):
     parent with N ``REBATE_DISPENSE_LINE`` children.  The parent carries the batch
     total, the children carry the claim-level money.
 
+    The ``_LINE`` in ``REMITTANCE_CLAIM_LINE`` means *claim within a batch*, NOT
+    *service line within a claim*.  Service lines are embedded arrays on both the
+    submission and the remittance side, never their own rows.  There is deliberately
+    no ``MEDICAL_SUBMISSION_LINE``: an 837 arrives one-per-claim with nothing
+    batching above it, so there is no parent total to split.  An earlier version
+    carried that member anyway -- copied from the two genuine parent/child pairs --
+    and no adapter ever produced one.
+
     This list is mirrored by a ``CHECK`` constraint in ``db/schema.sql``; a test
     parses the SQL and asserts the two stay in lockstep.
     """
@@ -107,7 +115,6 @@ class RecordKind(StrEnum):
     REMITTANCE_CLAIM_LINE = "REMITTANCE_CLAIM_LINE"
     PROVIDER_LEVEL_ADJUSTMENT = "PROVIDER_LEVEL_ADJUSTMENT"
     MEDICAL_SUBMISSION = "MEDICAL_SUBMISSION"
-    MEDICAL_SUBMISSION_LINE = "MEDICAL_SUBMISSION_LINE"
     MEDICAL_ACKNOWLEDGMENT = "MEDICAL_ACKNOWLEDGMENT"
     TPA_QUALIFICATION = "TPA_QUALIFICATION"
     TPA_REBATE_REQUEST = "TPA_REBATE_REQUEST"
