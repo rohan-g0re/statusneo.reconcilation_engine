@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "Knowledge Graph Builder": {
+      "source": "daffy0208/ai-dev-standards",
+      "sourceType": "github",
+      "skillPath": "skills/knowledge-graph-builder/SKILL.md",
+      "computedHash": "fa0cdd4c99853bc603e4d40f6bb188a7d703208afe8c97f115811d748caee525"
+    },
+    "memory-systems": {
+      "source": "sickn33/agentic-awesome-skills",
+      "sourceType": "github",
+      "skillPath": "skills/memory-systems/SKILL.md",
+      "computedHash": "6bce4dfac72694a4c898d12b3e1dc8c8d881f95aa9294511e925a17d2d8999be"
+    },
+    "remember": {
+      "source": "yonatangross/orchestkit",
+      "sourceType": "github",
+      "skillPath": "plugins/ork/skills/remember/SKILL.md",
+      "computedHash": "bde9d20af3cd76b6500c2b02350bda98f15fc130c198da6b3fd1c40caa401ea9"
+    }
+  }
+}

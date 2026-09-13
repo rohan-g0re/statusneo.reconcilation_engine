@@ -191,6 +191,14 @@ Global Instructions
   design documents, the build order, and the known traps. Read it before doing
   anything else in this repository.
 
+  docs/knowledge_graph.jsonl is a traversable knowledge graph of the project --
+  58 entities, 234 observations, 54 relations covering the domain, the object
+  model, every load-bearing decision, the four feeds and their identifiers, the
+  state space, and the process learnings. It is wired to the memory MCP server
+  in .mcp.json, so it can be queried with search_nodes and open_nodes as well as
+  read directly. Rebuild or extend it with a new wave via
+  `python docs/build_knowledge_graph.py`.
+
   docs/decision_ledger.md records every decision with provenance -- which were
   approved by the user, which were delegated, and which are agent defaults.
   docs/glossary.md is the vocabulary authority.
