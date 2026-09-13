@@ -129,17 +129,19 @@ I proposed each of these and you did not object, so they were written into the d
 
 ## Section C — walked and closed
 
-**At a glance:** 19 decided · 2 deferred · 1 needs you
+**At a glance:** 20 decided · 2 deferred · nothing outstanding
 
 | Status | Count | Which |
 |---|---|---|
 | ✅ Decided | 19 | C1–C19 |
 | ⏸️ Deferred | 2 | C20, C21 — agent layer, after the deterministic layer exists |
-| 🔴 Needs you | 1 | C23 — the design note |
+| ✅ Decided | +1 | C23 — the design note, now mine to write |
 
 A decision to drop something is still a decision. C16 and C19 are closed; they keep a ❌ only to show *what* was decided.
 
-C22 (tests) and C24 (README) were never decisions — they are work. Moved to the work table at the foot of this file.
+C22 (tests) and C24 (README) were never decisions — they are work. Moved to the work table at the foot of this file. C23 joined them once its scope was settled.
+
+**Section C is closed.** Nothing in it is waiting on anyone.
 
 ### C.1 — Parameters
 
@@ -176,7 +178,7 @@ C22 (tests) and C24 (README) were never decisions — they are work. Moved to th
 | C19 | ❌ | **Mock workflow / Epic feed** | **Dropped as a fifth input feed.** Your call. The generated dataset *is* the mock; regeneration is a UI control that wipes and rebuilds, usable repeatedly rather than only for tests. **Parked, not dropped:** the Workflow Coordinator still needs somewhere to *write* a work item — a table, not a feed, belonging with C20 |
 | C20 | ⏸️ | **Agent layer** | **Deferred by agreement.** Deterministic layer and workflow first, so the agent is designed against a working object rather than a guess |
 | C21 | ⏸️ | **Agent evaluation set** | Deferred — depends on C20 |
-| C23 | 🔴 | **The design note** | **The one item that needs you.** 4–5 pages carrying architecture (20%), most of domain understanding (15%) and communication (10%). No code dependency — draftable at any time, but it has to sound like you |
+| C23 | ✅ | **The design note** | Scope settled and handed to me. Not a prose essay — a record of the load-bearing decisions: **how the flow works, how the models work, how the queries run, and one claim traced end to end**. That last section doubles as walkthrough preparation, since the debrief explicitly asks for a claim traced end to end. Carries architecture (20%), most of domain understanding (15%) and communication (10%) |
 
 ---
 
@@ -190,6 +192,7 @@ Two passes are owed before the engine can be built. Neither needs a ruling; both
 | **Record to dimension mapping** | Given these records at this cursor, what is `ph_settlement`? `r_manufacturer`? The decision tree defines verdicts in terms of abstract dimensions but never says how to derive them from actual records | It is the bridge between `feed_formats.md` and `decision_tree/spec.py`, and neither document covers it. C13 is one instance; roughly twenty more exist |
 | **Test suite** | Coverage assertion over the 372 verdict pairs, determinism across processes, the immutability triggers actually firing, index usage on both hot paths | *Was C22.* Never a decision — written alongside the engine |
 | **README** | Architecture diagram, prerequisites, how to run the demo, assumptions, known trade-offs | *Was C24.* Never a decision — written last, once there is something to describe |
+| **Design note** | Flow, models, queries, one claim end to end. Consumes the output of the two design passes above, so it is written after them and before the build | *Was C23.* The agent/tool section stays stubbed until C20 is undeferred |
 
 ---
 
