@@ -23,17 +23,20 @@ python verify.py         # independent verification
 | Eliminated as impossible | 12,093,230,976 (99.99997%) |
 | Coherent configurations | 3,860 |
 | Anomalous configurations (tagged, not pruned) | 364 |
-| Leaf depth range | **3 to 15 decisions*** |
-| Cash verification slots per case | **0 to 4** |
+| Leaf depth range | **3 to 14 decisions** (remeasured 2026-09-12 on the current tree; was 3 to 15 pre-SLA-removal*) |
+| Cash verification slots per case | **0 to 4** (current histogram: 63 / 564 / 1,473 / 1,440 / 684) |
+| Configurations per verdict pair | min 1, max 252 — **252x spread**; 99 of 372 pairs have exactly one configuration (remeasured 2026-09-12) |
 | Reachable reimbursement verdicts | 31 |
 | Reachable rebate verdicts | 12 |
 | **Reachable verdict pairs** | **372** |
 | Deterministic rules (track + cross-track) | 43 + 7 = **50** |
 | If-checks per case (min / avg / max) | 10 / 21.0 / 32 |
 
-\* depth range and the per-depth table in §1 are from the pre-SLA-removal run
-(7,046 paths) and were not recomputed after §7. The three structural causes of
-variable depth are unaffected by SLA removal and still hold.
+\* the per-depth histogram and per-arity counts in §1 are from the
+pre-SLA-removal run (7,046 paths). The depth range and cash-arity histogram in
+the headline table above were remeasured on the current 4,224-path tree
+(2026-09-12); the three structural causes of variable depth are unaffected by
+SLA removal and still hold.
 
 **Running history of the headline count:** 510 (hand-counted) → 528 (exhaustive
 generation corrected four hand-counting errors) → **372** (SLA thresholds
@@ -213,25 +216,45 @@ rejects.
 
 ### The generator must sample verdicts, not configurations
 
-Configuration frequency is wildly non-uniform — a 60× spread on the
-pre-SLA-removal run (exact counts below are from that 7,046-path run and were
-not recomputed post-§7; the imbalance itself is structural and does not go away
-when the totals shrink):
+Configuration frequency is wildly non-uniform. **Remeasured 2026-09-12 on the
+current 4,224-path tree** (an earlier revision of this section quoted a "~60×"
+spread and "X-1 = 1 configuration in 7,046" — both were figures from the
+pre-SLA-removal run and are superseded by the counts below):
 
 ```
-B-15 (medical takeback)                        1,560 configs
-A-12 / A-13 (recoupment matched / untraceable)   936 configs each
-A-01 (POS rejection)                              26 configs
-X-1 compliance case                                1 config
+verdict frequency (current tree)
+  B-15 (medical takeback)                          924 configs
+  A-12 / A-13 (recoupment matched / untraceable)   528 configs each
+  A-01 (POS rejection)                              22 configs
+
+pair-level skew (current tree)
+  configurations per pair : min 1, max 252  ->  252x spread
+  pairs with exactly one configuration : 99 of 372
+
+cross-track flag rarity (current tree; configs / distinct pairs)
+  X-6 total loss                          8 /  8   <- rarest
+  X-4 rebate-only failure                 9 /  6
+  X-1 denied with rebate paid            36 / 16
+  X-7 appeal won after clawback         108 /  4
+  X-2 reversed dispense, live rebate    260 / 20
+  X-5 correlated cash gap               305 / 64
+  X-3 recoupment undermines qual        912 / 18
+
+coherence partition at pair level (current tree)
+  36 pairs wholly anomalous  = {A-01, A-10, A-11, A-16} x
+       {C-01, C-03, C-05, C-07, C-08, C-09, C-10, C-11, C-14}
+  336 pairs wholly coherent, none mixed
+  -> a compliance flag is decidable from the verdict pair alone
 ```
 
 Sampling 50 episodes uniformly from thousands of configurations yields roughly
 a fair number of recoupment cases and, with better than even odds, zero POS
-rejections and zero X-1. The X-1 case — reimbursement refused while rebate
-money is held — is the single strongest thing to show in the walkthrough, and
-it remains a needle-in-a-haystack path: still exactly one named-case check away
-from being missed by random sampling (§7 reconfirms X-1 exists by construction
-on the current 4,224-path tree; exact config count not part of this pass).
+rejections. Ninety-nine pairs sit on a single configuration each, and the
+rarest flags are now X-6 (8 configs) and X-4 (9) — a stratifier must target
+flags by these measured counts, not by narrative. The X-1 case — reimbursement
+refused while rebate money is held — remains the single strongest thing to show
+in the walkthrough; at 36 configurations in 4,224 it is still effectively
+invisible to uniform sampling.
 
 Sampling must be stratified over the 372 verdict pairs, with named cases placed
 deliberately.

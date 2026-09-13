@@ -130,6 +130,8 @@ Neither CLP01 nor CLP07 exists in NCPDP. The medical feed and the pharmacy feed 
 
 **Why.** A real bank export genuinely is flat CSV — banks were never designed to carry claims data, and forcing JSON onto it would misrepresent the feed it's modelling. Having one structurally poorer feed in the mix (CSV, no addenda, no trace number reliability) is itself part of the point (Decision 9's sibling on the cash side).
 
+**Reaffirmed at reconciliation (2026-09-12), against a "vendor CSV export" reading of the 340B feed.** The 340B feed is `tpa_340b_events.jsonl` — JSONL — because the rebate payment batch is irreducibly nested (one total, N dispense lines) and the worked examples in `feed_formats.md` §2 are field-level JSON specifications the connector is written against. The 340B feed's structural *poverty* (Decision 9) is about identifiers and linkage, not the envelope; JSONL preserves it in full.
+
 ### 14. Two profiles from one generator and one seed
 
 **Decided.**
@@ -145,7 +147,7 @@ Neither CLP01 nor CLP07 exists in NCPDP. The medical feed and the pharmacy feed 
 
 **Decided.** The `full` profile's episode generation is stratified so that every reachable verdict (and ideally every verdict pair) is represented, rather than sampling uniformly over the underlying 4,224 configurations.
 
-**Why.** Configuration frequency spans roughly 60x across the space, and the single highest-value compliance case is one path among thousands. Uniform sampling would very plausibly miss it entirely in a 1,500-episode run — stratifying over verdicts is what makes the coverage guarantee in Decision 14 actually hold.
+**Why.** Configuration frequency is wildly non-uniform: measured on the current 4,224-configuration tree, the spread is **252x at verdict-pair level** (min 1, max 252 configurations per pair), and **99 of the 372 pairs sit on exactly one configuration**. The rarest cross-track flags are X-6 (8 configurations) and X-4 (9); the X-1 compliance case is 36 configurations across 16 pairs. (An earlier draft cited a "~60x" spread and "X-1 = 1 configuration" — both were figures from the pre-SLA-removal 7,046-path run and are stale; `decision_tree/REPORT.md` §5 carries the correction.) Uniform sampling would very plausibly miss the single-configuration pairs entirely in a 1,500-episode run — stratifying over verdicts is what makes the coverage guarantee in Decision 14 actually hold.
 
 ---
 
@@ -288,12 +290,128 @@ Real timing rules do exist in the industry — Medicare's 30-day payment ceiling
 
 ---
 
+## H. Technology stack
+
+**34. Python for the backend, FastAPI for the API layer, React for the front end.**
+
+The assignment permits any reasonable stack and asks only that the choice be justified and that production gaps be named.
+
+| Layer | Choice | Reason |
+|---|---|---|
+| Generators, ingestion, reconciliation engine | Python, standard library first | The deterministic core is arithmetic and rule evaluation. No framework earns its weight here, and a dependency-light core is easier for a reviewer to read end to end. |
+| Persistence | SQLite | Stdlib, no service to run, and the exception queue becomes a real query rather than a list comprehension. Lineage joins are expressible in SQL, which makes the evidence trail demonstrable instead of asserted. |
+| API | FastAPI | Typed request/response models via Pydantic give the cursor and verdict contracts a schema for free. Async is not needed for the prototype but does not cost anything. |
+| Front end | React | Needed for the cursor control described below. |
+
+**35. The front end exists to make the cursor visible.**
+
+The reconciliation answer is a function of `(claim, cursor)`. A static page cannot show that. The interface advances a date cursor across the 1 July 2025 – 1 July 2026 window and re-renders the queues, so the same claim can be watched moving `PENDING → CLOSED → EXCEPTION` as later records arrive. That is the clearest possible demonstration of the replay model and it costs one control.
+
+**36. Layering discipline: the engine must not import the API.**
+
+The deterministic core is a library. FastAPI depends on it; it never depends on FastAPI. The generators are a separate entry point that writes files and touches neither. This keeps the core independently testable and means the walkthrough can be driven from a CLI if the front end is not running.
+
+**Production gaps to name in the design note:** SQLite gives way to Postgres once there is more than one writer; the in-process engine becomes a worker consuming an ingestion queue; the React app needs real authentication and tenant scoping, none of which the prototype implements.
+
+---
+
+## I. Reconciliation decisions (2026-09-12)
+
+Rulings made when the four parallel implementation plans were reconciled. Full rationale per conflict lives in `plans/RECONCILIATION.md`; these are the binding outcomes.
+
+### 37. The medical 340B join is a natural key with no Rx number
+
+**Decided.** The 340B track attaches to medical episodes through the TPA feed. A medically-administered drug is bought and infused at the covered entity's clinic — there is no prescription, so there is no Rx number. Medical-benefit TPA records carry `rx_number: null`, `pharmacy_npi: null`, and `provider_npi` (the 837 billing provider NPI); `fill_date` carries the administration/service date. The join key is **{provider NPI, NDC, service date}** — registered as crosswalk key type `NATURAL_340B_MEDICAL`.
+
+**Why.** `reconciliation_state_space.md` §5 makes all 15 medical verdicts 340B-compatible; without a medical join key, roughly half the 372 verdict pairs are unreachable and the coverage assertion fails. The key is deliberately weaker than the pharmacy key (two same-day administrations of the same drug at the same site are ambiguous) — the connector parks ambiguity rather than guessing, which is a real hazard worth modelling, not a defect of the design.
+
+### 38. All generated entity names are fictional
+
+**Decided.** The assignment's confidentiality clause ("synthetic data only… no client names") binds the *generated data*: every payer, PBM and manufacturer name in feeds and worked examples is invented (`MERIDIANRX`, `CASCADERX`, `BLUE HARBOR HEALTH`, `GRANITE PEAK HEALTH`, `VERION`, `ALDEBARAN`, `CORVANE`, `TALVEX`, `SAGEPOINT`, `HALCYON`), with realistic *shape* preserved (≤16-char NACHA truncation, uppercase, 6-digit BINs). Real names may appear in prose as domain context only. Generic drug names and public HCPCS J-codes are public clinical reference data and may be kept; all prices are invented.
+
+### 39. The 277CA clearinghouse acknowledgment is part of the medical submissions file
+
+**Decided.** `medical_837_submissions.jsonl` carries a second record type, `record_type: "277CA"`, with `stc01_composite` accept/reject codes (`feed_formats.md` §3). Without it, B-01 (clearinghouse rejection) is indistinguishable on the wire from B-02 (accepted, awaiting 835). The 277CA is the real, standard acknowledgment on the same rail — realism, not invention — and it preserves Decision 16 (`received_at` remains the only non-native field). The rejected alternative, a non-native `clearinghouse_status` field on the 837, violates Decision 16.
+
+### 40. Settlement is encoded via CLP02, and the engine must mirror the read
+
+**Decided.** `ph_settlement` has no native transaction; it is encoded on the paying 835 claim line's CLP02: `"1"` = CONFIRMED; `"19"` (or rarer `"25"`) with no later `"1"` line for the same CLP01 = MISSING. The reconciliation engine's rule for verdict A-06 must read exactly this encoding. Documented in `feed_formats.md` §1.
+
+### 41. PLB sign convention: credits are negative
+
+**Decided.** Under the identity `BPR02 = Σ(CLP04) − Σ(PLB, signed)`, a positive PLB reduces payment. `WO`/`FB`/`CS`/`72` are positive (reduce the deposit); `L6` and appeal-credit `RA` are **negative** (increase it). An earlier `feed_formats.md` draft said appeal credits were positive — self-contradictory with its own identity; corrected.
+
+### 42. The rebate deposit's `allocation_code` rides in the bank `trn02` column
+
+**Decided.** `trn02` is semantically "the payer-assigned business reference from the CCD+ addenda": the 835 trace number for claim payments, the `allocation_code` for manufacturer rebates. Same column, same ~20% addenda-loss rate, different issuer. A rebate deposit that loses its addenda and fails amount+date matching *is* D-4 — the orphan rebate emerges from the mechanism instead of being hand-placed, and the bank CSV needs no rebate-specific column.
+
+### 43. Two additional TPA event types: `REBATE_REQUEST` and `MANUFACTURER_DECISION`
+
+**Decided.** `REBATE_REQUEST` (carrying `submission_date`) separates C-03 from C-05 on the wire and makes `NON_CONFORMING_45_DAY` representable; `MANUFACTURER_DECISION` carries rejections (C-07), which cannot ride inside a payment batch. Both are additive to `feed_formats.md` §2's original four examples.
+
+### 44. One generator contract: two-level slices, declare → realize → format
+
+**Decided.** All four generators build against one contract module, `src/recon/generators/contracts.py`, owned by G2. Its shape:
+
+- **Two-level slices.** Per-episode event slices (`PbmClaimSlice`, `MedicalSubmissionSlice`, `TpaDispenseSlice`) plus cross-episode batch slices (`PbmRemittanceSlice`, `MedicalRemittanceSlice`, `RebateBatchSlice`) — batching is irreducibly cross-episode. Seven generator entry points; every slice carries `slice_ref` (opaque) and `rng_seed`; none carries an episode ID, verdict code, case ID or cross-track flag.
+- **Division of labour.** The orchestrator owns all facts, all dates (`received_at` included), all per-claim/per-line amounts, and **batch composition** (which claim payments share a remittance, which PLB entries attach to which later batch, which dispenses share a rebate batch — the netting ledger is orchestrator machinery). Generators own native formatting and their own identifier namespaces (`authorization_number`, `clp07`, `ach_trace_number`, `record_id`), and they own their channel's **wire arithmetic**: each batch generator computes `BPR = Σ(CLP04) − Σ(PLB, signed)` from its slice's lines and totals a rebate batch from its dispense lines. Batch slices carry no precomputed net total; the total exists exactly once, where it is formatted.
+- **Money flows declare → realize → format.** Payer-side generators return `MoneyMovement[]` (amount = the net they computed, PLB already applied; `payer_reference` = trn02 or allocation_code). The **orchestrator's realizer** — the only place cash faults live — turns movements into `CashEvent[]` applying `MATCHED`/`PARTIAL`/`ABSENT`, injects D-3 orphans and true-reversal debits, and decides `trn02` presence (the ~20% drop) so ground truth can record link resolvability. `gen_bank` is a pure formatter of `CashEvent[]`: it never learns a deposit is missing because it never sees an expected figure.
+- **No file back-channels.** Generators communicate with the orchestrator only through return values (`Record[]`, `MoneyMovement[]`). The previously proposed `_remittance_manifest.jsonl` under `data/generated/_internal/` is disallowed; the orchestrator, which invoked the generators, already holds everything ground truth needs.
+- **Minting.** The orchestrator mints all cross-feed values (natural keys, `trn02`, `allocation_code`, `clm01`, `cardholder_id`) per the crossing matrix in `plans/G2-orchestrator.md`; a value may be handed to two generators only where it genuinely crosses those systems in reality (natural keys, TRN02, allocation_code).
+
+### 45. Entity universe sizes (closes the former open question)
+
+**Decided.** The smallest universe in which every disqualification reason and defect is generatable:
+
+| Entity | Count | Note |
+|---|---|---|
+| Specialty drugs | 12 | 7 pharmacy-benefit, 5 medical-benefit (J-coded) |
+| Pharmacies | 2 | the operator's main site + one satellite **not registered** with the covered entity — makes `UNREGISTERED_LOCATION` generatable |
+| Billing provider (medical) | 1 | |
+| Prescribers | 6 | at least one unaffiliated with either covered entity — makes `PRESCRIBER_NOT_AFFILIATED` generatable |
+| PBMs | 2 | two reject-code vocabularies demonstrate Decision 33's mapping-row claim |
+| Medical payers | 2 | |
+| Covered entities | 2 | the operator's own (`DSH…`) + one decoy (`PED…`), per the two IDs in `feed_formats.md` §2 |
+| Manufacturers | 6 | fictional restricting wave (Decision 38); ≥1 with `restricts_contract_pharmacy = True` |
+| Patients | 40 | tokenized cardholder IDs, no demographics |
+
+**Why this and not more.** Scale-invariance (Decision 33) is demonstrated by configuration rows, not by universe size; a bigger universe would only make the demo harder to read. Batching realism (one 835 covering dozens of claims) comes from claim volume per (payer, cycle), which two payers per channel provide.
+
+### 46. Defect injection rates (closes the former open question)
+
+**Decided.** All rates live in config as named constants; only the 20% TRN drop is sourced from `feed_formats.md` — the rest are set here:
+
+| Defect | Rate (`full`) | Note |
+|---|---|---|
+| Dropped TRN02 / addenda on bank credits | **20%** | sourced; applies to rebate deposits too (Decision 42); decided by the orchestrator's realizer, not the bank generator |
+| D-1 duplicate delivery | 3% of records | identical payload, same `record_id`, later `received_at` on the second copy |
+| D-2 late arrival | 8% of episodes, one record each | `received_at` shifted +7..45 days; event dates untouched |
+| D-3 orphan bank deposit | ~2% of bank rows | synthesized by the realizer |
+| D-4 orphan rebate | ~2% of rebate dispense lines | plus the emergent Decision 42 path |
+| D-5 malformed record | 0.5%, `full` only, never `demo` | injected **centrally, post-write**, by the orchestrator corrupting emitted lines — a malformed record is a transport accident, not something a payer emits; generators stay provably well-formed |
+| D-6 crosswalk miss | emergent | from TRN drops + identifier drift; recorded in ground truth `expected_links` |
+| D-7 allocation residual | unreferenced `FB` on 5% of otherwise-clean remittances; 100% of recoupments net via PLB | |
+| Rx identifier drift | 6% of 340B-bearing episodes | orchestrator assigns a `rx_number_rendering` directive to **exactly one feed** per episode (pharmacy 835 zero-padded is the canonical case); generators render as directed, never drift independently |
+| Rx truncation | 2% of episodes | |
+| `company_name` truncation, CLP07 reassignment on reprocess, J-code/NDC unit mismatch | always on | field limits and standards behaviour, not defects |
+
+`demo` uses hand-placed defects (each D-code exactly once), never rates.
+
+### 47. Canonical file names and output layout
+
+**Decided.** Feeds: `pbm_claim_events.jsonl`, `pbm_remittance_835.jsonl`, `medical_837_submissions.jsonl`, `medical_835_remittance.jsonl`, `tpa_340b_events.jsonl`, `bank_transactions.csv`, under `data/generated/<profile>/feeds/`. Ground truth: `data/generated/<profile>/truth/ground_truth.json` — a directory the ingestion and engine layers never read (enforced by a lint test plus the loader taking only the feeds directory). Reproducibility manifest: `data/generated/<profile>/manifest.json` (SHA-256 per feed file, seed, window, reference fingerprint). `feed_formats.md` names win wherever a brief and the spec disagreed.
+
+### 48. `decision_tree/pairs.json` is a live test oracle, owned by G1
+
+**Decided.** G1's domain-vocabulary unit loads `pairs.json` in a test and asserts the 372 reachable pairs equal `recon.domain.verdicts.REACHABLE_PAIRS` (31 × 12, exact product). G2's coverage test asserts the `full` profile hits every pair in `REACHABLE_PAIRS` — a single ownership chain: the artifact proves the vocabulary, the vocabulary proves the dataset. `decision_tree/` itself is frozen; the orchestrator consumes `leaves_classified.json` with a digest check.
+
+---
+
 ## Open questions
 
 Not yet decided, listed so they aren't silently assumed:
 
-- **Entity universe sizes.** How many pharmacies, PBMs, TPAs, payers, and manufacturers the generator instantiates is not yet fixed.
-- **Defect injection rates.** The proportion of episodes carrying each defect type (underpayment, no-cash, duplicate, late arrival, etc.) is not yet set.
-- **The drug price table.** Source and structure of the NDC-to-price mapping the generator uses to produce realistic expected amounts is not yet defined.
-- **Whether the mock workflow/Epic feed gets generated.** Leaning yes — it's the fifth box in the assignment's own architecture diagram, and it's the agent's only write target (Decision 31), so its absence would leave that write path untestable.
+- **Whether the mock workflow/Epic feed gets generated.** Leaning yes — it's the fifth box in the assignment's own architecture diagram, and it's the agent's only write target (Decision 31), so its absence would leave that write path untestable. If it lands it is an additive slice type in the Decision 44 contract; nothing else changes.
 - **Agent framework choice.** Leaning toward a plain tool-calling loop over an agent framework, because the agent logic here is simple (investigate, cite, sort, recommend, write one work item) and a framework would obscure exactly the tool boundary (Decision 29) the assignment is testing.
+
+*(Formerly open, now closed: entity universe sizes → Decision 45; defect injection rates → Decision 46; the drug price table → G1's reference/pricing unit, `plans/G1-foundation.md` U6.)*

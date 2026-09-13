@@ -2,7 +2,23 @@
 
 What each generator emits. Every feed is written as if by a source system that has never heard of the other three — its own identifiers, its own format, its own timing.
 
-Status: **All four feeds drafted.**
+Status: **All four feeds drafted. Reconciled 2026-09-12 — see `plans/RECONCILIATION.md` for the rulings applied (fictional entity names, medical 340B dispenses, 277CA acknowledgments, rebate request/decision events, PLB `RA` sign, settlement encoding, worked-example corrections).**
+
+### Confidentiality: every entity name is fictional
+
+The assignment mandates synthetic data only — no real client names. Every payer, PBM and manufacturer in the *generated data* (and in the worked examples below) is invented, while keeping the real-world *shape* (≤16-char NACHA truncation, uppercase company names, 6-digit BINs, HRSA ID grammar). The fictional universe:
+
+| Role | Fictional entities |
+|---|---|
+| PBMs | `MERIDIANRX`, `CASCADERX` |
+| Medical payers | `BLUE HARBOR HEALTH`, `GRANITE PEAK HEALTH` |
+| Manufacturers (incl. the contract-pharmacy-restricting wave) | `VERION PHARMA`, `ALDEBARAN THERAPEUTICS`, `CORVANE BIOSCIENCES`, `TALVEX LABS`, `SAGEPOINT BIO`, `HALCYON BIOLOGICS` |
+
+Real-world names (Caremark, Anthem, Lilly, the 2020 restricting manufacturers) may still appear in *prose* as domain context; they must never appear in generated records.
+
+### Canonical file names
+
+Six feed files, fixed here as the single naming authority: `pbm_claim_events.jsonl`, `pbm_remittance_835.jsonl`, `medical_837_submissions.jsonl`, `medical_835_remittance.jsonl`, `tpa_340b_events.jsonl`, `bank_transactions.csv` — written to `data/generated/<profile>/feeds/`. Ground truth lives in `data/generated/<profile>/truth/`, which the connector under test never reads.
 
 ---
 
@@ -65,8 +81,8 @@ One JSON object per line. Every record is a single transaction, not a claim summ
   "prescriber_id": "1972000897",
   "prescriber_id_qualifier": "01",
 
-  "bin": "610014",
-  "pcn": "MEDDPRIME",
+  "bin": "604211",
+  "pcn": "SPECRX",
   "group_id": "RXGRP0042",
   "cardholder_id": "W884210097",
   "person_code": "01",
@@ -98,8 +114,8 @@ One JSON object per line. Every record is a single transaction, not a claim summ
   "date_of_service": "20260302",
   "product_service_id": "00002143380",
 
-  "bin": "610014",
-  "pcn": "MEDDPRIME",
+  "bin": "604211",
+  "pcn": "SPECRX",
   "cardholder_id": "W112039884",
 
   "response_status": "R",
@@ -127,8 +143,8 @@ One JSON object per line. Every record is a single transaction, not a claim summ
   "date_of_service": "20260302",
   "product_service_id": "00071015523",
 
-  "bin": "610014",
-  "pcn": "MEDDPRIME",
+  "bin": "604211",
+  "pcn": "SPECRX",
 
   "response_status": "P",
   "authorization_number": "AUTH0098231A",
@@ -183,7 +199,7 @@ One JSON object per line, where **one line is one whole remittance file** coveri
     "originating_company_id": "1043251982"
   },
 
-  "payer_name": "CAREMARK",
+  "payer_name": "MERIDIANRX",
   "payee_npi": "1234567893",
 
   "claim_payments": [
@@ -205,6 +221,7 @@ One JSON object per line, where **one line is one whole remittance file** coveri
         "date_of_service": "20260302"
       },
       "adjustments": [
+        { "group_code": "CO", "reason_code": "45", "amount": 50.00 },
         { "group_code": "PR", "reason_code": "3", "amount": 50.00 }
       ]
     },
@@ -253,6 +270,19 @@ bpr.total_actual_provider_payment             =  47,218.40   <- what hits the ba
 
 The bank will show $47,218.40 and nothing else. The $412.60 is invisible outside this segment. This is the single most realistic reconciliation trap in the whole dataset, and it is why bank amount will not equal the sum of claim payments.
 
+### How settlement is encoded (binding — the engine must mirror this read)
+
+Neither NCPDP nor the X12 835 has a "settlement" transaction, so `ph_settlement` has no native record of its own. It is encoded on the paying claim line's **CLP02**:
+
+- `ph_settlement = CONFIRMED` → `clp02_claim_status_code: "1"` (processed as primary — final).
+- `ph_settlement = MISSING` → `clp02_claim_status_code: "19"` (processed as primary, forwarded to additional payer — money moved, receivable not closed), with `"25"` (predetermination) as a rarer second variant, **and no later CLP02 `"1"` line exists for that CLP01**.
+
+This is native, per-claim, and needs no invented record. The future reconciliation engine must read verdict **A-06** ("paid and matched, settlement missing") exactly this way: cash matched, covering line's CLP02 is `19`/`25`, no later `1` line for the same CLP01. Rejected alternatives: dropping the TRN (collides with the bank's missing-TRN defect, and is file-level), `bpr04 = NON` (file-level, would de-settle the whole batch), a zero-dollar closing 835 line (invented, confuses duplicate-835 detection).
+
+### Every claim line balances — with one deliberate exception
+
+The invariant on every 835 claim line, both channels: `clp03 = clp04 + Σ(adjustments)` and `clp05 = Σ(PR adjustments)`. The one deliberate exception is the pharmacy **underpayment** defect (see the defect table below): `clp04` short of the adjudicated promise with a `CO-45` that does not explain the whole gap, leaving `clp03 − clp04 − Σ(adjustments) > 0`. Medical 835s always balance; the medical dispute is about the *reason* for a reduction, never the arithmetic. *(Correction log: worked example 1 above originally omitted its `CO-45` of 50.00 and did not balance; fixed 2026-09-12.)*
+
 ---
 
 ### What the generator decides vs. what it emits
@@ -288,6 +318,8 @@ The assignment's own language — "manufacturer payment," "unmatched rebate" —
 
 The other thing that makes this feed different from the first: **there is no 835, no trace number, and no standard underneath it at all.** Real 340B TPAs ship vendor-specific CSV exports or portal downloads, and nothing about the shape of the data is standardized vendor to vendor. That isn't a modeling shortcut — it's the actual state of this part of the industry, and it's exactly why "unmatched rebate" is one of the assignment's own named exceptions: a feed with no shared identifier space is structurally prone to losing the thread.
 
+**Envelope ruling (Decision 13, reaffirmed):** this feed is emitted as `tpa_340b_events.jsonl` — JSONL, one record per line — because the rebate payment batch is irreducibly nested (one total, N dispense lines). The feed's structural *poverty* is about identifiers and linkage, not serialization: vendor-invented event names, no standards body, no trace number, a natural key as the only bridge. All of that is preserved in JSON.
+
 ### Two decision-makers, not one
 
 Every dispense that reaches this feed passes through two independent gates:
@@ -297,9 +329,17 @@ Every dispense that reaches this feed passes through two independent gates:
 
 Model both. A dispense can be `QUALIFIED` at the TPA and still `REJECTED` at the manufacturer, and that gap is where most of the real dispute volume in this program lives.
 
-### The join key, because there is nothing better
+### The join keys, because there is nothing better
 
 The PBM's `authorization_number` (Section 1) never reaches the TPA — the two systems don't talk to each other. The only way to tie a 340B record back to a PBM claim is the natural key **{pharmacy NPI, Rx#, NDC, fill date}**. What flags a claim as 340B-related in the first place, at the point of adjudication, is NCPDP field 420-DK (`submission_clarification_code`) carrying the value `20` on the PBM claim event (Section 1) — a flag on someone else's record, not an identifier of its own.
+
+**Medical episodes have a 340B track too — with an even poorer key.** A medically-administered drug is bought and infused at the covered entity's clinic. There is no prescription and therefore **no Rx number**: nothing pharmacy-shaped exists to key on. A TPA record for a medical-benefit dispense carries the NDC, the service date, the administering site's provider NPI, the prescriber/ordering NPI, and the covered entity ID — and nothing else. On these records:
+
+- `rx_number` is `null` and `pharmacy_npi` is `null`;
+- `provider_npi` carries the billing provider NPI that also appears on the 837 (Section 3);
+- `fill_date` carries the administration date — the same value as the 837's `date_of_service`. (Yes, the vendor column is still called `fill_date`; the export schema was built for pharmacy and reused for medical. That is realistic, not sloppy modelling.)
+
+The medical 340B join is therefore the natural key **{provider NPI, NDC, service date}** — strictly weaker than the pharmacy key, because two administrations of the same drug at the same site on the same day are indistinguishable. That ambiguity is a real crosswalk hazard the connector must park as ambiguous rather than guess through.
 
 ### Worked examples
 
@@ -349,6 +389,73 @@ The PBM's `authorization_number` (Section 1) never reaches the TPA — the two s
 }
 ```
 
+**TPA qualification decision — medical-benefit (clinic-administered) dispense.** No Rx number exists; the natural key is `{provider_npi, ndc_11, fill_date}`:
+
+```json
+{
+  "record_id": "TPA-EVT-000142",
+  "source_system": "TPA_PORTAL",
+  "event_type": "QUALIFICATION_DECISION",
+  "received_at": "2026-03-12T09:30:00Z",
+
+  "rx_number": null,
+  "pharmacy_npi": null,
+  "provider_npi": "1497821345",
+  "ndc_11": "50242007923",
+  "fill_date": "20260308",
+  "prescriber_npi": "1972000897",
+  "covered_entity_id": "DSH310074",
+  "hin": "HN3021998",
+  "wholesaler_invoice_number": "WI-88213422",
+
+  "qualification_status": "QUALIFIED",
+  "disqualification_reason": null
+}
+```
+
+**Rebate request — separates C-03 (qualified, not yet submitted) from C-05 (submitted, manufacturer pending), and carries the submission date the 45-day rule needs:**
+
+```json
+{
+  "record_id": "TPA-EVT-000155",
+  "source_system": "TPA_PORTAL",
+  "event_type": "REBATE_REQUEST",
+  "received_at": "2026-03-15T10:05:00Z",
+
+  "rx_number": "7845102",
+  "ndc_11": "00071015523",
+  "fill_date": "20260302",
+  "pharmacy_npi": "1234567893",
+  "covered_entity_id": "DSH310074",
+
+  "submission_date": "20260314",
+  "manufacturer": "VERION"
+}
+```
+
+**Manufacturer decision — a rejection cannot ride inside a payment batch, so it gets its own record:**
+
+```json
+{
+  "record_id": "TPA-EVT-000198",
+  "source_system": "MANUFACTURER_REBATE",
+  "event_type": "MANUFACTURER_DECISION",
+  "received_at": "2026-03-28T08:00:00Z",
+
+  "rx_number": "7845310",
+  "ndc_11": "00002143380",
+  "fill_date": "20260210",
+  "pharmacy_npi": "1234567893",
+  "covered_entity_id": "DSH310074",
+
+  "manufacturer": "VERION",
+  "manufacturer_status": "REJECTED",
+  "rejection_reason": "NON_CONFORMING_45_DAY"
+}
+```
+
+An `APPROVED` decision may be emitted as its own `MANUFACTURER_DECISION` record (C-11, approved but not yet paid) or be implied by the dispense's later appearance in a `REBATE_PAYMENT_BATCH` — both are real vendor behaviours.
+
 **Manufacturer rebate batch — one payment, many dispenses:**
 
 ```json
@@ -358,7 +465,7 @@ The PBM's `authorization_number` (Section 1) never reaches the TPA — the two s
   "event_type": "REBATE_PAYMENT_BATCH",
   "received_at": "2026-04-02T08:15:00Z",
 
-  "manufacturer": "LILLY",
+  "manufacturer": "VERION",
   "allocation_code": "RBT-20260402-01",
   "total_rebate_amount": 18420.00,
   "payment_effective_date": "20260401",
@@ -386,7 +493,9 @@ The PBM's `authorization_number` (Section 1) never reaches the TPA — the two s
 }
 ```
 
-`allocation_code` is what makes this splittable. The bank deposit for this rebate (Section 4) carries the same code, because it's the only thing tying one lump payment back to N dispenses.
+`allocation_code` is what makes this splittable. The bank deposit for this rebate (Section 4) carries the same code **in its `trn02` column, when the CCD+ addenda survive the trip**: `trn02` is semantically "the payer-assigned business reference from the addenda" — for a claim payment the payer is the PBM/health plan and the reference is the 835 reassociation trace number; for a rebate the payer is the manufacturer and the reference is the `allocation_code`. Same column, same semantics, different issuer. Rebate deposits are subject to the same ~20% addenda-loss rate as claim payments, and a rebate deposit that loses its `allocation_code` *and* cannot be resolved on amount+date is exactly D-4, "orphan / unmatched rebate" — the exception emerges from the mechanism rather than being hand-placed. The bank CSV gains no rebate-specific column.
+
+Batch `dispenses[]` lines for medical-benefit episodes follow the same shape as their qualification records: `rx_number: null`, `pharmacy_npi: null`, `provider_npi` populated.
 
 **Reversal — negative quantity, not a delete:**
 
@@ -411,11 +520,13 @@ The PBM's `authorization_number` (Section 1) never reaches the TPA — the two s
 
 | Field | Format | Assigned by |
 |---|---|---|
-| `rx_number` | numeric, ≤12 digits | Pharmacy |
+| `rx_number` | numeric, ≤12 digits; **`null` on medical-benefit dispenses** (no prescription exists) | Pharmacy |
 | `ndc_11` | 11-digit NDC, no punctuation | FDA |
-| `fill_date` | CCYYMMDD | — |
-| `pharmacy_npi` | 10-digit NPI | NPPES |
+| `fill_date` | CCYYMMDD; on medical dispenses carries the administration/service date | — |
+| `pharmacy_npi` | 10-digit NPI; **`null` on medical-benefit dispenses** | NPPES |
+| `provider_npi` | 10-digit NPI, the 837 billing provider; **present only on medical-benefit dispenses** | NPPES |
 | `prescriber_npi` | 10-digit NPI | NPPES |
+| `submission_date` | CCYYMMDD, on `REBATE_REQUEST` only; >45 days after `fill_date` drives `NON_CONFORMING_45_DAY` | TPA |
 | `covered_entity_id` | HRSA format, e.g. `DSH310074`; prefix identifies entity type (`DSH`/`CAH`/`CAN`/`PED`/`RRC`/`SCH` = hospitals, `CH`/`FQHC`/`HM`/`RW*` = grantees); optional trailing letter = child site (`DSH310074A`) | **HRSA** |
 | `hin` | 9-char alphanumeric | **HIBCC** |
 | `wholesaler_invoice_number` | vendor-specific | Wholesaler |
@@ -429,7 +540,7 @@ The PBM's `authorization_number` (Section 1) never reaches the TPA — the two s
 |---|---|
 | Patient-definition failure | `qualification_status = NOT_QUALIFIED`; reason one of `NO_QUALIFYING_ENCOUNTER`, `PRESCRIBER_NOT_AFFILIATED`, `UNREGISTERED_LOCATION` |
 | Medicaid duplicate-discount exclusion | `qualification_status = NOT_QUALIFIED`; reason `MEDICAID_DUPLICATE_DISCOUNT` |
-| Contract-pharmacy restriction | `manufacturer_status = REJECTED`; reason `CONTRACT_PHARMACY_RESTRICTED`; manufacturer one of the 2020 restricting wave — Lilly, AstraZeneca, Sanofi, Novartis, Merck, Novo Nordisk |
+| Contract-pharmacy restriction | `manufacturer_status = REJECTED`; reason `CONTRACT_PHARMACY_RESTRICTED`; manufacturer one of the fictional restricting wave — `VERION`, `ALDEBARAN`, `CORVANE`, `TALVEX`, `SAGEPOINT`, `HALCYON` (modelled on the real 2020 manufacturer restrictions; real names appear in prose only) |
 | Non-conforming claim | `manufacturer_status = REJECTED`; reason `NON_CONFORMING_45_DAY`; submitted more than 45 days after `fill_date` |
 | Reversal after rebate already paid | A `DISPENSE_REVERSAL` (negative quantity) arrives after a `REBATE_PAYMENT_BATCH` already paid that dispense — cross-track cleanup, not a simple reject |
 | Batched rebate needing allocation | One `REBATE_PAYMENT_BATCH` covers many `dispenses[]`; the connector must fan the total back out to individual claims via `allocation_code` |
@@ -445,8 +556,10 @@ Same shape as PBM, different rails: the provider files an institutional/professi
 
 | File | What it is | Format basis |
 |---|---|---|
-| `medical_837_submissions.jsonl` | Claim submissions, replacements and voids | X12 837 |
+| `medical_837_submissions.jsonl` | Claim submissions, replacements and voids, **plus 277CA clearinghouse acknowledgments** | X12 837 + X12 277CA |
 | `medical_835_remittance.jsonl` | Payer remittance advice | X12 835 |
+
+The 277CA rides in the submissions file because it is the same rail: the clearinghouse acknowledges the 837 it just carried. Without it, a clearinghouse rejection (verdict B-01 — "837 rejected before reaching the payer") would be indistinguishable on the wire from "accepted, awaiting 835" (B-02): both would be an 837 with no 835. The 277CA is the real, standard acknowledgment transaction — this is realism, not invention, and it keeps `received_at` the only non-native field.
 
 ### The identifier that actually matters: CLM01 vs CLP01 vs CLP07
 
@@ -544,6 +657,44 @@ Note the drug appears twice, on two different unit bases: SVC05 (`4`, J-code bil
 }
 ```
 
+### Worked examples — 277CA clearinghouse acknowledgment
+
+A second `record_type` in the same file. `stc01_composite` carries the claim-status category and code; the payer claim control number is populated only on acceptance.
+
+**Accepted:**
+
+```json
+{
+  "record_id": "MED-277-000502",
+  "source_system": "CLEARINGHOUSE_837",
+  "record_type": "277CA",
+  "received_at": "2026-03-11T08:12:00Z",
+
+  "clm01_patient_control_number": "ENC-88231-01",
+  "stc01_composite": "A1:19",
+  "stc12_free_form": "ACCEPTED FOR PROCESSING",
+  "payer_claim_control_number": "20260610077213"
+}
+```
+
+**Rejected (never reached the payer — verdict B-01 territory):**
+
+```json
+{
+  "record_id": "MED-277-000509",
+  "source_system": "CLEARINGHOUSE_837",
+  "record_type": "277CA",
+  "received_at": "2026-03-11T08:12:00Z",
+
+  "clm01_patient_control_number": "ENC-89544-01",
+  "stc01_composite": "A3:21",
+  "stc12_free_form": "MISSING OR INVALID SUBSCRIBER ID",
+  "payer_claim_control_number": null
+}
+```
+
+Rejection codes in use: `A3:21`, `A3:33`, `A3:187`. Ordinary 837 records carry no `record_type` field; the 277CA always does.
+
 ### Worked example — 835
 
 ```json
@@ -571,12 +722,14 @@ Note the drug appears twice, on two different unit bases: SVC05 (`4`, J-code bil
       "clp04_payment_amount": 6100.00,
       "clp05_patient_responsibility": 300.00,
       "clp07_payer_claim_control_number": "20260610088410",
-      "service_line": {
-        "svc01_composite": "HC:J9035:JW",
-        "svc02_charge": 8420.00,
-        "svc03_paid": 6100.00,
-        "svc05_units": 4
-      },
+      "service_lines": [
+        {
+          "svc01_composite": "HC:J9035:JW",
+          "svc02_charge": 8420.00,
+          "svc03_paid": 6100.00,
+          "svc05_units": 4
+        }
+      ],
       "adjustments": [
         { "group_code": "CO", "reason_code": "45", "amount": 1820.00 },
         { "group_code": "CO", "reason_code": "197", "amount": 200.00, "rarc": "N522" },
@@ -593,6 +746,8 @@ Note the drug appears twice, on two different unit bases: SVC05 (`4`, J-code bil
 ```
 
 The CO-197 adjustment (prior auth absent) sits alongside a paid claim — very common on specialty J-codes, where the drug gets administered before the auth paperwork fully clears. It's paired with RARC N522 for machine-readable detail.
+
+`service_lines` is an **array**: an infusion claim is one J-code drug line (which owns the claim-level `loop_2410`) plus zero to two CPT administration lines (`96413`, `96415`) that legitimately carry no NDC. The single-line example above is the degenerate one-element case. The pharmacy 835 (Section 1) keeps `service_line` singular — pharmacy claims genuinely are one line.
 
 The PLB math, same sign convention as Section 1:
 
@@ -631,7 +786,20 @@ bpr02_total_payment                           =   5,242.30   <- what hits the ba
 
 **RARC codes in use:** `N130`, `N362` (units exceed maximum), `N522`, `M15`, `N54`, `N56`
 
-**PLB codes:** `WO` overpayment recovery · `FB` forward balance, unrecovered remainder carried to next cycle · `L6` interest owed (negative, increases payment) · `CS` adjustment · `72` authorized return · `RA` retroactive adjustment
+**PLB codes:** `WO` overpayment recovery · `FB` forward balance, unrecovered remainder carried to next cycle · `L6` interest owed (negative, increases payment) · `CS` adjustment · `72` authorized return · `RA` retroactive adjustment (**when it represents an appeal credit it is carried negative, same direction as `L6`** — under the identity `BPR02 = Σ(CLP04) − Σ(PLB, signed)` a positive PLB reduces payment, so a credit must be negative; an earlier draft said "positive" and was self-contradictory)
+
+**PLB sign convention, in one block:**
+
+```
+WO  > 0   overpayment recovery       -> reduces the deposit
+FB  > 0   forward balance, no ref    -> reduces the deposit, unexplained residual
+CS  > 0   adjustment                 -> reduces the deposit
+72  > 0   authorized return          -> reduces the deposit
+L6  < 0   interest owed to provider  -> increases the deposit
+RA  < 0   appeal credit              -> increases the deposit
+```
+
+A negative CLP04 (`clp02 = "22"`, reversal of prior payment) reduces the batch total through the `Σ(CLP04)` term, not through PLB — the two mechanisms are never both applied to the same reversal.
 
 ### PLB sits outside every claim loop
 
@@ -656,7 +824,7 @@ This dataset uses **both conventions**, deliberately, because both are real and 
 | CLP07 discontinuity | Same `CLM01`/`CLP01` across two remittances, different `CLP07` each time — correct behavior a connector must not mistake for two unrelated claims |
 | Untraceable provider offset | `PLB` `FB` or `CS` line with no `reference_icn` |
 | Appeal via reprocessing | New 837 (freq `7`) with no explicit "appeal" flag anywhere |
-| Appeal via PLB credit | `RA` reason code, positive amount, no new claim submitted |
+| Appeal via PLB credit | `RA` reason code, **negative** amount (a credit — increases the payment, same direction as `L6`), no new claim submitted |
 | Duplicate 835 | Same `record_id` (or same `clp07`) emitted twice |
 
 ---
@@ -671,7 +839,7 @@ A real business bank statement export gives you what a bank gives you, nothing m
 
 Every ACH credit carries a 15-digit **ACH trace number** — 8 digits of the originating bank's routing number followed by a 7-digit sequence number. It is pure banking plumbing: it identifies the transfer to the banking network, carries zero business content, and is **always present**, because the network can't move money without it.
 
-`TRN02` — the reassociation trace number from Section 1's 835 (`trn.reassociation_trace_number`) — is a completely different number, assigned by the *payer*, carrying real business content: it's the thread back to which remittance a deposit belongs to. It only survives to the bank statement if the ACH addenda record made the whole trip intact, which is common but not guaranteed.
+`TRN02` — the reassociation trace number from Section 1's 835 (`trn.reassociation_trace_number`) — is a completely different number, assigned by the *payer*, carrying real business content: it's the thread back to which remittance a deposit belongs to. It only survives to the bank statement if the ACH addenda record made the whole trip intact, which is common but not guaranteed. Semantically the column is "the payer-assigned business reference from the CCD+ addenda": for a claim payment that is the 835 trace number; **for a manufacturer rebate it is the batch's `allocation_code`** (Section 2). Same column, same survival odds, different issuer.
 
 These are two unrelated numbering systems that happen to ride the same wire transfer. A connector that assumes they're interchangeable breaks the day one of them is missing — which, by design, happens often (see Defects, below).
 
@@ -681,7 +849,7 @@ Every ACH credit also carries, off the same NACHA CCD+ batch header:
 
 | Field | Format | Notes |
 |---|---|---|
-| `company_name` | ≤16 chars | Often truncated, e.g. `CAREMARK` |
+| `company_name` | ≤16 chars | Often truncated, e.g. `BLUE HARBOR HEAL` (16 chars of `BLUE HARBOR HEALTH`) |
 | `company_id` | 10 chars | Usually `1` + 9-digit EIN, e.g. `1911234567` |
 | `company_entry_description` | ≤10 chars | For healthcare claim payments, the mandated literal `HCCLAIMPMT` |
 
@@ -699,13 +867,13 @@ And by the time it reaches our side of the pipeline, the exception has already r
 
 ```csv
 posting_date,description,ach_trace_number,trn02,company_name,company_id,company_entry_description,amount,type,running_balance,received_at
-2026-03-17,ACH CREDIT,071000301234567,8873020123,CAREMARK,1911234567,HCCLAIMPMT,47218.40,CREDIT,1284302.11,2026-03-17T18:05:00Z
-2026-03-24,ACH CREDIT,071000305567234,,ANTHEM BCBS,1622109834,HCCLAIMPMT,5242.30,CREDIT,1289544.41,2026-03-24T17:58:00Z
-2026-04-02,ACH CREDIT,073000199981122,,LILLY REBATE,1837765021,CCD,18420.00,CREDIT,1307964.41,2026-04-02T18:10:00Z
-2026-03-06,ACH DEBIT,071000309912345,7734410098,CAREMARK,1911234567,HCCLAIMPMT,-3150.00,DEBIT,1236883.71,2026-03-06T17:50:00Z
+2026-03-17,ACH CREDIT,071000301234567,8873020123,MERIDIANRX,1911234567,HCCLAIMPMT,47218.40,CREDIT,1284302.11,2026-03-17T18:05:00Z
+2026-03-24,ACH CREDIT,071000305567234,,BLUE HARBOR HEAL,1622109834,HCCLAIMPMT,5242.30,CREDIT,1289544.41,2026-03-24T17:58:00Z
+2026-04-02,ACH CREDIT,073000199981122,,VERION PHARMA,1837765021,CCD,18420.00,CREDIT,1307964.41,2026-04-02T18:10:00Z
+2026-03-06,ACH DEBIT,071000309912345,7734410098,MERIDIANRX,1911234567,HCCLAIMPMT,-3150.00,DEBIT,1236883.71,2026-03-06T17:50:00Z
 ```
 
-Read across: line 1 is the pharmacy deposit from Section 1's 835, `trn02` present, trivially matched. Line 2 is a medical deposit for the exact payment amount worked out in Section 3, `trn02` missing — matched on amount and date alone. Line 3 is the 340B rebate batch from Section 2, distinguishable only by `company_name`, since `company_entry_description` isn't `HCCLAIMPMT` for a rebate. Line 4 is a true ACH reversal — a debit, inside 5 banking days of an unrelated earlier credit carrying `trn02 = 7734410098`, for the exact same amount as that credit. Note it is deliberately unrelated to the $412.60 `WO` recoupment from Section 1 — that recoupment is netted, not reversed, and never appears as its own bank line at all (see below).
+Read across: line 1 is the pharmacy deposit from Section 1's 835, `trn02` present, trivially matched. Line 2 is a medical deposit for the exact payment amount worked out in Section 3, `trn02` missing — matched on amount and date alone. Line 3 is the 340B rebate batch from Section 2 — for a rebate deposit, `trn02` carries the batch's `allocation_code` when the CCD+ addenda survive (Section 2's join-key ruling); this particular row is one of the ~20% where the addenda dropped, so it is distinguishable only by `company_name`, since `company_entry_description` isn't `HCCLAIMPMT` for a rebate. Lose the addenda *and* fail amount+date and you have D-4, the orphan rebate. Line 4 is a true ACH reversal — a debit, inside 5 banking days of an unrelated earlier credit carrying `trn02 = 7734410098`, for the exact same amount as that credit. Note it is deliberately unrelated to the $412.60 `WO` recoupment from Section 1 — that recoupment is netted, not reversed, and never appears as its own bank line at all (see below).
 
 ### Deposits are never combined
 
@@ -753,8 +921,9 @@ The latest appended row for a claim is its current status. Nothing is ever updat
 |---|---|---|
 | PBM 835 | `clp01_patient_control_number` = `"7845102FILL00"`, parsed to `{rx, fill}`, plus `payee_npi` | Pharmacy claim |
 | Medical 835 | `clp01_patient_control_number` = provider claim number | 837 submission |
-| 340B / TPA response | `rx_number` + `ndc_11` + `fill_date` + `pharmacy_npi` | Dispense |
-| Bank line | `ach_trace_number` / `trn02` | **A remittance, NOT a claim** |
+| 340B / TPA response (pharmacy dispense) | `rx_number` + `ndc_11` + `fill_date` + `pharmacy_npi` | Dispense |
+| 340B / TPA response (medical dispense) | `provider_npi` + `ndc_11` + `fill_date` (= service date); `rx_number` is null | 837 submission |
+| Bank line | `ach_trace_number` / `trn02` (which for a rebate deposit carries the `allocation_code`) | **A remittance or rebate batch, NOT a claim** |
 
 ### The bank line is two hops
 
