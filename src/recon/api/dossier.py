@@ -86,6 +86,9 @@ class TimelineEvent:
     #: The fields of this record worth surfacing, carried verbatim. Absent fields
     #: are omitted rather than nulled, so the key set states what the record has.
     facts: dict[str, Any] = field(default_factory=dict)
+    #: The subset of ``facts`` that carries the story rather than the identity.
+    #: A short view shows these; a full view shows everything. Both read one object.
+    essential: tuple[str, ...] = ()
     #: Where to look it up: the feed file, the line, the source record id.
     source: dict[str, Any] | None = None
     #: True when arrival lagged the event by more than a fortnight — the late-arrival defect.
@@ -337,6 +340,19 @@ class Projection:
     body: tuple[str, ...] = ()
     #: Columns read straight off the ``normalized_record`` row.
     row: tuple[str, ...] = ()
+    #: The subset that carries the *story*: what happened and what it was worth.
+    #:
+    #: Everything else in ``body``/``row`` is identity -- an ICN, a covered-entity
+    #: id, a wholesaler invoice number, an authorization number.  Those matter when
+    #: you are chasing one record down to its source, and they are noise when you
+    #: are reading a timeline to work out what happened to a claim.  Reading
+    #: "HIN HN3021998, covered entity DSH310074, invoice WI-88213" tells you
+    #: nothing about the episode; "QUALIFIED" tells you everything.
+    #:
+    #: The split lives here rather than in the front end on purpose: the agent
+    #: layer wants the same short view a person does, and a filter implemented in
+    #: React would be invisible to it.
+    simple: tuple[str, ...] = ()
 
 
 _PROJECTIONS: dict[RecordKind, Projection] = {
@@ -348,10 +364,17 @@ _PROJECTIONS: dict[RecordKind, Projection] = {
             "total_amount_paid_cents",
         ),
         row=("authorization_number", "rx_number"),
+        # Paid or rejected, for how much, and whether it was flagged 340B at the
+        # counter. The ingredient/dispensing split is detail; the total is the story.
+        simple=(
+            "response_status", "reject_codes", "total_amount_paid_cents",
+            "patient_pay_amount_cents", "submission_clarification_code",
+        ),
     ),
     RecordKind.PHARMACY_REVERSAL: Projection(
         body=("transaction_code", "response_status", "reversal_reason"),
         row=("authorization_number", "rx_number"),
+        simple=("reversal_reason",),
     ),
     RecordKind.REMITTANCE: Projection(
         # payer_name is the PBM path, payer_tin the medical one -- see the note above.
@@ -360,6 +383,7 @@ _PROJECTIONS: dict[RecordKind, Projection] = {
             "payment_effective_date", "claim_line_count",
         ),
         row=("trn02", "amount_cents"),
+        simple=("amount_cents", "claim_line_count", "payment_effective_date"),
     ),
     RecordKind.REMITTANCE_CLAIM_LINE: Projection(
         # service_line singular is PBM, service_lines plural is medical.
@@ -369,42 +393,59 @@ _PROJECTIONS: dict[RecordKind, Projection] = {
             "service_lines",
         ),
         row=("clp07", "amount_cents"),
+        # Charged, paid, why the difference, and whether the receivable closed.
+        simple=(
+            "clp02_claim_status_code", "charge_cents", "payment_cents", "adjustments",
+        ),
     ),
     RecordKind.PROVIDER_LEVEL_ADJUSTMENT: Projection(
         body=("reason_code", "amount_cents", "reference"),
+        simple=("reason_code", "amount_cents"),
     ),
     RecordKind.MEDICAL_SUBMISSION: Projection(
         body=(
             "frequency_code", "ref_f8_original_icn", "rendering_provider_npi",
             "service_lines", "ctp04_quantity", "ctp05_uom_qualifier",
         ),
+        # frequency_code is the one that matters: original, replacement or void.
+        simple=("frequency_code", "service_lines"),
     ),
     RecordKind.MEDICAL_ACKNOWLEDGMENT: Projection(
         body=("stc01_composite", "stc12_free_form", "accepted"),
         row=("clp07",),
+        # The free-form text alone: "ACCEPTED FOR PROCESSING" on the happy path,
+        # "MISSING OR INVALID SUBSCRIBER ID" on a rejection. Carrying `accepted`
+        # beside it restates the same fact twice in the cases where it is true.
+        simple=("stc12_free_form",),
     ),
     RecordKind.TPA_QUALIFICATION: Projection(
         body=(
             "event_type", "qualification_status", "disqualification_reason",
             "covered_entity_id", "hin", "wholesaler_invoice_number",
         ),
+        simple=("qualification_status", "disqualification_reason"),
     ),
     RecordKind.TPA_REBATE_REQUEST: Projection(
         body=("event_type", "manufacturer", "submission_date", "covered_entity_id"),
+        simple=("manufacturer", "submission_date"),
     ),
     RecordKind.TPA_MANUFACTURER_DECISION: Projection(
         body=("event_type", "manufacturer_status", "rejection_reason", "covered_entity_id"),
+        simple=("manufacturer_status", "rejection_reason"),
     ),
     RecordKind.TPA_REVERSAL: Projection(
         body=("event_type", "quantity_dispensed", "reversal_reason", "covered_entity_id"),
+        simple=("quantity_dispensed", "reversal_reason"),
     ),
     RecordKind.REBATE_BATCH: Projection(
         body=("event_type", "manufacturer", "payment_effective_date", "dispense_line_count"),
         row=("allocation_code", "amount_cents"),
+        simple=("manufacturer", "amount_cents", "payment_effective_date"),
     ),
     RecordKind.REBATE_DISPENSE_LINE: Projection(
         body=("manufacturer_status", "covered_entity_id", "rebate_amount_cents"),
         row=("allocation_code",),
+        simple=("manufacturer_status", "rebate_amount_cents"),
     ),
     RecordKind.BANK_TRANSACTION: Projection(
         body=(
@@ -412,8 +453,17 @@ _PROJECTIONS: dict[RecordKind, Projection] = {
             "company_entry_description", "direction", "running_balance_cents",
         ),
         row=("trn02", "amount_cents"),
+        simple=("direction", "amount_cents", "posting_date"),
     ),
 }
+
+
+# Every projection's `simple` must be a subset of what it actually surfaces,
+# otherwise the short view silently asks for a field that can never appear.
+for _kind, _p in _PROJECTIONS.items():
+    _unknown = set(_p.simple) - set(_p.body) - set(_p.row)
+    if _unknown:  # pragma: no cover - guard whose job is to never fire
+        raise RuntimeError(f"{_kind}: simple names fields it does not project: {sorted(_unknown)}")
 
 
 # Every kind gets a row.  The previous version skipped unknown kinds with a bare
@@ -480,14 +530,19 @@ def _record_events(records: list[sqlite3.Row]) -> list[TimelineEvent]:
     events: list[TimelineEvent] = []
     for row in records:
         kind = RecordKind(row["record_kind"])
+        projection = _PROJECTIONS[kind]
         body = json.loads(row["canonical"])
         occurred = row["date_of_service"]
+        facts = _facts(projection, row, body)
         events.append(
             TimelineEvent(
                 at=row["received_at"],
                 occurred_on=occurred,
                 tag=str(kind),
-                facts=_facts(_PROJECTIONS[kind], row, body),
+                facts=facts,
+                # Intersected with what is actually present, so `essential` never
+                # names a key the consumer cannot find in `facts`.
+                essential=tuple(name for name in projection.simple if name in facts),
                 source=_source(row),
                 late=_is_late(row["received_at"], occurred),
             )
@@ -530,6 +585,9 @@ def _cash_events(allocations: list[sqlite3.Row]) -> list[TimelineEvent]:
                 occurred_on=bank.get("posting_date"),
                 tag="CASH",
                 facts=facts,
+                # Which way the money went, on which track, how much, and how
+                # confidently it was linked. The trace numbers are identity.
+                essential=("direction", "track", "allocated_cents", "basis"),
                 source={"ach_trace_number": row["ach_trace_number"], "trn02": row["trn02"]},
             )
         )
@@ -588,6 +646,12 @@ def _verdict_events(verdicts) -> list[TimelineEvent]:
                 occurred_on=None,
                 tag="VERDICT",
                 facts=facts,
+                # A verdict is already the short version of itself -- everything on
+                # it is the story. Only the `previous_*` fields are context a short
+                # view can drop, since the transition label already says it moved.
+                essential=tuple(
+                    name for name in facts if not name.startswith("previous_")
+                ),
             )
         )
         previous = signature

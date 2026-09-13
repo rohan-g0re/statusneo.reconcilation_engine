@@ -1,5 +1,5 @@
-import React from 'react'
-import { formatMoney } from '../api.js'
+import React, { useState } from 'react'
+import { api, formatMoney } from '../api.js'
 
 // The episode, read as a story.
 //
@@ -190,9 +190,17 @@ function FactRow({ factKey, value }) {
 
 // `facts` renders generically: whatever keys a record's projection kept, in the order the API sent
 // them. Absent fields are already dropped server-side, so every key here is one worth showing.
-function FactsList({ facts }) {
+//
+// `onlyKeys`, when given, restricts rendering to that subset — this is how the simple view reuses
+// this exact renderer (same value handling: money, nested tables, chips, yes/no) over fewer facts,
+// rather than growing a second, parallel facts renderer that could drift from this one.
+function FactsList({ facts, onlyKeys }) {
   if (!facts || typeof facts !== 'object') return null
-  const entries = Object.entries(facts).filter(([, value]) => value !== null && value !== undefined)
+  let entries = Object.entries(facts).filter(([, value]) => value !== null && value !== undefined)
+  if (onlyKeys) {
+    const keep = new Set(onlyKeys)
+    entries = entries.filter(([key]) => keep.has(key))
+  }
   if (entries.length === 0) return null
   return (
     <dl className="dossier-facts">
@@ -203,7 +211,91 @@ function FactsList({ facts }) {
   )
 }
 
+// A hash is shown short because the whole 64-character string is never what anyone reads at a
+// glance — the truncated form is what a human scans, the full value lives in `title` for the one
+// time someone needs to copy it out to compare byte for byte.
+function shortHash(hash) {
+  if (!hash) return null
+  return hash.length > 16 ? `${hash.slice(0, 16)}…` : hash
+}
+
+// The panel revealed under a timeline event once its source line is clicked. `entry` is this raw
+// record's slot in the dossier's own fetch cache — undefined while nothing has happened yet, which
+// this component never sees because the caller only renders it once a fetch has been kicked off.
+function RecordPanel({ entry }) {
+  if (!entry || entry.status === 'loading') {
+    return (
+      <div className="source-panel" data-testid="source-panel">
+        <p className="spinner">loading the source record…</p>
+      </div>
+    )
+  }
+  if (entry.status === 'error') {
+    return (
+      <div className="source-panel" data-testid="source-panel">
+        <p className="error" style={{ margin: 0 }}>Could not load the source record: {entry.error}</p>
+      </div>
+    )
+  }
+
+  const record = entry.data
+  let payload = record.payload
+  try {
+    payload = JSON.stringify(JSON.parse(record.payload), null, 2)
+  } catch {
+    // Not valid JSON, or not a string at all — show whatever the API sent rather than crash on it.
+    payload = record.payload
+  }
+
+  return (
+    <div className="source-panel" data-testid="source-panel">
+      <div className="source-panel-meta mono">
+        {record.source_file}:{record.source_line_no} · {record.source_record_id} ·{' '}
+        {record.source_system}
+      </div>
+      <pre>{String(payload)}</pre>
+      <div className="source-panel-hashes">
+        <span title={record.payload_sha256}>payload {shortHash(record.payload_sha256)}</span>
+        <span title={record.file_sha256}>file {shortHash(record.file_sha256)}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function EpisodeDossier({ dossier, busy, onClose }) {
+  // Simple is the default: an operator opening an episode wants "what happened", not a provenance
+  // audit. Detailed is one click away, not a second surface, because it is the same timeline with
+  // more of each event's own facts shown — never a different data source.
+  const [view, setView] = useState('simple')
+
+  // Keyed by raw_id, not by the event's position in the timeline, because raw_id is what the record
+  // actually is — an episode's timeline can be re-fetched (a cursor move, a different episode
+  // selected) without invalidating what has already been opened, and a stale index can never point
+  // at the wrong event's panel.
+  const [openRecords, setOpenRecords] = useState(() => new Set())
+  const [recordCache, setRecordCache] = useState({})
+
+  function toggleSource(rawId) {
+    setOpenRecords((prev) => {
+      const next = new Set(prev)
+      if (next.has(rawId)) next.delete(rawId)
+      else next.add(rawId)
+      return next
+    })
+    if (!recordCache[rawId]) {
+      setRecordCache((prev) => ({ ...prev, [rawId]: { status: 'loading' } }))
+      api
+        .record(rawId)
+        .then((data) => setRecordCache((prev) => ({ ...prev, [rawId]: { status: 'ready', data } })))
+        .catch((exc) =>
+          setRecordCache((prev) => ({
+            ...prev,
+            [rawId]: { status: 'error', error: String(exc.message ?? exc) },
+          })),
+        )
+    }
+  }
+
   if (busy && !dossier) return <p className="spinner">loading the episode…</p>
   if (!dossier) {
     return (
@@ -219,61 +311,82 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
 
   return (
     <div data-testid="dossier">
-      <div className="dossier-head">
-        <div>
-          <div className="dossier-id">{dossier.episode_id}</div>
-          <div className="dossier-drug">
-            {identity.drug} · {identity.quantity} units ·{' '}
-            {identity.track === 'PHARMACY' ? 'pharmacy benefit' : 'medical benefit'} ·{' '}
-            {identity.payer}
-          </div>
-          <div className="dossier-keys">
-            dispensed {identity.date_of_service}
-            {identity.rx_number ? ` · Rx ${identity.rx_number}/${identity.fill_number}` : null}
-            {identity.clm01 ? ` · CLM01 ${identity.clm01}` : null}
-            {identity.is_340b_flagged ? ' · flagged 340B at the point of sale' : null}
-          </div>
-        </div>
-        {current ? (
-          <div className="dossier-verdict" style={{ '--d': DISPOSITION_COLOR[current.episode_disposition] }}>
-            <div className="dossier-disposition" data-testid="dossier-disposition">
-              {current.episode_disposition}
+      <div className="dossier-sticky">
+        <div className="dossier-head">
+          <div>
+            <div className="dossier-id">{dossier.episode_id}</div>
+            <div className="dossier-drug">
+              {identity.drug} · {identity.quantity} units ·{' '}
+              {identity.track === 'PHARMACY' ? 'pharmacy benefit' : 'medical benefit'} ·{' '}
+              {identity.payer}
             </div>
-            <div>
-              <span className="verdict-code">{current.reimbursement_verdict}</span>{' '}
-              <span className="verdict-code">{current.rebate_verdict}</span>
+            <div className="dossier-keys">
+              dispensed {identity.date_of_service}
+              {identity.rx_number ? ` · Rx ${identity.rx_number}/${identity.fill_number}` : null}
+              {identity.clm01 ? ` · CLM01 ${identity.clm01}` : null}
+              {identity.is_340b_flagged ? ' · flagged 340B at the point of sale' : null}
             </div>
-            {current.reopened_from ? (
-              <div className="chip reopened" style={{ marginTop: 6 }}>
-                reopened from {current.reopened_from}
+          </div>
+          {current ? (
+            <div className="dossier-verdict" style={{ '--d': DISPOSITION_COLOR[current.episode_disposition] }}>
+              <div className="dossier-disposition" data-testid="dossier-disposition">
+                {current.episode_disposition}
               </div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="dossier-verdict">
-            <div className="dossier-disposition">no verdict yet</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              at this cursor the claim exists and has not been evaluated
+              <div>
+                <span className="verdict-code">{current.reimbursement_verdict}</span>{' '}
+                <span className="verdict-code">{current.rebate_verdict}</span>
+              </div>
+              {current.reopened_from ? (
+                <div className="chip reopened" style={{ marginTop: 6 }}>
+                  reopened from {current.reopened_from}
+                </div>
+              ) : null}
             </div>
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="dossier-verdict">
+              <div className="dossier-disposition">no verdict yet</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                at this cursor the claim exists and has not been evaluated
+              </div>
+            </div>
+          )}
+        </div>
 
-      {current && (current.reason_codes.length > 0 || current.cross_track_flags.length > 0) ? (
-        <p className="dossier-reasons">
-          {current.reason_codes.map((code) => (
-            <span className="chip" key={code}>{code}</span>
-          ))}
-          {current.cross_track_flags.map((flag) => (
-            <span className="chip flag" key={flag}>{flag}</span>
-          ))}
-          {current.cross_track_flags.length > 0 ? (
-            <span className="dossier-note">
-              cross-track — a story no single-track view can tell
-            </span>
-          ) : null}
-        </p>
-      ) : null}
+        {current && (current.reason_codes.length > 0 || current.cross_track_flags.length > 0) ? (
+          <p className="dossier-reasons">
+            {current.reason_codes.map((code) => (
+              <span className="chip" key={code}>{code}</span>
+            ))}
+            {current.cross_track_flags.map((flag) => (
+              <span className="chip flag" key={flag}>{flag}</span>
+            ))}
+            {current.cross_track_flags.length > 0 ? (
+              <span className="dossier-note">
+                cross-track — a story no single-track view can tell
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+
+        <div className="view-toggle" role="group" aria-label="Timeline detail level">
+          <button
+            type="button"
+            data-testid="view-simple"
+            aria-pressed={view === 'simple'}
+            onClick={() => setView('simple')}
+          >
+            Simple
+          </button>
+          <button
+            type="button"
+            data-testid="view-detailed"
+            aria-pressed={view === 'detailed'}
+            onClick={() => setView('detailed')}
+          >
+            Detailed
+          </button>
+        </div>
+      </div>
 
       {economics ? (
         <div className="dossier-money" data-testid="dossier-economics">
@@ -321,9 +434,11 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
         </span>
       </h3>
 
-      <ol className="dossier-timeline" data-testid="dossier-timeline">
+      <ol className="dossier-timeline" data-testid="dossier-timeline" data-view={view}>
         {timeline.map((event, index) => {
           const dot = TAG_DOT[event.tag] ?? 'var(--border-strong)'
+          const rawId = event.source?.raw_id
+          const sourceOpen = rawId !== undefined && rawId !== null && openRecords.has(rawId)
           return (
             <li key={index} style={{ '--dot': dot }} data-testid={`event-${event.tag}`}>
               {/* Date only. The raw tag used to sit here too, but the gutter is fixed-width and
@@ -343,23 +458,44 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
                     </span>
                   ) : null}
                 </div>
-                <FactsList facts={event.facts} />
-                <div className="dossier-provenance">
-                  {event.occurred_on && event.occurred_on !== event.at.slice(0, 10) ? (
-                    <span title="The event happened on this date; we learned of it later">
-                      happened {event.occurred_on}, learned {event.at.slice(0, 10)}
-                    </span>
-                  ) : null}
-                  {event.source?.file ? (
-                    <span className="mono">
-                      {event.source.file}:{event.source.line}
-                      {event.source.record_id ? ` · ${event.source.record_id}` : ''}
-                    </span>
-                  ) : null}
-                  {event.source?.ach_trace_number ? (
-                    <span className="mono">ACH {event.source.ach_trace_number}</span>
-                  ) : null}
-                </div>
+                {/* Simple: only the facts this event's own `essential` list names — the outcome and
+                    the money, not the identifiers that got it there. Detailed: everything, via the
+                    same generic renderer, just over the full key set. */}
+                <FactsList facts={event.facts} onlyKeys={view === 'simple' ? event.essential : null} />
+                {view === 'detailed' ? (
+                  <>
+                    <div className="dossier-provenance">
+                      {event.occurred_on && event.occurred_on !== event.at.slice(0, 10) ? (
+                        <span title="The event happened on this date; we learned of it later">
+                          happened {event.occurred_on}, learned {event.at.slice(0, 10)}
+                        </span>
+                      ) : null}
+                      {event.source?.file ? (
+                        rawId !== undefined && rawId !== null ? (
+                          <button
+                            type="button"
+                            className="source-link"
+                            data-testid={`source-link-${index}`}
+                            aria-expanded={sourceOpen}
+                            onClick={() => toggleSource(rawId)}
+                          >
+                            {event.source.file}:{event.source.line}
+                            {event.source.record_id ? ` · ${event.source.record_id}` : ''}
+                          </button>
+                        ) : (
+                          <span className="mono">
+                            {event.source.file}:{event.source.line}
+                            {event.source.record_id ? ` · ${event.source.record_id}` : ''}
+                          </span>
+                        )
+                      ) : null}
+                      {event.source?.ach_trace_number ? (
+                        <span className="mono">ACH {event.source.ach_trace_number}</span>
+                      ) : null}
+                    </div>
+                    {sourceOpen ? <RecordPanel entry={recordCache[rawId]} /> : null}
+                  </>
+                ) : null}
               </div>
             </li>
           )

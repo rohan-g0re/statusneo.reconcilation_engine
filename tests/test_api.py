@@ -495,3 +495,73 @@ def test_a_reseeded_dataset_is_still_a_working_dataset(client):
 def test_a_nonsense_seed_is_refused(client):
     assert client.post("/api/regenerate?profile=demo&seed=-1").status_code == 422
     assert client.post("/api/regenerate?profile=demo&seed=0").status_code == 422
+
+
+# ═══ the short view, and the source behind a record ════════════════════════
+
+
+def test_every_event_marks_which_facts_carry_the_story(client):
+    """Two views, one object.
+
+    A timeline is read to work out what happened; identifiers are read when chasing one record down
+    to its source. Mixing them means an operator reads a covered-entity id and a wholesaler invoice
+    number before reaching the word QUALIFIED. `essential` is the split, and it lives server-side so
+    the agent layer gets the same short view a person does.
+    """
+    payload = _richest_dossier(client)
+    for event in payload["timeline"]:
+        assert event["essential"], f"{event['tag']} marks nothing as essential"
+        for key in event["essential"]:
+            assert key in event["facts"], (
+                f"{event['tag']}.essential names {key!r}, which is not in facts"
+            )
+
+
+def test_the_short_view_drops_identifiers_and_keeps_the_outcome(client):
+    """The specific noise this was built to remove, asserted by name."""
+    payload = _richest_dossier(client)
+    by_tag = {e["tag"]: e for e in payload["timeline"]}
+
+    if "TPA_QUALIFICATION" in by_tag:
+        event = by_tag["TPA_QUALIFICATION"]
+        assert "qualification_status" in event["essential"], "the outcome is the whole point"
+        for identifier in ("hin", "wholesaler_invoice_number", "covered_entity_id", "event_type"):
+            assert identifier not in event["essential"], (
+                f"{identifier} is identity, not story -- it belongs in the detailed view"
+            )
+
+    if "REMITTANCE_CLAIM_LINE" in by_tag:
+        event = by_tag["REMITTANCE_CLAIM_LINE"]
+        assert {"charge_cents", "payment_cents"} <= set(event["essential"])
+        for identifier in ("clp01", "clp07"):
+            assert identifier not in event["essential"]
+
+
+def test_a_timeline_event_leads_to_its_verbatim_source(client):
+    """Lineage level two: the bytes, not just the pointer.
+
+    Every event carries a `raw_id`; this is the hop that turns it into the line as it arrived.
+    """
+    payload = _richest_dossier(client)
+    # Verdicts have no source (nothing arrived; the engine concluded) and cash events carry a
+    # trace-number source rather than a record one. Only record events have a raw_id.
+    sourced = [e for e in payload["timeline"] if (e.get("source") or {}).get("raw_id")]
+    assert sourced, "record events must carry a raw_id to be traceable at all"
+
+    event = sourced[0]
+    response = client.get(f"/api/record/{event['source']['raw_id']}")
+    assert response.status_code == 200
+    record = response.json()
+
+    assert record["source_file"] == event["source"]["file"]
+    assert record["source_line_no"] == event["source"]["line"]
+    assert record["payload"], "the stored payload is the evidence; empty is useless"
+
+    # The hash has to be over what is actually returned, or it proves nothing.
+    import hashlib
+
+    assert hashlib.sha256(record["payload"].encode()).hexdigest() == record["payload_sha256"]
+
+
+def test_an_unknown_source_record_is_a_404(client):
+    assert client.get("/api/record/99999999").status_code == 404

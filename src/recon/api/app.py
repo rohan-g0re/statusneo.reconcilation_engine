@@ -285,6 +285,49 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(status_code=404, detail=f"no episode {episode_id!r}")
         return payload
 
+    @app.get("/api/record/{raw_id}")
+    def raw_record(raw_id: int) -> dict[str, Any]:
+        """The verbatim source line a timeline event came from.
+
+        Lineage has three levels and they are not the same thing.  A *pointer* says where a fact came
+        from — file, line, record id — and every timeline event already carries one.  This endpoint is
+        the second level: the bytes themselves, exactly as they arrived, plus the hashes that prove
+        they are unaltered.
+
+        It is a separate call on purpose.  A raw feed line runs several hundred characters, and an
+        episode has a dozen of them; inlining every payload into the dossier would multiply the cost
+        of every agent call to carry something almost no question needs.  Real systems reference
+        documents and fetch them on demand rather than embedding them, and the pointer in each event
+        is what makes the fetch one hop.
+
+        ``payload_sha256`` is over the stored line and ``file_sha256`` over the whole feed, so a
+        reader can verify both the record and the file it claims to come from.
+        """
+        with open_conn() as conn:
+            row = conn.execute(
+                "SELECT r.raw_id, r.source_system, r.source_record_id, r.source_line_no,"
+                "       r.payload, r.payload_sha256, r.received_at,"
+                "       b.source_file, b.file_sha256, b.loaded_at"
+                "  FROM raw_record r"
+                "  JOIN ingest_batch b ON b.batch_id = r.batch_id"
+                " WHERE r.raw_id = ?",
+                (raw_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no source record {raw_id}")
+        return {
+            "raw_id": row["raw_id"],
+            "source_file": row["source_file"],
+            "source_line_no": row["source_line_no"],
+            "source_record_id": row["source_record_id"],
+            "source_system": row["source_system"],
+            "received_at": row["received_at"],
+            "payload": row["payload"],
+            "payload_sha256": row["payload_sha256"],
+            "file_sha256": row["file_sha256"],
+            "loaded_at": row["loaded_at"],
+        }
+
     @app.get("/api/feed-exceptions")
     def feed_exceptions(
         cursor: str | None = Query(None, description="Replay cursor, ISO8601 UTC"),

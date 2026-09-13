@@ -31,6 +31,9 @@ export const api = {
   trace: (episodeId) => get(`/episode/${episodeId}/trace`),
   // One call, one episode, its entire history — the same payload the agent layer receives.
   dossier: (episodeId, cursor) => get(`/episode/${episodeId}/dossier`, { cursor }),
+  // The verbatim source line behind a record event — what the operator sees when they click a
+  // timeline event's `file:line` in the detailed view.
+  record: (rawId) => get(`/record/${rawId}`),
   feedExceptions: (cursor) => get('/feed-exceptions', { cursor }),
   // `seed` omitted rebuilds the published dataset byte for byte; a seed gives a genuinely
   // different one. The seed is chosen HERE, at the edge — nothing inside the generator reads a
