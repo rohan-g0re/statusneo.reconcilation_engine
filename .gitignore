@@ -20,3 +20,10 @@ data/generated/
 Thumbs.db
 .idea/
 *.swp
+
+# Stale foundation code written by a planning agent that exceeded its brief.
+# It predates the no-normalisation, crosswalk-indexing and database-first
+# decisions, so its schema is wrong. Kept on disk as a reference only.
+# DELETE THIS BLOCK when real implementation starts.
+/src/
+/pyproject.toml
