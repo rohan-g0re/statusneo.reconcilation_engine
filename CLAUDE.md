@@ -6,9 +6,9 @@ Global Instructions
   can be broken into independent subtasks, launch them as concurrent agents rather than executing sequentially. This
   maximizes throughput and minimizes wall-clock time.
 
-  - Use the Agent tool with model: "sonnet" for all subagent work
-  - Launch independent agents in parallel (multiple Agent tool calls in a single message)
-  - Only run agents sequentially when there are true data dependencies between them
+- Use the Agent tool with model: "sonnet" for all subagent work
+- Launch independent agents in parallel (multiple Agent tool calls in a single message)
+- Only run agents sequentially when there are true data dependencies between them
 
   Small Task Handling
 
@@ -16,19 +16,19 @@ Global Instructions
   technically run on a larger LLM. This applies to all quick, single-step, or low-complexity subtasks, regardless of
   their category.
 
-  - If a new agent or tool is spun up for a small task, set model: "sonnet" explicitly.
-  - Prefer Sonnet for efficiency, reduced latency, and cost, even if no parallelization opportunity is present.
-  - Do not escalate to more powerful models for trivial subproblems ("small", "routine", "one-off" jobs).
+- If a new agent or tool is spun up for a small task, set model: "sonnet" explicitly.
+- Prefer Sonnet for efficiency, reduced latency, and cost, even if no parallelization opportunity is present.
+- Do not escalate to more powerful models for trivial subproblems ("small", "routine", "one-off" jobs).
 
   Worker Fallback Policy (Sonnet → Opus)
 
   If a Sonnet worker fails (error, incomplete result, or task not accomplished), retry the same task with an Opus worker
   before giving up. Do NOT retry with Sonnet again — escalate immediately.
 
-  - First attempt: model: "sonnet" (cheap, fast)
-  - On failure: model: "opus" (deeper reasoning, better error recovery)
-  - Pass the Opus worker the same prompt plus context about what failed and why
-  - If Opus also fails, report to the user — do not loop
+- First attempt: model: "sonnet" (cheap, fast)
+- On failure: model: "opus" (deeper reasoning, better error recovery)
+- Pass the Opus worker the same prompt plus context about what failed and why
+- If Opus also fails, report to the user — do not loop
 
   Browser Automation Delegation (MANDATORY)
 
@@ -38,16 +38,17 @@ Global Instructions
   Playwright MCP is the PRIMARY browser automation tool. It provides direct browser control via MCP tools (navigate,
   snapshot, click, fill, upload, submit).
 
-  - Orchestrator (Opus): decides what to do, which URL, what data, which resume
-  - Worker (general-purpose, Sonnet, foreground): executes all Playwright MCP calls
-  - Use subagent_type: "general-purpose", model: "sonnet", run_in_background: false for browser tasks
-  - NEVER use sonnet-worker for browser tasks — it cannot access MCP tools
-  - NEVER use run_in_background: true for browser tasks — background subagents lose MCP access
-  - One browser worker at a time — no parallel browser workers (shared browser instance)
-  - Pass the worker a complete prompt with: target URL, all field values, resume path, platform patterns
-  - Persistent Chrome profile at C:\Users\ddpat\AppData\Local\playwright-mcp-profile preserves login state
+- Orchestrator (Opus): decides what to do, which URL, what data, which resume
+- Worker (general-purpose, Sonnet, foreground): executes all Playwright MCP calls
+- Use subagent_type: "general-purpose", model: "sonnet", run_in_background: false for browser tasks
+- NEVER use sonnet-worker for browser tasks — it cannot access MCP tools
+- NEVER use run_in_background: true for browser tasks — background subagents lose MCP access
+- One browser worker at a time — no parallel browser workers (shared browser instance)
+- Pass the worker a complete prompt with: target URL, all field values, resume path, platform patterns
+- Persistent Chrome profile at C:\Users\ddpat\AppData\Local\playwright-mcp-profile preserves login state
 
-  <!-- rtk-instructions v2 -->
+<!-- rtk-instructions v2 -->
+
   RTK (Rust Token Killer) - Token-Optimized Commands
 
   Golden Rule
@@ -56,10 +57,13 @@ Global Instructions
   means RTK is always safe to use.
 
   Important: Even in command chains with &&, use rtk:
-  # ❌ Wrong
+
+# ❌ Wrong
+
   git add . && git commit -m "msg" && git push
 
-  # ✅ Correct
+# ✅ Correct
+
   rtk git add . && rtk git commit -m "msg" && rtk git push
 
   RTK Commands by Workflow
@@ -79,7 +83,7 @@ Global Instructions
   rtk cargo test          # Cargo test failures only (90%)
   rtk vitest run          # Vitest failures only (99.5%)
   rtk playwright test     # Playwright failures only (94%)
-  rtk test <cmd>          # Generic test wrapper - failures only
+  rtk test <cmd></cmd>          # Generic test wrapper - failures only
 
   Git (59-80% savings)
 
@@ -100,7 +104,7 @@ Global Instructions
 
   GitHub (26-87% savings)
 
-  rtk gh pr view <num>    # Compact PR view (87%)
+  rtk gh pr view <num></num>    # Compact PR view (87%)
   rtk gh pr checks        # Compact PR checks (79%)
   rtk gh run list         # Compact workflow runs (82%)
   rtk gh issue list       # Compact issue list (80%)
@@ -111,46 +115,46 @@ Global Instructions
   rtk pnpm list           # Compact dependency tree (70%)
   rtk pnpm outdated       # Compact outdated packages (80%)
   rtk pnpm install        # Compact install output (90%)
-  rtk npm run <script>    # Compact npm script output
-  rtk npx <cmd>           # Compact npx command output
+  rtk npm run     # Compact npm script output
+  rtk npx <cmd></cmd>           # Compact npx command output
   rtk prisma              # Prisma without ASCII art (88%)
 
   Files & Search (60-75% savings)
 
-  rtk ls <path>           # Tree format, compact (65%)
-  rtk read <file>         # Code reading with filtering (60%)
-  rtk grep <pattern>      # Search grouped by file (75%)
-  rtk find <pattern>      # Find grouped by directory (70%)
+  rtk ls <path></path>           # Tree format, compact (65%)
+  rtk read <file></file>         # Code reading with filtering (60%)
+  rtk grep <pattern></pattern>      # Search grouped by file (75%)
+  rtk find <pattern></pattern>      # Find grouped by directory (70%)
 
   Analysis & Debug (70-90% savings)
 
-  rtk err <cmd>           # Filter errors only from any command
-  rtk log <file>          # Deduplicated logs with counts
-  rtk json <file>         # JSON structure without values
+  rtk err <cmd></cmd>           # Filter errors only from any command
+  rtk log <file></file>          # Deduplicated logs with counts
+  rtk json <file></file>         # JSON structure without values
   rtk deps                # Dependency overview
   rtk env                 # Environment variables compact
-  rtk summary <cmd>       # Smart summary of command output
+  rtk summary <cmd></cmd>       # Smart summary of command output
   rtk diff                # Ultra-compact diffs
 
   Infrastructure (85% savings)
 
   rtk docker ps           # Compact container list
   rtk docker images       # Compact image list
-  rtk docker logs <c>     # Deduplicated logs
+  rtk docker logs <c></c>     # Deduplicated logs
   rtk kubectl get         # Compact resource list
   rtk kubectl logs        # Deduplicated pod logs
 
   Network (65-70% savings)
 
-  rtk curl <url>          # Compact HTTP responses (70%)
-  rtk wget <url>          # Compact download output (65%)
+  rtk curl <url></url>          # Compact HTTP responses (70%)
+  rtk wget <url></url>          # Compact download output (65%)
 
   Meta Commands
 
   rtk gain                # View token savings statistics
   rtk gain --history      # View command history with savings
   rtk discover            # Analyze Claude Code sessions for missed RTK usage
-  rtk proxy <cmd>         # Run command without filtering (for debugging)
+  rtk proxy <cmd></cmd>         # Run command without filtering (for debugging)
   rtk init                # Add RTK instructions to CLAUDE.md
   rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
@@ -177,7 +181,9 @@ Global Instructions
   └──────────────────┴────────────────────────────────┴─────────────────┘
 
   Overall average: 60-90% token reduction on common development operations.
-  <!-- /rtk-instructions -->
+
+<!-- /rtk-instructions -->
+
   Read-before-answer protocol
 
   Before answering any non-trivial question, dispatch parallel subagents with model: "haiku" to read relevant files
@@ -192,7 +198,7 @@ Global Instructions
   anything else in this repository.
 
   docs/knowledge_graph.jsonl is a traversable knowledge graph of the project --
-  67 entities, 294 observations, 70 relations across 8 waves, covering the
+  67 entities, 295 observations, 70 relations across 8 waves, covering the
   domain, the object model, every load-bearing decision, the four feeds and
   their identifiers, the state space, the process learnings, and what building
   the deterministic layer settled. Reading the .jsonl directly always works;
