@@ -198,7 +198,7 @@ Global Instructions
   anything else in this repository.
 
   docs/knowledge_graph.jsonl is a traversable knowledge graph of the project --
-  67 entities, 295 observations, 70 relations across 8 waves, covering the
+  71 entities, 322 observations, 79 relations across 9 waves, covering the
   domain, the object model, every load-bearing decision, the four feeds and
   their identifiers, the state space, the process learnings, and what building
   the deterministic layer settled. Reading the .jsonl directly always works;

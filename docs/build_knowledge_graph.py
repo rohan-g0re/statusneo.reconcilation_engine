@@ -657,9 +657,81 @@ def wave_8_implementation():
     R("Build state", "is corrected by", "Build order")
 
 
+# ===========================================================================
+# WAVE 9 -- the read layer stops narrating
+#
+# Wave 8 recorded the episode dossier as built.  This wave records that it was
+# rebuilt: the version wave 8 described composed English for every event, and
+# the user rejected that outright.  The decision is theirs, stated plainly, and
+# the reasoning generalises well past this project.
+# ===========================================================================
+
+def wave_9_state_do_not_narrate():
+
+    # --- corrections to waves 7 and 8 --------------------------------------
+
+    UNOBS("Episode dossier",
+          "every line is composed in Python from fields the records carry")
+    OBS("Episode dossier",
+        "REBUILT: an event is now a TAG and its FACTS -- the record kind, plus that record's own fields carried verbatim, with absent fields omitted rather than nulled",
+        "The version wave 8 described composed English for every event, and no longer exists",
+        "14 record kinds plus CASH and VERDICT give 16 projections and one generic renderer, replacing 51 hand-written branches across 13 functions",
+        "Verified over 14,898 timeline events across both profiles: zero prose, zero nulls, zero empty fact-sets")
+
+    OBS("Agent layer",
+        "Its payload is tag-and-facts, never pre-narrated. Turning an event into a sentence is the agent's job and is deliberately left undone by the deterministic layer",
+        "This also means the agent can pitch the same facts differently for an auditor and for a pharmacy technician, which a fixed sentence cannot")
+
+    OBS("Build state",
+        "210 tests green after the dossier rewrite")
+
+    # --- what the user decided ---------------------------------------------
+
+    E("State, do not narrate", "Learning",
+      "PROVENANCE: decided by the user, emphatically, against an agent default that had already shipped",
+      "The deterministic layer states facts; the agent layer turns them into sentences. Prose written in the deterministic layer is doing the agent's job one layer too early and worse",
+      "Prose there is also a capability claim the code cannot keep: English existed only for branches somebody had written out, so an unanticipated record produced nothing at all while the component LOOKED able to describe anything",
+      "That makes the demo more convincing than the software, which is the specific harm -- a reviewer credits the system with a faculty it does not have",
+      "The tag vocabulary is already descriptive. TPA_QUALIFICATION with qualification_status=QUALIFIED carries exactly what a sentence about it carried",
+      "Maintenance shape is the tell: prose grows with the cross-product of structural variation, facts grow with the number of record kinds")
+
+    E("Tag and facts", "Mechanism",
+      "One projection per record kind: an ordered list of the fields worth surfacing, and a single generic renderer",
+      "Drop-absent-never-null-pad is the whole mechanism -- it is what lets flat per-kind lists cover a field space that genuinely varies, with no branching",
+      "It absorbs two real shape problems without special-casing: four TPA kinds sharing one wide sparse adapter dict, and two kinds each built by two adapters under different key names",
+      "The output's key set therefore states what the record has, which is itself information the consumer can use",
+      "Money stays integer cents in the payload. Formatting is the display edge's job; the agent wants the exact figure, not a rounded string",
+      "A code value is a SLOT, not a template. Published vocabularies already carry descriptions written by the standards body, so '{code}: {description}' is one template rather than one per code -- get this wrong and the count explodes for no gain")
+
+    E("Silent dispatch miss", "Trap",
+      "The renderer looked up a handler per record kind and did a bare `continue` when it found none",
+      "Four record kinds had no handler and were therefore absent from every episode payload for the entire life of that implementation, with no error anywhere",
+      "A dispatch table with a silent default is the same failure as a guard that is never called: output stays plausible while coverage is quietly partial",
+      "Fixed by a completeness check that raises at import, so a missing projection fails where it is introduced rather than evaporating at runtime")
+
+    E("Service lines are embedded, never rows", "Decision",
+      "PROVENANCE: agent default, ratified after investigation when the user asked why a declared record kind produced nothing",
+      "The _LINE in REMITTANCE_CLAIM_LINE means claim-within-batch, NOT service-line-within-claim -- an 835 batches many claims under one BPR02 total, so it needs a parent and children",
+      "An 837 arrives one-per-claim with nothing above it to split, so a MEDICAL_SUBMISSION_LINE has no referent. It was copied from the two genuine parent/child pairs and never described in the object model, even in the planning draft that first carried it",
+      "Multi-line claims are the majority (68-73% carry two service lines), so the kind was not dead for lack of data -- both sides embed lines as arrays, consistently",
+      "Removed from the enum and the schema CHECK")
+
+    # --- relations ---------------------------------------------------------
+
+    R("State, do not narrate", "is implemented by", "Tag and facts")
+    R("Tag and facts", "rebuilt", "Episode dossier")
+    R("Tag and facts", "fixed", "Silent dispatch miss")
+    R("State, do not narrate", "scopes", "Agent layer")
+    R("Silent dispatch miss", "resembles", "Silent generator defects")
+    R("Silent dispatch miss", "resembles", "A docstring is not a test")
+    R("Service lines are embedded, never rows", "constrains", "Record")
+    R("Service lines are embedded, never rows", "clarifies", "Medical feed")
+    R("State, do not narrate", "depends on", "Deterministic boundary")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
-         wave_8_implementation]
+         wave_8_implementation, wave_9_state_do_not_narrate]
 
 
 def main():
