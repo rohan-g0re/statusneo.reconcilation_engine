@@ -690,6 +690,20 @@ def build_router(
             "dry_run": envelope["data"]["dry_run"],
             "message": envelope["message"],
             "diff": diff,
+            # `create_mock_work_item` derives `from_verdict_id` itself from
+            # `repository.latest_verdict(conn, episode_id, cursor)` -- it never reads the
+            # caller-supplied `from_verdict_id` above, which exists only to mint (and, on a
+            # real commit, to authorise) `write_token`. Nothing on the read side of the HTTP
+            # surface exposes the verdict primary key at all (`/api/episode`, `/api/episode/
+            # {id}/dossier`, `/api/episode/{id}/trace` all omit it by design -- it is a DB
+            # implementation detail, not a domain field), so a browser client has no way to
+            # learn the value it must send on `dry_run=false` except by reading it back here.
+            # `dry_run=true` skips the token check entirely (see `create_mock_work_item`), so
+            # a client can always discover the correct value with a harmless preview call
+            # before committing -- exactly what that branch's own message promises: "this is
+            # the draft that will be shown to the reviewer for editing before it is accepted."
+            "from_verdict_id": envelope["data"]["from_verdict_id"],
+            "at_cursor": envelope["data"]["at_cursor"],
         }
 
     # ─── The to-do list ──────────────────────────────────────────────────────────

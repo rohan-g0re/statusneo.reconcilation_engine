@@ -294,7 +294,19 @@ export default function App() {
 
         <div className="layout-right">
           <section className="panel" id="episode" data-testid="episode-panel">
-            <h2>The episode, end to end</h2>
+            <div className="panel-head-row">
+              <h2>The episode, end to end</h2>
+              {dossier ? (
+                <button
+                  type="button"
+                  data-testid="inspect-using-ai"
+                  onClick={() => window.open(`/analyse/${dossier.episode_id}`, '_blank', 'noopener')}
+                  title="Open the agent layer's analysis screen for this episode in a new tab — an LLM explanation and a recommended next step, grounded in this same dossier and never computing a number of its own."
+                >
+                  Inspect using AI
+                </button>
+              ) : null}
+            </div>
             <p className="hint">
               One claim, everything that happened to it, in the order we learned it — the claim filed,
               what the payer said, when the money moved, how the 340B rebate went, and every point at

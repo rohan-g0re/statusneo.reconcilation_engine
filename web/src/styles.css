@@ -74,7 +74,7 @@ header.masthead {
   padding: 16px;
   margin-bottom: 18px;
 }
-.panel > h2 {
+.panel > h2, .panel-head-row > h2 {
   margin: 0 0 4px;
   font-size: 13px;
   font-weight: 650;
@@ -83,6 +83,11 @@ header.masthead {
   color: var(--text-secondary);
 }
 .panel > .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; max-width: 78ch; }
+
+/* A panel's <h2> plus a header-level action (e.g. "Inspect using AI") on the same line,
+ * without disturbing `.panel > h2`'s own rule for every panel that has no such action. */
+.panel-head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.panel-head-row > h2 { margin: 0; }
 
 /* ═══ two-column layout ════════════════════════════════════════════════ */
 /* Left: everything you scroll through while working a queue. Right: the one episode you have
@@ -402,6 +407,105 @@ details.evidence pre {
 
 @media print {
   .table-wrap, .queue-scroll { overflow: visible; max-height: none; }
+}
+
+/* ═══ agent analysis screen (/analyse/:episodeId) ═════════════════════════ */
+/* Reuses `.layout-grid`/`.panel`/`.chip`/`.verdict-code`/`.dossier-*` wholesale — this screen
+ * is an addition to the same design system, not a second one. Only what is genuinely new here
+ * (the streamed event log, the outcome banner, the editable draft form) gets its own rules. */
+
+.agent-unavailable {
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.agent-unsourced {
+  border: 1px solid var(--status-critical);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+/* The streamed decide loop. Deliberately a plain scrolling log, not a spinner — every line is
+ * something that already happened, in the order it happened, which is the whole point of
+ * streaming an audit trail rather than summarising it after the fact. */
+.agent-log {
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.agent-log-row { overflow-wrap: anywhere; }
+.agent-log-row.muted { color: var(--text-muted); }
+.agent-log-row.bad { color: var(--status-critical); font-weight: 600; }
+.agent-log-row.mono { font-family: var(--mono); }
+.agent-log-divider {
+  margin: 8px 0 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+.agent-log-rule { border: none; border-top: 1px dashed var(--border); margin: 8px 0; }
+.agent-log-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 4px 0;
+}
+.agent-log-card-head { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.agent-log-card-body { margin-top: 4px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.agent-log-card-foot { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
+.agent-log-criteria { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.agent-log-criteria .chip { border-width: 2px; cursor: help; }
+
+/* The terminal outcome. `--oc` carries the per-status colour set inline by OutcomeBanner —
+ * the same pattern `.dossier-verdict`'s `--d` custom property already uses on this page. */
+.outcome-banner {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--oc, var(--border-strong));
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.outcome-banner-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.outcome-banner-icon { color: var(--oc); font-size: 16px; font-weight: 700; }
+.outcome-banner-label { font-size: 14.5px; font-weight: 650; color: var(--oc); }
+.outcome-trajectory { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+
+/* The editable work-item draft — a safety property, not a convenience: nothing here is
+ * pre-committed, and every field the human gate writes is a plain, directly-editable control. */
+.wi-form { margin-top: 4px; }
+.wi-field { display: block; margin-bottom: 12px; }
+.wi-field > span {
+  display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-muted);
+}
+.wi-field select, .wi-field textarea {
+  width: 100%; font: inherit; font-size: 13px; padding: 6px 8px;
+  border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--surface-1); color: var(--text-primary); resize: vertical;
+}
+.wi-artifact-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.wi-artifact-row input {
+  flex: 1; font: inherit; font-size: 13px; padding: 6px 8px;
+  border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--surface-1); color: var(--text-primary);
 }
 
 /* ═══ dossier: sticky header, view toggle, source panel ══════════════════ */
