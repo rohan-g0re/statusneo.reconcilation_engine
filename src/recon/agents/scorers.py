@@ -33,7 +33,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterator
 
 import recon.api.dossier as dossier_module
-from recon.agents.envelope import ToolEnvelope, contains_wrapper_markers
+from recon.agents.envelope import ToolEnvelope, contains_wrapper_markers, unwrap
 from recon.agents.grounding import Clause
 from recon.agents.schemas import (
     ActionEnum,
@@ -716,8 +716,21 @@ def _identifier_fragments(text: str, sourced_strings: frozenset[str]) -> set[tup
     This is narrow on purpose. To launder a fabricated ``52700`` through it, the
     string ``52700`` would have to sit inside an identifier that a tool actually
     returned this run -- at which point it *is* sourced, and quoting it is correct.
+
+    On the exact-match branch below: every tool result a proposer sees is fenced
+    (``envelope.wrap``), so the element actually sitting in ``sourced_strings`` for
+    a feed-derived leaf is never the bare value -- it is
+    ``⟦UNTRUSTED:<path>#<nonce>⟧<value>⟦/UNTRUSTED:#<nonce>⟧``. A payer ICN like
+    ``"20260618724907"`` is *never* literally a member of ``sourced_strings`` under
+    that shape, only a substring of one, so the exact-match test has to run against
+    each string's un-fenced body too, not the fenced form alone. Without this, a
+    pure-digit identifier is exempted only when it happens to also carry a letter or
+    a separator (the other branch of the guard below), which is exactly the class of
+    false positive measured live: ``20260618724907`` and ``111000020000008`` are both
+    genuine payer/bank identifiers a tool returned this run, and both are all-digit.
     """
     exempt: set[tuple[int, int]] = set()
+    exact_matches = sourced_strings | frozenset(unwrap(s) for s in sourced_strings)
     for match in _IDENT_TOKEN_RE.finditer(text):
         token = match.group(0)
         if not any(token in s for s in sourced_strings):
@@ -725,10 +738,40 @@ def _identifier_fragments(text: str, sourced_strings: frozenset[str]) -> set[tup
         # A pure number is normally a figure and must go through canon() -- unless a
         # tool returned that exact string, which is what a payer ICN like
         # "20260618724907" is: an identifier that happens to be all digits.
-        if not any(ch.isalpha() or ch in ":_/-" for ch in token) and token not in sourced_strings:
+        if not any(ch.isalpha() or ch in ":_/-" for ch in token) and token not in exact_matches:
             continue
         exempt.add((match.start(), match.end()))
     return exempt
+
+
+#: Characters `CANDIDATE_RE`'s own optional groups can pull in from immediately
+#: outside a real identifier token: a leading `$`/`-` sign, a swallowed space on
+#: either side, a trailing `%`, or a thousands-style comma that happens to sit at a
+#: sentence boundary rather than inside a number. `_IDENT_TOKEN_RE` never places any
+#: of these at a token's own edge, so trimming them before the containment check
+#: below only removes cosmetic spillover -- it cannot launder a figure that is not
+#: already entirely inside a sourced identifier's span.
+_CANDIDATE_EDGE_CHARS = "$ -,%"
+
+
+def _trim_candidate_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Shrink a `CANDIDATE_RE` match to its digit core, dropping cosmetic edges.
+
+    Measured live: `_identifier_fragments` had already recorded the correct span
+    for ``ENC-358361-00049`` (an identifier a tool returned this run), but the
+    veto still fired, because `CANDIDATE_RE`'s trailing ``[\\d,]*\\s?`` swallowed
+    the sentence's own ``", "`` right after the identifier -- so the regex match
+    ``"9, "`` ended two characters past the identifier's own span, and the
+    strict "entirely inside one fragment span" containment check failed on that
+    spillover alone. Trimming the match to `start`/`end` bounds that exclude any
+    such leading/trailing filler restores the intended check: does the actual
+    digit content of this candidate sit inside a sourced identifier.
+    """
+    token = text[start:end]
+    lead = len(token) - len(token.lstrip(_CANDIDATE_EDGE_CHARS))
+    trimmed = token[lead:]
+    trail = len(trimmed) - len(trimmed.rstrip(_CANDIDATE_EDGE_CHARS))
+    return start + lead, end - trail
 
 
 @dataclass(frozen=True, slots=True)
@@ -941,7 +984,8 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
         token = m.group(0)
         if not token.strip():
             continue
-        if any(start <= m.start() and m.end() <= end for start, end in fragment_spans):
+        core_start, core_end = _trim_candidate_span(text, m.start(), m.end())
+        if any(start <= core_start and core_end <= end for start, end in fragment_spans):
             continue  # part of a sourced identifier, not a figure -- see _identifier_fragments
         if token.rstrip().endswith("%"):
             # The deterministic layer emits no percentage anywhere (integer cents end

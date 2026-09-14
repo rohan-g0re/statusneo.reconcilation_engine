@@ -945,6 +945,62 @@ def test_ndc11_npi_episode_id_and_iso_date_are_exempt():
     assert no_unsourced_number(ctx).verdict == "SUPPORTED"
 
 
+def test_all_digit_identifier_wrapped_in_untrusted_fence_is_exempt():
+    """Regression, exact reproduction (E-000006, a MEDICAL-835 crosswalk proposal
+    pulled from ``data/agent_runs``): a payer ICN and an ACH trace number are both
+    pure-digit identifiers a tool actually returned this run, but every tool
+    result a proposer sees is fenced (``envelope.wrap``), so the bare digit
+    string is never itself a member of ``sourced_strings`` -- only a substring of
+    the fenced form. ``_identifier_fragments``'s exact-match branch for all-digit
+    tokens used to test membership against the fenced strings unchanged, so
+    ``20260618724907`` and ``111000020000008`` were both reported as invented
+    figures despite a tool result carrying each of them verbatim this run --
+    which zeroed an honest proposal outright, since G3 is a veto. This also
+    exercises the ``CANDIDATE_RE`` boundary-spillover fix: the proposal echoes
+    every identifier immediately followed by a sentence comma, which used to
+    make the regex match spill past the identifier's own recorded span even once
+    the span itself was found (the alphanumeric identifiers here, e.g.
+    ``ENC-358361-00049``, hit exactly that spillover)."""
+    nonce = "60d816be"
+    clm01 = envelope.wrap("identity.clm01", "ENC-358361-00049", nonce)
+    clp07 = envelope.wrap("timeline[5].facts.clp07", "20260618724907", nonce)
+    covered_entity = envelope.wrap("timeline[7].facts.covered_entity_id", "DSH310074", nonce)
+    manufacturer = envelope.wrap("timeline[4].facts.manufacturer", "SAGEPOINT", nonce)
+    allocation_code = envelope.wrap("timeline[7].facts.allocation_code", "RBT-20250909-72245", nonce)
+    ach_trace = envelope.wrap("timeline[8].source.ach_trace_number", "111000020000008", nonce)
+    tool_results = (
+        _tool_result(
+            "get_episode_dossier",
+            {
+                "identity": {"clm01": clm01},
+                "timeline": [
+                    {
+                        "facts": {
+                            "clp07": clp07,
+                            "covered_entity_id": covered_entity,
+                            "manufacturer": manufacturer,
+                            "allocation_code": allocation_code,
+                        }
+                    },
+                    {"source": {"ach_trace_number": ach_trace}},
+                ],
+            },
+        ),
+    )
+    proposal = FakeProposedAction(
+        reasoning="No dollar figure is stated for this claim; see required_artifacts for the sourced identifiers.",
+        required_artifacts=(
+            "Every identifier above appears verbatim in tool results (clm01 ENC-358361-00049, "
+            "clp07 20260618724907, covered_entity_id DSH310074, manufacturer SAGEPOINT, "
+            "allocation_code RBT-20250909-72245, ach_trace_number 111000020000008). I do not "
+            "state a dollar figure for this claim.",
+        ),
+    )
+    ctx = _ctx(proposal=proposal, tool_results=tool_results)
+    finding = no_unsourced_number(ctx)
+    assert finding.verdict == "SUPPORTED", finding.reasoning
+
+
 def test_a_sourced_date_long_form_rendering_is_recognised():
     """Exemption class: dates, routed through a parallel sourced-date check that
     also recognises long-form renderings of an ISO date actually returned."""
