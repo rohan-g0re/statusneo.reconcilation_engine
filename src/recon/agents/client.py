@@ -356,6 +356,16 @@ class RecordingClient:
         self._inner = inner
         self._path = Path(fixture_dir) / f"{run_id}.jsonl"
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Truncate: a fixture is the record of ONE run, and a run id names it.
+        #
+        # This appended, so every re-record of the same scenario stacked on top of the
+        # last. Measured after four re-records of one eval fixture: 55 exchanges in a
+        # file that should have held 5, including responses from an older prompt
+        # version and an older tool schema. `ReplayClient` matches by digest and takes
+        # the first hit, so a stale exchange from three recordings ago can answer a
+        # request the current code never made -- an eval set quietly grading yesterday's
+        # system. Re-recording is the normal way to update a fixture; it must replace.
+        self._path.write_text("", encoding="utf-8")
 
     @property
     def path(self) -> Path:

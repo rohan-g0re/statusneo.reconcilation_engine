@@ -194,6 +194,12 @@ _HOW_TO_REPLY = (
     "Call tools until you can support a proposal, then reply with exactly one call to\n"
     "emit_proposed_action. No prose alongside it. Fill reasoning first and let it do\n"
     "the work: it is where you think, and everything after it should follow from it.\n\n"
+    "Ask for everything you need at once. Every tool here is an independent read of a\n"
+    "database that does not change while you work, so nothing is gained by waiting to\n"
+    "see one result before requesting the next — put all of them in a single turn and\n"
+    "read the answers together. Save a second turn for what you could not have known\n"
+    "to ask for the first time, such as a raw record whose id only appeared in an\n"
+    "earlier result. You have three turns; using one is the normal case.\n\n"
 )
 
 _RUN_CONTEXT = (

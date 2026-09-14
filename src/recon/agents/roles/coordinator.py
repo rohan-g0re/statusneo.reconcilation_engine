@@ -61,6 +61,16 @@ _READ_TOOL_NAMES: tuple[str, ...] = tuple(n for n in tool_names() if n != "creat
 #: this stays a module constant, reset fresh on every harness iteration.
 _PROPOSER_MAX_ROUNDS = 3
 
+#: Ceiling on the escalation call to the thinking model.
+#:
+#: The fallback exists to rescue a run the cheap model could not encode, not to think
+#: about the episode from scratch. Uncapped it does the latter: measured on one live
+#: run, two escalations produced 53,670 and 33,873 reasoning tokens and turned a
+#: 20-second Decide into 355 seconds. A checklist verdict is a few thousand tokens of
+#: output; anything past this ceiling is the model reasoning for its own sake, and
+#: cutting it off costs a rescue attempt rather than a correct answer.
+_FALLBACK_MAX_TOKENS = 8_000
+
 _PROPOSER_REPAIR_MESSAGE = (
     "That reply contained no emit_proposed_action tool call, so nothing was recorded.\n\n"
     "Do not reconsider the proposal. Transcribe the action, evidence, artifacts and "
@@ -160,6 +170,7 @@ def _emit_structured(
     journal: Journal,
     agent: str,
     iteration: int,
+    max_tokens: int | None = None,
 ) -> ToolCall:
     """Get exactly one call to `forced_name`, branching on
     `client.supports_forced_tool_choice(model)` (`.agents/specs/spec_contracts.md` S:2).
@@ -186,7 +197,7 @@ def _emit_structured(
 
     response = client.complete(
         agent=agent, iteration=iteration, messages=messages, model=model,
-        tools=[tool_spec], tool_choice=tool_choice,
+        tools=[tool_spec], tool_choice=tool_choice, max_tokens=max_tokens,
     )
     call = _find_tool_call(response, forced_name)
     if call is not None:
@@ -227,7 +238,7 @@ def _emit_structured(
     messages.append({"role": "user", "content": repair_message})
     response = client.complete(
         agent=agent, iteration=iteration, messages=messages, model=model,
-        tools=[tool_spec], tool_choice="auto", temperature=0.0,
+        tools=[tool_spec], tool_choice="auto", temperature=0.0, max_tokens=max_tokens,
     )
     call = _find_tool_call(response, forced_name) or _coerce_sole_forced_call(response, forced_name, _required_of(tool_spec))
     if call is None:
@@ -534,8 +545,6 @@ def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
             parts.append(f"{header} → {status}, {detail}. Not cited by this proposal; body omitted.")
     parts.append("")
 
-    parts += ["## The proposal", json.dumps(inp.proposal_view, sort_keys=True, default=str), ""]
-
     # Same principle as the tool results above: full text for the clause the proposal
     # cited, and for the handful mapped to this episode's own reason codes; a name-only
     # index for the rest.
@@ -560,8 +569,14 @@ def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
         for c in remaining:
             by_entity.setdefault(c.entity, []).append(c.clause_id)
         parts.append(
-            "\nAlso available, bodies omitted — ask for one by id if the proposal should "
-            "have cited it instead:"
+            # Deliberately does not say "ask for one". The earlier wording did, and the
+            # model read it as a promise that a clause-fetching tool existed -- a live
+            # run had it calling `search_clauses` and `get_work_item_history`, neither
+            # of which is in the registry. A prompt that implies a capability the
+            # system does not have costs a whole wasted round.
+            "\nAlso available, bodies omitted. Listed so you can see whether a better "
+            "clause existed; there is no tool for fetching one, and citing a clause "
+            "whose body is omitted here is not wrong for that reason alone:"
         )
         for entity, ids in by_entity.items():
             parts.append(f"- {entity}: {', '.join(ids)}")
@@ -571,6 +586,22 @@ def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
     for criterion_id, question in inp.checklist:
         parts.append(f"- [{criterion_id}] {question}")
     parts.append("")
+
+    # The proposal goes LAST, and the ordering is worth a sentence.
+    #
+    # DeepSeek caches on a token PREFIX, so a request reuses the cache only up to its
+    # first differing token. Every section above is stable within a run -- the episode
+    # and the clause set do not move, the checklist is fixed, and the tool results only
+    # ever grow at the end -- while the proposal is by definition different every
+    # iteration. With the proposal sitting in the middle, iteration two invalidated the
+    # cache before reaching the clauses and the checklist behind it. Measured before
+    # this change: 2,560 cached tokens against a 13,899-token evaluator prompt.
+    #
+    # It is also the better reading order -- everything the proposal will be judged
+    # against is established before the proposal appears -- so the cache alignment
+    # costs nothing in clarity. FINAL_LINE still ends the turn, because recency
+    # reinforcement (S:C.4) has to be the last thing read.
+    parts += ["## The proposal", json.dumps(inp.proposal_view, sort_keys=True, default=str), ""]
 
     parts.append(evaluator_prompt.FINAL_LINE)  # recency reinforcement, S:C.4
     return "\n".join(parts)
@@ -718,6 +749,7 @@ def _make_evaluate(
                     tool_spec=EMIT_EVALUATION_TOOL, forced_name="emit_evaluation",
                     repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
                     journal=journal, agent="evaluator", iteration=iteration,
+                    max_tokens=_FALLBACK_MAX_TOKENS,
                 )
                 verdict = EvaluatorVerdict.parse(call.arguments)
 

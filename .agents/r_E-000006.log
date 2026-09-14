@@ -1,0 +1,29 @@
+══════════════════════════════════════════════════════════════════════════════
+E-000006  MEDICAL  cursor 2026-07-01T23:59:59Z
+  disposition   EXCEPTION
+  verdicts      B-10 / C-08
+  reasons       DENIED, DENIED_WITH_REBATE_PAID
+  timeline      10 events, 0 unresolved
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+COORDINATOR  run eval-e00  model deepseek-chat
+══════════════════════════════════════════════════════════════════════════════
+  outcome   stalled
+  score     0.0  (best 0.0, threshold 80.0)
+  rounds    3
+  action    APPEAL
+  clause    KG-REASON-CODE-c5e9929d
+  artifacts ['Payer ICN to quote on the appeal: CLP07 = 20260618724907 from 835 MED-835-000001', 'Provider claim number CLM01 = ENC-358361-00049 (echoed as CLP01) to identify the claim on the appeal', 'CARC 50 with group code CO on the J2350 line and the 835 denial language CLP02 = 4 — the denial the appeal rebuts', 'The 277CA acknowledgment MED-277-000047 (STC A1:19, "ACCEPTED FOR PROCESSING") proving the claim was submitted and accepted', 'Original 837 submission MED-837-000046, frequency code 1, service lines HC:J2350:JW (units 4) and HC:96413 (units 1) with charge 13500000 cents, to support medical necessity', 'Medical-necessity documentation for ocrelizumab J2350 on DOS 2025-07-30 (the CO/50 denial basis)', "Payer appeal form and the payer's filing deadline for BLUE HARBOR HEALTH (form number and deadline not in the record)"]
+  evidence  7 spans
+
+  journal   C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\data\agent_runs\eval-e000006-x1-denied-rebate.jsonl
+  models    {'proposer': 'deepseek-chat', 'evaluator': 'deepseek-v4-pro'}
+  tokens    {'prompt_tokens': 166245, 'completion_tokens': 46795, 'total_tokens': 213040, 'prompt_cache_hit_tokens': 114560, 'prompt_cache_miss_tokens': 51685}
+  tool calls (6):
+    - get_episode({"detail": "essential", "episode_id": "E-000006"})
+    - calculate_reconciliation({"claim_id": "E-000006"})
+    - get_remittance_detail({"episode_id": "E-000006"})
+    - get_rebate_status({"episode_id": "E-000006"})
+    - get_cash_match({"episode_id": "E-000006", "include_unallocated_deposits": true})
+    - get_raw_record({"raw_id": 137})
