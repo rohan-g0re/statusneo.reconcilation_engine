@@ -93,6 +93,11 @@ EMIT_EVALUATION_TOOL: dict[str, Any] = {
 # ═══ the one function that gets either model to reliably emit one tool call ═════════
 
 
+def _required_of(tool_spec: dict[str, Any]) -> tuple[str, ...]:
+    """The required field names of a tool schema, for the coercion guard below."""
+    return tuple((tool_spec.get("function", {}).get("parameters", {}) or {}).get("required", ()) or ())
+
+
 def _find_tool_call(response: LLMResponse, name: str) -> ToolCall | None:
     for call in response.tool_calls:
         if call.name == name:
@@ -100,7 +105,9 @@ def _find_tool_call(response: LLMResponse, name: str) -> ToolCall | None:
     return None
 
 
-def _coerce_sole_forced_call(response: LLMResponse, forced_name: str) -> ToolCall | None:
+def _coerce_sole_forced_call(
+    response: LLMResponse, forced_name: str, required_fields: tuple[str, ...] = ()
+) -> ToolCall | None:
     """Accept a single tool call under the wrong name when exactly one name was legal.
 
     Measured against DeepSeek on 2026-09-13: with `tool_choice` naming
@@ -128,6 +135,17 @@ def _coerce_sole_forced_call(response: LLMResponse, forced_name: str) -> ToolCal
     call = response.tool_calls[0]
     if call.name == forced_name:
         return call
+    # The name alone is not enough evidence. Measured: the model sometimes answers a
+    # forced emit by calling a READ tool instead -- `get_raw_record(raw_id=63)` -- and
+    # renaming that produced a `ProposedAction` with no `reasoning`, turning a
+    # recoverable provider hiccup into a SchemaError one layer later. So coerce only
+    # when the payload is actually the thing we asked for: every required field of the
+    # target schema present. A read tool's arguments never satisfy that, so it falls
+    # through to the repair turn, which is the right handling for "it called the wrong
+    # thing" as opposed to "it labelled the right thing wrongly".
+    required = required_fields or ()
+    if required and not all(field in call.arguments for field in required):
+        return None
     return ToolCall(id=call.id, name=forced_name, arguments=call.arguments, raw_arguments=call.raw_arguments)
 
 
@@ -177,7 +195,7 @@ def _emit_structured(
     if forced:
         # The provider did not honour the forced name. If it nonetheless produced
         # exactly one call, the target was unambiguous -- see _coerce_sole_forced_call.
-        coerced = _coerce_sole_forced_call(response, forced_name)
+        coerced = _coerce_sole_forced_call(response, forced_name, _required_of(tool_spec))
         if coerced is not None:
             journal.event(
                 "forced_tool_name_coerced", agent=agent, iteration=iteration,
@@ -185,10 +203,22 @@ def _emit_structured(
                 coerced_to=forced_name,
             )
             return coerced
-        raise SchemaError(
-            f"{forced_name} was forced via tool_choice on {model!r} but the response carried no "
-            f"matching tool call (names returned: {[c.name for c in response.tool_calls] or 'none'}).",
-            repair_message=repair_message,
+        # Fall through to the repair turn rather than raising.
+        #
+        # This branch used to raise immediately, on the reasoning that a forced call
+        # coming back without its tool is a provider bug and not a modelled case. It
+        # is a provider bug -- and it happens often enough to matter: measured in the
+        # browser, `deepseek-chat` stopped honouring a forced `tool_choice` on 2 of 3
+        # interactive runs once the conversation already carried several tool calls.
+        # Raising turned that into "Run failed", which is the one outcome the design
+        # does not have a name for. The loop has four honest terminal states and a
+        # provider hiccup should land in one of them, so the same transcription repair
+        # the thinking model gets is offered here too, and only a second failure
+        # raises.
+        journal.event(
+            "forced_tool_name_coerced", agent=agent, iteration=iteration,
+            model=response.model, returned_name="<none>", coerced_to=forced_name,
+            note="forced tool_choice ignored; attempting one repair turn",
         )
 
     # spec_prompts_roles.md S:C.4: the prose assistant turn stays in history --
@@ -199,7 +229,7 @@ def _emit_structured(
         agent=agent, iteration=iteration, messages=messages, model=model,
         tools=[tool_spec], tool_choice="auto", temperature=0.0,
     )
-    call = _find_tool_call(response, forced_name)
+    call = _find_tool_call(response, forced_name) or _coerce_sole_forced_call(response, forced_name, _required_of(tool_spec))
     if call is None:
         raise SchemaError(
             f"evaluator_no_tool_call: {forced_name} produced no tool call on {model!r} even after "

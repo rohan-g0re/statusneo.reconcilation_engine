@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from recon.agents.client import ReplayClient
+from recon.agents.client import ReplayMiss, ReplayClient
 from recon.agents.config import load_agent_settings
 from recon.agents.grounding import render_clause_index, select_clauses
 from recon.agents.harness import RunBudgets
@@ -285,16 +285,19 @@ def test_e000032_no_cash(demo_conn, demo_settings, tmp_path):
     the harness forces `tool_choice` to `emit_proposed_action`
     (`roles/coordinator.py._emit_structured`) -- and the model answered with two
     tool calls that were never offered in its schema (`get_bank_transactions`,
-    `get_crosswalk`) instead of complying. There is no repair turn on this path for
-    a model that supports forced tool choice (only the non-forced `deepseek-v4-pro`
-    path gets one), so this is a hard failure: `run_coordinator` raises
-    `SchemaError`, not a degraded `Outcome`. Measured on 3 of 5 real recordings for
-    this task (see docs/agent_layer_forced_tool_choice_fragility.md) -- reported
-    here, not smoothed over, because "the loop sometimes cannot finish at all" is
-    exactly the kind of fact an eval set exists to keep visible."""
+    `get_crosswalk`) instead of complying. The harness now offers this path the same one-shot
+    transcription repair the non-forced `deepseek-v4-pro` path always had, because
+    raising here produced "Run failed" -- the one outcome the design has no name for,
+    when it has four honest terminal states. This fixture was recorded BEFORE that
+    repair existed, so it contains no response for the repair request and
+    `ReplayClient` correctly reports a miss. That is the assertion: the harness is
+    proven to attempt a repair rather than raise. Measured on 3 of 5 real recordings
+    (see docs/agent_layer_forced_tool_choice_fragility.md) -- kept visible rather than
+    smoothed over, because "the provider sometimes ignores a forced tool_choice" is
+    exactly the kind of fact an eval set exists to preserve."""
     agent_settings = _agent_settings(tmp_path)
     cursor = demo_settings.max_cursor
-    with pytest.raises(SchemaError, match="no matching tool call"):
+    with pytest.raises(ReplayMiss):
         _replay_coordinator(
             demo_conn, agent_settings, tmp_path,
             episode_id="E-000032", cursor=cursor, nonce="bbbb2222", run_id="eval-e000032-no-cash",
@@ -317,7 +320,7 @@ def test_e000040_insufficient_data(demo_conn, demo_settings, tmp_path):
     on what "the eval set" is for."""
     agent_settings = _agent_settings(tmp_path)
     cursor = demo_settings.max_cursor
-    with pytest.raises(SchemaError, match="no matching tool call"):
+    with pytest.raises(ReplayMiss):
         _replay_coordinator(
             demo_conn, agent_settings, tmp_path,
             episode_id="E-000040", cursor=cursor, nonce="cccc3333", run_id="eval-e000040-insufficient-data",
@@ -382,7 +385,7 @@ def test_e000825_crosswalk_miss(full_conn, full_settings, tmp_path):
     already contains several real tool results."""
     agent_settings = _agent_settings(tmp_path)
     cursor = full_settings.max_cursor
-    with pytest.raises(SchemaError, match="missing required field 'reasoning'"):
+    with pytest.raises(ReplayMiss):
         _replay_coordinator(
             full_conn, agent_settings, tmp_path,
             episode_id="E-000825", cursor=cursor, nonce="eeee5555", run_id="eval-e000825-crosswalk-miss",

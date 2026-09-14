@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import traceback
 import secrets
 import sys
 import uuid
@@ -203,6 +204,7 @@ def main() -> int:
                 print(f"  evidence  {len(proposal.evidence)} spans")
         except Exception as exc:  # noqa: BLE001 -- a smoke script reports, it does not swallow
             print(f"  RAISED {type(exc).__name__}: {exc}")
+            traceback.print_exc()
             exit_code = 1
         finally:
             journal.event("run_finished", role=role)
