@@ -69,9 +69,17 @@ _SECTION_HEADINGS: tuple[str, ...] = (
     "What I could not determine",
     "What a human should check first",
 )
+# One or two hashes, and the trailing colon some models add. Measured live: the model
+# was asked for "## State of the book" and wrote "# State of the book" -- an h1 rather
+# than an h2. The prose was perfect and every figure was sourced, and the whole report
+# parsed to four empty strings because of one missing character.
+#
+# A parser that rejects a correct answer over its heading level is not enforcing
+# anything; the headings are a transport convention, not a requirement on the content.
+# Be strict about what the sections MEAN and liberal about how they are marked.
 _SECTION_RE = re.compile(
-    r"^##\s+(" + "|".join(re.escape(h) for h in _SECTION_HEADINGS) + r")\s*$",
-    re.MULTILINE,
+    r"^#{1,3}\s+(" + "|".join(re.escape(h) for h in _SECTION_HEADINGS) + r")\s*:?\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
