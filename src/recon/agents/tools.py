@@ -249,6 +249,28 @@ def _not_found_message(conn: sqlite3.Connection, identifier: str, cursor: str, *
     )
 
 
+def _usd(cents: int | None) -> str | None:
+    """A cents figure rendered as dollars, computed in Python, for the model to QUOTE.
+
+    The agent is forbidden to do arithmetic, and dividing by 100 is arithmetic -- so
+    without this it must either write "13500000 cents" at a human, or convert and
+    break the rule the whole system exists to enforce. Neither is acceptable, and the
+    resolution is the same one the deterministic boundary always gives: if a number
+    should appear, Python produces it and the model quotes it.
+
+    So both renderings ship side by side. `*_cents` stays the canonical integer -- it
+    is what every downstream check compares against -- and `*_usd` is the string a
+    sentence can carry. The model picks the readable one and has still invented
+    nothing; the number-detection scorer already treats a dollars rendering of a
+    sourced `_cents` value as sourced, so quoting it verifies.
+    """
+    if cents is None:
+        return None
+    sign = "-" if cents < 0 else ""
+    whole, part = divmod(abs(int(cents)), 100)
+    return f"{sign}${whole:,}.{part:02d}"
+
+
 def _describe_or_none(code: str | None) -> str | None:
     if not code:
         return None
@@ -1254,6 +1276,9 @@ def calculate_reconciliation(ctx: ToolContext, *, claim_id: str) -> ToolEnvelope
             "expected_cents": verdict.expected_reimbursement_cents,
             "received_cents": verdict.received_reimbursement_cents,
             "variance_cents": verdict.reimbursement_variance_cents,
+            "expected_usd": _usd(verdict.expected_reimbursement_cents),
+            "received_usd": _usd(verdict.received_reimbursement_cents),
+            "variance_usd": _usd(verdict.reimbursement_variance_cents),
         },
         "rebate": {
             "track_present": not track_absent,
@@ -1263,8 +1288,16 @@ def calculate_reconciliation(ctx: ToolContext, *, claim_id: str) -> ToolEnvelope
             "expected_cents": verdict.expected_rebate_cents,
             "received_cents": verdict.received_rebate_cents,
             "variance_cents": verdict.rebate_variance_cents,
+            "expected_usd": _usd(verdict.expected_rebate_cents),
+            "received_usd": _usd(verdict.received_rebate_cents),
+            "variance_usd": _usd(verdict.rebate_variance_cents),
         },
-        "totals": {"total_variance_cents": total_variance, "absolute_variance_cents": absolute_variance},
+        "totals": {
+            "total_variance_cents": total_variance,
+            "absolute_variance_cents": absolute_variance,
+            "total_variance_usd": _usd(total_variance),
+            "absolute_variance_usd": _usd(absolute_variance),
+        },
         "episode_disposition": verdict.episode_disposition.value,
         "reason_codes": [
             {"code": code.value, "track": track.value}

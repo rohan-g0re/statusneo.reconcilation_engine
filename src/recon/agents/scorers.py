@@ -639,8 +639,19 @@ def _build_sourced_sets(tool_results: tuple[RecordedToolResult, ...]) -> _Source
                     # than silently dropped as dead code.
             elif isinstance(leaf, str):
                 strings.add(leaf)
-                if _ISO_DATE_PREFIX_RE.match(leaf):
-                    dates.update(_date_renderings(leaf[:10]))
+                # `unwrap` first, and add the unwrapped form too. A tool result's
+                # feed-derived values arrive inside an untrusted-text fence, so the raw
+                # leaf begins with the fence character and an ISO-prefix test against it
+                # always fails -- which meant every fenced date was invisible to the
+                # sourced set. Measured: a real proposal was vetoed for quoting
+                # '2025-08-07', a rebate submission date that `get_rebate_status` had
+                # handed it moments earlier. Same class of bug as the fenced all-digit
+                # identifier; fixed at the source rather than per-symptom.
+                body = unwrap(leaf)
+                if body != leaf:
+                    strings.add(body)
+                if _ISO_DATE_PREFIX_RE.match(body):
+                    dates.update(_date_renderings(body[:10]))
                 # A number embedded in an ordinary returned string -- most commonly a
                 # drug's own strength inside its name ("LENALIDOMIDE 25 MG",
                 # "OCRELIZUMAB 300 MG/10 ML") -- is exactly as sourced as a top-level

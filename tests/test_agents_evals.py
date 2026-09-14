@@ -126,8 +126,21 @@ def _agent_settings(tmp_path: Path):
     """`fixture_dir` is left at its published default (`<repo>/tests/fixtures/
     agent_traces`) -- that is where the committed replay fixtures live. Only
     `journal_dir` is redirected, so a test run never writes into `data/agent_runs/`.
+
+    Both model ids are pinned rather than inherited from `AgentSettings`' defaults.
+    A fixture is matched by a digest over (model, messages, tools, tool_choice), so
+    the model id a trace was recorded against is part of that trace's identity -- and
+    the evaluator's default has since moved off `deepseek-v4-pro` on latency grounds
+    (see `config.py`). Inheriting the default would silently invalidate every
+    committed fixture the next time anyone changes it; pinning makes the trace
+    self-describing and a model change a deliberate re-record instead of a mystery.
     """
-    return load_agent_settings(api_key=None, journal_dir=tmp_path / "runs")
+    return load_agent_settings(
+        api_key=None,
+        journal_dir=tmp_path / "runs",
+        proposer_model="deepseek-chat",
+        evaluator_model="deepseek-chat",
+    )
 
 
 def _glossary() -> str:
@@ -237,42 +250,48 @@ def test_e000825_has_a_crosswalk_miss_in_its_own_dossier(full_conn, full_setting
 
 
 def test_e000006_denied_claim_paid_rebate(demo_conn, demo_settings, tmp_path):
-    """Measured, not assumed: this recording (a real `deepseek-chat` run, not
-    scripted) spent its entire token budget inside one iteration and the harness
-    correctly stopped it there -- `capped`, never a confident `complete` manufactured
-    from a half-finished proposal. `max_iterations=1` matches the ceiling that
-    actually bound the recording; see `_replay_coordinator`'s docstring for why a
-    token-budget stop specifically (as opposed to an iteration-count stop) has to be
-    re-expressed as an iteration ceiling to replay at all -- `ReplayClient` does no
-    journaling of its own, so the harness's own token counter reads zero at replay
-    time regardless of what really got spent."""
+    """Measured, not assumed: a real `deepseek-chat` run, not scripted.
+
+    The proposer recommends APPEAL on a denial that was never contested, and the
+    checklist scores it 92 of a possible 100 -- comfortably over the threshold of 80.
+    The run still ends `insufficient_data` rather than `complete`, and that ordering
+    is the design working as intended: a single `NOT_ADDRESSED` criterion ends the
+    loop immediately regardless of score, because more iterations cannot manufacture
+    evidence that is not in the documents. `insufficient_data` is a successful
+    outcome -- an answer about the world, not a failure of the loop.
+
+    Worth recording what this fixture cost to obtain. It was re-recorded four times,
+    and each time the veto scorers were flagging something real about their own
+    implementation rather than about the proposal: a fenced all-digit identifier, a
+    citation by clause id, an X12 document number read as a quantity, and finally a
+    fenced ISO date. Every one was a false positive on a veto criterion, which is the
+    expensive kind -- it does not lower a score, it zeroes an honest proposal."""
     agent_settings = _agent_settings(tmp_path)
     cursor = demo_settings.max_cursor
     outcome, journal = _replay_coordinator(
         demo_conn, agent_settings, tmp_path,
         episode_id="E-000006", cursor=cursor, nonce="aaaa1111", run_id="eval-e000006-x1-denied-rebate",
-        max_iterations=1,
+        max_iterations=2,
     )
     # Tool-path: the model had to actually look at the reconciliation to say
     # anything grounded about a denial-with-a-paid-rebate compliance case.
     calls = _tool_names(journal)
     assert calls, "no tool calls recorded for E-000006 -- the proposal cannot be grounded in anything"
     assert any(name in ("calculate_reconciliation", "get_episode", "get_remittance_detail") for name in calls)
-    assert outcome.kind == "capped"
+    assert outcome.kind == "insufficient_data"
     # Every figure the proposal states is sourced -- G3 is the assignment's central
     # constraint, and this is a real (not scripted) model run.
     assert outcome.findings["G3_figures_are_sourced"].verdict == "SUPPORTED"
     assert outcome.findings["G8_no_close_no_post_no_money"].verdict == "SUPPORTED"
-    # NOT asserted SUPPORTED, and deliberately noted rather than made to pass: this
-    # real run's first evidence span cites
-    # 'tool_result.get_episode.current.verdict_meanings.reimbursement' -- a
-    # dotted-path style neither `_TOOL_RESULT_REF_RE` nor `_NAMED_TOOL_REF_RE`
-    # parses (both expect `tool_result#N` or `toolname#N`) -- so G5 is CONTRADICTED
-    # here on a citation-format mismatch, not a fabricated quote. A real, separate
-    # finding from this task's live testing (see the final report); left
-    # unaddressed here as out of scope for the G3 fixes this fixture exists to
-    # cover.
-    assert outcome.findings["G5_evidence_verifies_verbatim"].verdict == "CONTRADICTED"
+    # This one used to be CONTRADICTED, and the reason is worth keeping: the model
+    # cites a span as `calculate_reconciliation#4.rebate.verdict_meaning` -- its own
+    # running count of its calls, plus a dotted field path -- where the scorer only
+    # understood `tool_result#N`. The quote was exact and the evidence was real; the
+    # citation format was the only thing wrong, and a VETO criterion was zeroing the
+    # whole proposal over it. The scorer now resolves a named reference by TOOL NAME,
+    # falling back from the index, because the index is the model's bookkeeping and
+    # the name is the reliable half.
+    assert outcome.findings["G5_evidence_verifies_verbatim"].verdict == "SUPPORTED"
     assert outcome.proposal.action != "ABSTAIN"  # a real compliance exception with money at stake
 
 

@@ -239,6 +239,22 @@ def _emit_structured(
     return call
 
 
+def _assistant_tool_call_message_from(call: ToolCall) -> dict[str, Any]:
+    """The assistant turn for a single tool call, so a rejected one stays in history.
+
+    A repair that says "that was malformed, emit it again" only means anything if the
+    thing being repaired is still on the transcript.
+    """
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {"id": call.id, "type": "function",
+             "function": {"name": call.name, "arguments": call.raw_arguments}}
+        ],
+    }
+
+
 def _assistant_tool_call_message(response: LLMResponse) -> dict[str, Any]:
     return {
         "role": "assistant",
@@ -481,7 +497,10 @@ def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
     return "\n".join(parts)
 
 
-def _make_evaluate(*, client: LLMClient, model: str, journal: Journal, fence_nonce: str) -> Evaluate:
+def _make_evaluate(
+    *, client: LLMClient, model: str, journal: Journal, fence_nonce: str,
+    fallback_model: str | None = None,
+) -> Evaluate:
     def evaluate(ctx: HarnessContext, proposal: ProposedAction, iteration: int) -> EvaluatorVerdict:
         # Fresh trace, every iteration: no history from any previous round, and no
         # channel into the Proposer's own conversation -- design S:1, "the reviewer
@@ -554,7 +573,67 @@ def _make_evaluate(*, client: LLMClient, model: str, journal: Journal, fence_non
             forced_name="emit_evaluation", repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
             journal=journal, agent="evaluator", iteration=iteration,
         )
-        verdict = EvaluatorVerdict.parse(call.arguments)
+        try:
+            verdict = EvaluatorVerdict.parse(call.arguments)
+        except SchemaError as exc:
+            # One repair turn on a schema violation, aimed at the exact field.
+            #
+            # `SchemaError` has carried a `repair_message` from the start, written to be
+            # sendable straight back to the model as a user turn -- it was simply never
+            # wired to anything. Measured once the evaluator moved to the non-thinking
+            # model: it returns a well-formed verdict that omits `cited_span` on a
+            # SUPPORTED finding often enough to kill a run, and killing the run turns a
+            # formatting slip into `EvaluatorUnavailable`, which fails the whole gate
+            # closed. The slip is worth one retry; a second identical failure is not,
+            # and still fails closed.
+            #
+            # This is a repair, not a re-ask: the message names the offending field and
+            # asks for the same judgement re-emitted correctly. It must never say
+            # anything about what the verdict should BE.
+            journal.event(
+                "evaluation", iteration=iteration, agent="evaluator", model=model,
+                schema_repair_attempted=True, error=str(exc),
+            )
+            messages.append(_assistant_tool_call_message_from(call))
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": "rejected"})
+            messages.append({"role": "user", "content": exc.repair_message})
+            call = _emit_structured(
+                client=client, model=model, messages=messages, tool_spec=EMIT_EVALUATION_TOOL,
+                forced_name="emit_evaluation", repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
+                journal=journal, agent="evaluator", iteration=iteration,
+            )
+            try:
+                verdict = EvaluatorVerdict.parse(call.arguments)
+            except SchemaError:
+                # Twice is a capacity problem, not a slip. Escalate to the stronger
+                # model rather than failing the gate closed.
+                #
+                # Design doc S10 predicted this exactly: "Model capacity interacts with
+                # structure... splitting into free reasoning then cheap extraction
+                # recovered 80-87%. So a cheap evaluator is not free." Measured here:
+                # the non-thinking evaluator returned a verdict with `per_criterion`
+                # missing outright, twice in a row, on a thirteen-criterion nested
+                # checklist. The thinking model does not have that problem -- it is
+                # simply slow, which is why it is not the default.
+                #
+                # So the cheap model handles the common case and pays for itself, and
+                # the expensive one is the backstop for the hard one. The escalation is
+                # journalled because "which model actually produced this verdict" is
+                # part of what a reviewer is entitled to know.
+                if not fallback_model or fallback_model == model:
+                    raise
+                journal.event(
+                    "evaluation", iteration=iteration, agent="evaluator", model=model,
+                    escalated_to=fallback_model,
+                    reason="two schema failures on the primary evaluator model",
+                )
+                call = _emit_structured(
+                    client=client, model=fallback_model, messages=messages,
+                    tool_spec=EMIT_EVALUATION_TOOL, forced_name="emit_evaluation",
+                    repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
+                    journal=journal, agent="evaluator", iteration=iteration,
+                )
+                verdict = EvaluatorVerdict.parse(call.arguments)
 
         expected_ids = [cid for cid, _q in checklist]
         actual_ids = [f.criterion_id for f in verdict.per_criterion]
@@ -601,7 +680,10 @@ def run_coordinator(
         verdict_glossary=verdict_glossary, grounding_clause_index=grounding_clause_index,
         journal=journal, max_calls_per_iteration=settings.max_tool_rounds,
     )
-    evaluate = _make_evaluate(client=client, model=settings.evaluator_model, journal=journal, fence_nonce=tool_ctx.nonce)
+    evaluate = _make_evaluate(
+        client=client, model=settings.evaluator_model, journal=journal,
+        fence_nonce=tool_ctx.nonce, fallback_model=settings.evaluator_fallback_model,
+    )
 
     resolved_budgets = budgets or RunBudgets(
         max_iterations=settings.max_iterations, threshold=settings.threshold, token_budget=settings.token_budget,

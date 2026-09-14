@@ -76,6 +76,10 @@ class AgentSettings:
     api_key: str | None  # None is legal -- replay mode needs no key
     proposer_model: str
     evaluator_model: str
+    #: Used only when the primary evaluator model fails the output schema twice in a
+    #: row -- a capacity problem rather than a slip (design doc S10). Set to the same
+    #: value as `evaluator_model`, or empty, to disable escalation.
+    evaluator_fallback_model: str
     investigator_model: str
     max_iterations: int
     threshold: float
@@ -122,7 +126,24 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         "base_url": env("BASE_URL", "https://api.deepseek.com"),
         "api_key": _lookup(f"{_ENV_PREFIX}API_KEY", dotenv) or _lookup("DEEPSEEK_API_KEY", dotenv),
         "proposer_model": env("PROPOSER_MODEL", "deepseek-chat"),
-        "evaluator_model": env("EVALUATOR_MODEL", "deepseek-v4-pro"),
+        # Measured over six real runs before this default changed: the evaluator on
+        # `deepseek-v4-pro` averaged 466s per call against the proposer's 4.1s, and
+        # 95% of its output tokens were reasoning tokens -- one call took 957s. It was
+        # 96% of every Decide run's wall clock. A thinking model grading a 16-criterion
+        # checklist in one call is simply the wrong shape of work for it.
+        #
+        # The cost of moving is real and should not be glossed: proposer and evaluator
+        # now share a model, so the self-preference-bias mitigation that motivated the
+        # split (design doc S1) is gone, and the design note has to say so rather than
+        # keep claiming independence. What survives is the part that was doing the
+        # heavier lifting anyway -- the evaluator still gets a fresh trace, never sees
+        # the proposer's reasoning, and Python still computes the score from a
+        # checklist rather than accepting a number the model volunteered.
+        #
+        # Set RECON_AGENT_EVALUATOR_MODEL=deepseek-v4-pro to buy the independence back
+        # at roughly eight minutes a call.
+        "evaluator_model": env("EVALUATOR_MODEL", "deepseek-chat"),
+        "evaluator_fallback_model": env("EVALUATOR_FALLBACK_MODEL", "deepseek-v4-pro"),
         "investigator_model": "deepseek-chat",
         "max_iterations": int(env("MAX_ITERATIONS", "5")),
         "threshold": float(env("THRESHOLD", "80.0")),

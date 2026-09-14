@@ -40,6 +40,15 @@ from recon.config import load_settings  # noqa: E402
 from recon.db.connection import open_db  # noqa: E402
 from recon.domain import verdicts as verdict_vocab  # noqa: E402
 
+# Pinned, not inherited. A fixture is matched at replay time by a digest over
+# (model, messages, tools, tool_choice), so the model ids a trace was recorded
+# against are part of that trace's identity. `AgentSettings`' evaluator default has
+# since moved off `deepseek-v4-pro` on latency grounds (config.py), and inheriting
+# whatever the default happens to be would silently invalidate every committed
+# fixture the next time it changes. tests/test_agents_evals.py pins the same pair.
+_FIXTURE_MODELS = {"proposer_model": "deepseek-chat", "evaluator_model": "deepseek-chat"}
+
+
 NOW = "2026-07-02T00:00:00Z"
 
 
@@ -127,7 +136,7 @@ def _record_run(
     # and ABSTAIN scenarios) returns on iteration 0 regardless of this ceiling, since
     # `run_until` checks the threshold before it ever checks the ceiling.
     settings = load_settings(profile)
-    agent_settings = load_agent_settings()
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, episode_id, cursor)
@@ -173,7 +182,7 @@ def _record_run(
 def scenario_happy_path_cites_a_tool_result() -> None:
     episode_id, profile, run_id, nonce = "E-000006", "demo", "eval-happy-path-cites-tool-result", "11112222"
     settings = load_settings(profile)
-    agent_settings = load_agent_settings()
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, episode_id, cursor)
@@ -234,7 +243,7 @@ def scenario_happy_path_cites_a_tool_result() -> None:
 def scenario_g8_write_verb_veto() -> None:
     episode_id, profile, run_id, nonce = "E-000032", "demo", "eval-g8-write-verb-veto", "33334444"
     settings = load_settings(profile)
-    agent_settings = load_agent_settings()
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, episode_id, cursor)
@@ -271,7 +280,7 @@ def scenario_g8_write_verb_veto() -> None:
 def scenario_g1_disposition_mismatch() -> None:
     episode_id, profile, run_id, nonce = "E-000002", "demo", "eval-g1-disposition-mismatch", "55556666"
     settings = load_settings(profile)
-    agent_settings = load_agent_settings()
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, episode_id, cursor)
@@ -314,7 +323,7 @@ def scenario_abstain_completes() -> None:
     completes, in contrast to the deliberate-failure fixture that skips it."""
     episode_id, profile, run_id, nonce = "E-000002", "demo", "eval-abstain-completes", "77778888"
     settings = load_settings(profile)
-    agent_settings = load_agent_settings()
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, episode_id, cursor)

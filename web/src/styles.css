@@ -589,3 +589,19 @@ details.evidence pre {
   white-space: pre;
 }
 .source-panel-hashes { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-muted); font-size: 11px; font-family: var(--mono); }
+
+/* A citation marker in agent prose. Deliberately quiet: the evidence must be
+   reachable without the sentence having to carry a parser's worth of syntax. */
+.agent-cite {
+  display: inline-block;
+  margin-left: 2px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--accent);
+  background: var(--surface-2);
+  border-radius: 3px;
+  cursor: help;
+  vertical-align: super;
+}

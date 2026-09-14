@@ -47,6 +47,15 @@ from recon.config import load_settings  # noqa: E402
 from recon.db.connection import open_db  # noqa: E402
 from recon.domain import verdicts as verdict_vocab  # noqa: E402
 
+# Pinned, not inherited. A fixture is matched at replay time by a digest over
+# (model, messages, tools, tool_choice), so the model ids a trace was recorded
+# against are part of that trace's identity. `AgentSettings`' evaluator default has
+# since moved off `deepseek-v4-pro` on latency grounds (config.py), and inheriting
+# whatever the default happens to be would silently invalidate every committed
+# fixture the next time it changes. tests/test_agents_evals.py pins the same pair.
+_FIXTURE_MODELS = {"proposer_model": "deepseek-chat", "evaluator_model": "deepseek-chat"}
+
+
 EPISODE_ID = "E-000006"
 NONCE = "f00dfeed"
 RUN_ID = "eval-g3-veto-failure"
@@ -102,7 +111,7 @@ class _ScriptedClient:
 
 def main() -> int:
     settings = load_settings("demo")
-    agent_settings = load_agent_settings()  # api_key irrelevant: nothing here calls the network
+    agent_settings = load_agent_settings(**_FIXTURE_MODELS)  # api_key irrelevant: nothing here calls the network
     conn = open_db(settings)
     cursor = settings.max_cursor
     dossier = dossier_module.build_dossier(conn, EPISODE_ID, cursor)
