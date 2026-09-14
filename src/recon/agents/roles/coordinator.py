@@ -36,6 +36,7 @@ from typing import Any
 
 from recon.agents.client import LLMClient, LLMResponse, ToolCall, supports_forced_tool_choice
 from recon.agents.config import AgentSettings
+from recon.agents.envelope import err as err_envelope
 from recon.agents.grounding import Clause, select_clauses
 from recon.agents.harness import Evaluate, HarnessContext, Propose, RunBudgets, run_until
 from recon.agents.journal import Journal
@@ -99,6 +100,37 @@ def _find_tool_call(response: LLMResponse, name: str) -> ToolCall | None:
     return None
 
 
+def _coerce_sole_forced_call(response: LLMResponse, forced_name: str) -> ToolCall | None:
+    """Accept a single tool call under the wrong name when exactly one name was legal.
+
+    Measured against DeepSeek on 2026-09-13: with `tool_choice` naming
+    `emit_proposed_action` and a `tools` array containing only that one function, the
+    model returned a well-formed `ProposedAction` payload -- correct `action`, correct
+    `grounding_clause_id`, full `reasoning` -- under the name `create_mock_work_item`,
+    a function that was *not in the array at all*. It had leaked in from the prompt's
+    description of the eventual write path.
+
+    Rejecting that outright throws away a good proposal over a label. Accepting any
+    mismatched name would be worse. The narrow rule: coerce only when the request
+    forced exactly one function AND the response carried exactly one tool call, so
+    there is no ambiguity about what the model meant -- the target was the only legal
+    one. The arguments are validated by `ProposedAction.parse` immediately afterwards
+    either way, so a genuinely wrong payload still fails; only the name is forgiven.
+
+    This is emphatically NOT a route to the write tool. The write is not reachable
+    from a model at all: `create_mock_work_item` is never in any `tools` array a role
+    sends (`_READ_TOOL_NAMES` excludes it), and the returned name is discarded here
+    rather than dispatched. What the model produced was a proposal wearing the wrong
+    label, not a write.
+    """
+    if len(response.tool_calls) != 1:
+        return None
+    call = response.tool_calls[0]
+    if call.name == forced_name:
+        return call
+    return ToolCall(id=call.id, name=forced_name, arguments=call.arguments, raw_arguments=call.raw_arguments)
+
+
 def _emit_structured(
     *,
     client: LLMClient,
@@ -143,9 +175,19 @@ def _emit_structured(
         return call
 
     if forced:
+        # The provider did not honour the forced name. If it nonetheless produced
+        # exactly one call, the target was unambiguous -- see _coerce_sole_forced_call.
+        coerced = _coerce_sole_forced_call(response, forced_name)
+        if coerced is not None:
+            journal.event(
+                "forced_tool_name_coerced", agent=agent, iteration=iteration,
+                model=response.model, returned_name=response.tool_calls[0].name,
+                coerced_to=forced_name,
+            )
+            return coerced
         raise SchemaError(
             f"{forced_name} was forced via tool_choice on {model!r} but the response carried no "
-            "matching tool call.",
+            f"matching tool call (names returned: {[c.name for c in response.tool_calls] or 'none'}).",
             repair_message=repair_message,
         )
 
@@ -255,23 +297,59 @@ class _ProposerSession:
             # here. See this coder's report.
             self._messages.append({"role": "user", "content": critique})
 
+        # The emitter is offered ALONGSIDE the read tools, not only in the forced call
+        # that follows. Measured live: with only read tools in the array, the model
+        # finished researching and called `emit_proposed_action` anyway -- a name that
+        # was not on offer -- because the prompt tells it to, and the round budget then
+        # cut the iteration short. Giving it the legitimate exit it was already reaching
+        # for turns a phantom call into the normal path, and the forced call below
+        # becomes the fallback it was meant to be rather than the only route.
         read_tools = wire_schemas(_READ_TOOL_NAMES)
+        loop_tools = [*read_tools, EMIT_PROPOSED_ACTION_TOOL]
         calls_made = 0
+        emitted: ToolCall | None = None
         for _round in range(_PROPOSER_MAX_ROUNDS):  # per-iteration budget, reset every call (S:B.1)
             response = self._client.complete(
                 agent="proposer", iteration=iteration, messages=self._messages,
-                model=self._model, tools=read_tools, tool_choice="auto",
+                model=self._model, tools=loop_tools, tool_choice="auto",
             )
             if not response.tool_calls:
                 self._messages.append({"role": "assistant", "content": response.content or ""})
+                break
+
+            emitted = _find_tool_call(response, "emit_proposed_action")
+            if emitted is not None:
+                # Done researching, and it said so in the sanctioned way. Note the
+                # assistant turn is NOT appended here: `_withheld_reasoning_tool_call_message`
+                # below is what goes into history, so the proposer's own reasoning
+                # never re-enters a later context verbatim.
                 break
 
             self._messages.append(_assistant_tool_call_message(response))
             budget_hit = False
             for call in response.tool_calls:
                 if calls_made >= self._max_calls:
+                    # Every declared tool_call still gets a reply. Breaking out here
+                    # without one leaves an assistant message announcing N calls
+                    # followed by fewer than N tool messages, which DeepSeek rejects
+                    # outright: "An assistant message with 'tool_calls' must be
+                    # followed by tool messages responding to each 'tool_call_id'."
+                    # Measured -- it 400s the whole run. The budget refusal is also
+                    # better information than silence: it tells the model the call was
+                    # declined rather than that the data does not exist.
                     budget_hit = True
-                    break
+                    self._messages.append({
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": render_tool_result(
+                            err_envelope(
+                                "not_permitted",
+                                f"this iteration's tool-call budget of {self._max_calls} is spent; "
+                                "propose from what you already have, or say what is missing.",
+                            )
+                        ),
+                    })
+                    continue
                 calls_made += 1
                 envelope = dispatch(self._tool_ctx, call.name, call.arguments, iteration=iteration)
                 ctx.tool_results.append(RecordedToolResult(name=call.name, arguments=call.arguments, envelope=envelope))
@@ -281,7 +359,7 @@ class _ProposerSession:
             if budget_hit or calls_made >= self._max_calls:
                 break
 
-        call = _emit_structured(
+        call = emitted if emitted is not None else _emit_structured(
             client=self._client, model=self._model, messages=self._messages, tool_spec=EMIT_PROPOSED_ACTION_TOOL,
             forced_name="emit_proposed_action", repair_message=_PROPOSER_REPAIR_MESSAGE,
             journal=self._journal, agent="proposer", iteration=iteration,

@@ -389,4 +389,12 @@ def create_app(settings: Settings | None = None):
         result["master_seed"] = app.state.settings.master_seed
         return result
 
+    # The agent layer's HTTP surface (docs/agent_layer_design.md S8.6). Always mounted:
+    # recon.agents.api guards its own heavy (httpx-dependent) imports internally and returns a
+    # 503 with an actionable message per request when the 'agent' extra is missing or no API key
+    # is configured, rather than this module needing to know or care which.
+    from recon.agents import api as agents_api
+
+    app.include_router(agents_api.build_router())
+
     return app

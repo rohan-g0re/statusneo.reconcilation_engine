@@ -205,6 +205,11 @@ def _norm(s: str) -> str:
 
 
 _TOOL_RESULT_REF_RE = re.compile(r"^tool_result#(\d+)")
+#: What the model actually writes: `calculate_reconciliation#4.rebate.verdict_meaning`
+#: -- the tool's own name, its 1-indexed call number, and the field path inside it.
+#: Strictly more informative than `tool_result#4`, so it is accepted rather than
+#: failed. Measured live: an honest proposal failed the G5 VETO on this alone.
+_NAMED_TOOL_REF_RE = re.compile(r"^([a-z_]+)#(\d+)")
 
 
 def render_tool_result(envelope: Any) -> str:
@@ -279,9 +284,35 @@ def _source_ref_text(ctx: ScoringInput, source_ref: str) -> str | None:
         texts = [c.text for c in ctx.clauses if c.entity == entity]
         return "\n".join(texts) if texts else None
 
-    m = _TOOL_RESULT_REF_RE.match(source_ref)
-    if not m:
+    # A bare clause id is the other legal spelling, and in practice the commoner one:
+    # `grounding.render_clause_index` puts `[KG-DETERMINISTIC-BOUNDARY-0ec14947] <text>`
+    # in front of the model and `ProposedAction.grounding_clause_id` asks for an id, so
+    # citing evidence by id is what the prompt invites. Measured live: a proposal that
+    # had invented nothing failed the G5 VETO purely because it cited
+    # `KG-X-1-COMPLIANCE-CASE-a35f81a8` rather than `KG:X-1 compliance case`. Accepting
+    # the id costs nothing -- it is a stricter reference than the entity name, since it
+    # names one observation rather than all of them.
+    if source_ref.startswith("KG-"):
+        for clause in ctx.clauses:
+            if clause.clause_id == source_ref:
+                return clause.text
         return None
+
+    m = _TOOL_RESULT_REF_RE.match(source_ref)
+    if m is None:
+        named = _NAMED_TOOL_REF_RE.match(source_ref)
+        if named is None:
+            return None
+        name, n = named.group(1), int(named.group(2))
+        if 1 <= n <= len(ctx.tool_results) and ctx.tool_results[n - 1].name == name:
+            return render_tool_result(ctx.tool_results[n - 1].envelope)
+        # The index is the model's own running count of its calls and need not match
+        # our recording order; the tool NAME is the reliable half of the reference.
+        # Measured live: a proposal cited `calculate_reconciliation#4` for what we
+        # recorded as call 5, and failed a VETO on the arithmetic rather than on the
+        # evidence. Fall back to the name, joining every result from that tool.
+        texts = [render_tool_result(t.envelope) for t in ctx.tool_results if t.name == name]
+        return "\n".join(texts) if texts else None
     n = int(m.group(1))
     if not (1 <= n <= len(ctx.tool_results)):
         return None
@@ -628,7 +659,76 @@ _SECTION_RE = re.compile(r"§\s?\d+(?:\.\d+)*")
 _LIST_MARKER_RE = re.compile(r"(?m)^\s{0,3}\d{1,2}[.)]\s")
 _BARE_SMALL_INT_RE = re.compile(r"(?<![\d.,$])[012](?![\d.,%])")
 
+# Numerals that are the NAME of a thing in this domain, not a quantity of anything.
+# Measured on a live run: an otherwise-clean proposal was vetoed for writing "the 835",
+# "the 837" and "a 277" -- the X12 transaction sets for a remittance advice, a claim
+# and a claim-status response. Those are document types; "835" there is a noun, and
+# no tool will ever return it as a figure because it is not a figure. "340B" is the
+# same case -- a statute nickname, and it appears in the project's own name.
+#
+# G3 is a VETO, so a false positive here does not lower a score, it zeroes an honest
+# proposal outright. That asymmetry is why this list exists and why it is a closed,
+# explicit set rather than a heuristic.
+_DOMAIN_NUMERIC_TERMS: tuple[str, ...] = (
+    "277CA", "999",                                                               # named variants first
+    "835", "837", "834", "270", "271", "276", "277", "278", "824", "997",         # X12
+    "340B", "340b",                                                               # the statute
+    "1500", "UB-04",                                                              # paper claim forms
+    "5010",                                                                       # the X12 version
+    "D.0",                                                                        # NCPDP Telecom
+)
+# Longest-first so "277CA" wins over "277"; the trailing guard then permits a letter
+# suffix only where the term itself already carries one.
+_DOMAIN_TERM_RE = re.compile(
+    r"(?<![\w.,$-])(?:"
+    + "|".join(re.escape(t) for t in sorted(_DOMAIN_NUMERIC_TERMS, key=len, reverse=True))
+    + r")(?![\d.,%-])"
+)
+
+#: The 8-hex suffix of a grounding clause id. Measured live: the model cited clauses
+#: as "ae4e8a90 states the net-negative condition and 52c330a2 names ..." -- dropping
+#: the `KG-...` prefix once it had introduced the full id earlier in the same
+#: paragraph, which is ordinary prose economy. Masked only when the hash actually
+#: belongs to a clause this run supplied, so it stays a provenance check.
+_BARE_CLAUSE_HASH_RE = re.compile(r"(?<![\w-])[0-9a-f]{8}(?![\w-])")
+
+#: A maximal identifier-ish token: letters, digits and the separators that appear
+#: inside real identifiers in these feeds (`HC:J2350:JW`, `RBT-20250909-72245`,
+#: `ENC-358361-00049`, `20260618724907`).
+_IDENT_TOKEN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9:_./-]*[A-Za-z0-9])?")
+
 CANDIDATE_RE = re.compile(r"\$?\s?-?\d[\d,]*(?:\.\d+)?\s?%?")
+
+
+def _identifier_fragments(text: str, sourced_strings: frozenset[str]) -> set[tuple[int, int]]:
+    """Spans in ``text`` that are digit runs *inside* an identifier a tool returned.
+
+    The exact-match mask only fires when the proposal reproduces a sourced string
+    whole. A model rarely does: given ``"procedure_code": "HC:J2350:JW"`` it writes
+    "the J2350 line", and given ``"allocation_code": "RBT-20250909-72245"`` it writes
+    the code but the candidate scanner still chops ``-20250909`` and ``-722`` out of
+    it. Both were live G3 violations on a proposal that had invented nothing.
+
+    The rule: take the maximal identifier token surrounding each candidate; if that
+    token appears inside any sourced string, the digits are part of a name a tool
+    supplied, not a figure the model computed.
+
+    This is narrow on purpose. To launder a fabricated ``52700`` through it, the
+    string ``52700`` would have to sit inside an identifier that a tool actually
+    returned this run -- at which point it *is* sourced, and quoting it is correct.
+    """
+    exempt: set[tuple[int, int]] = set()
+    for match in _IDENT_TOKEN_RE.finditer(text):
+        token = match.group(0)
+        if not any(token in s for s in sourced_strings):
+            continue
+        # A pure number is normally a figure and must go through canon() -- unless a
+        # tool returned that exact string, which is what a payer ICN like
+        # "20260618724907" is: an identifier that happens to be all digits.
+        if not any(ch.isalpha() or ch in ":_/-" for ch in token) and token not in sourced_strings:
+            continue
+        exempt.add((match.start(), match.end()))
+    return exempt
 
 
 @dataclass(frozen=True, slots=True)
@@ -780,6 +880,30 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
         text = _mask_literal(text, _norm(span.quote))
     # 2. clause ids
     text = _mask(text, _CLAUSE_ID_RE)
+    # 2b. bare 8-hex clause hashes -- the model drops the `KG-...` prefix once it has
+    # introduced an id, which is ordinary prose economy. Masked ONLY for hashes this
+    # run actually supplied, so it stays a provenance check rather than a blanket
+    # exemption. Must run before any digit mask: step 11 (bare 0/1/2) was consuming
+    # the trailing "2" of "52c330a2" and leaving a fragment no later rule could match.
+    known_hashes = sorted({c.clause_id.rsplit("-", 1)[-1] for c in ctx.clauses})
+    if known_hashes:
+        text = _mask(
+            text,
+            re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(h) for h in known_hashes) + r")(?![\w-])"),
+        )
+    # 2c. Spans that are digit runs inside an identifier a tool returned.
+    #
+    # Computed HERE, before any digit-shredding mask, and kept as offsets rather than
+    # masked in place -- the surrounding token is what proves provenance, so destroying
+    # it first destroys the evidence. Every `_mask` replaces a match with NULs of equal
+    # length, so offsets stay valid for the rest of this function.
+    #
+    # Measured: step 11 (bare 0/1/2) was eating the leading "0" of "ENC-358361-00049"
+    # and the trailing "2" of clause hashes, leaving fragments that no later rule could
+    # attribute -- so an identifier a tool had genuinely returned was reported as an
+    # invented figure. G3 is a veto, so that zeroed honest proposals outright.
+    fragment_spans = _identifier_fragments(text, sourced.strings)
+
     # 3. any sourced string, exact match, longest first
     for literal in sorted((s for s in sourced.strings if s), key=len, reverse=True):
         text = _mask_literal(text, _norm(literal))
@@ -806,6 +930,8 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
     text = _mask(text, _LIST_MARKER_RE)
     # 11. bare 0, 1, 2
     text = _mask(text, _BARE_SMALL_INT_RE)
+    # 12. domain numerals that name a document type rather than count anything
+    text = _mask(text, _DOMAIN_TERM_RE)
 
     violations: list[_Violation] = list(date_violations)
     # 12. spelled-out figures (reviewer finding 4) -- see the word-number
@@ -815,6 +941,8 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
         token = m.group(0)
         if not token.strip():
             continue
+        if any(start <= m.start() and m.end() <= end for start, end in fragment_spans):
+            continue  # part of a sourced identifier, not a figure -- see _identifier_fragments
         if token.rstrip().endswith("%"):
             # The deterministic layer emits no percentage anywhere (integer cents end
             # to end) -- a percentage has no possible source and is always model

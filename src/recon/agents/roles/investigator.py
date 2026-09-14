@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from recon.agents.client import LLMClient, LLMResponse
-from recon.agents.envelope import ToolEnvelope
+from recon.agents.envelope import ToolEnvelope, err as err_envelope
 from recon.agents.prompts import investigator as investigator_prompt
 from recon.agents.schemas import Citation, CitationKind, InvestigatorReport
 from recon.agents.scorers import render_tool_result
@@ -128,8 +128,24 @@ def run_investigator(
         hit_call_budget = False
         for call in response.tool_calls:
             if total_calls >= MAX_TOOL_CALLS:
+                # Every declared tool_call gets a reply even when the budget is spent.
+                # Measured against DeepSeek: an assistant message announcing N calls
+                # followed by fewer than N tool messages is rejected outright --
+                # "An assistant message with 'tool_calls' must be followed by tool
+                # messages responding to each 'tool_call_id'" -- and 400s the run.
                 hit_call_budget = True
-                break
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": render_tool_result(
+                        err_envelope(
+                            "not_permitted",
+                            f"the tool-call budget of {MAX_TOOL_CALLS} is spent; write your "
+                            "explanation from what you already have, and name what is missing.",
+                        )
+                    ),
+                })
+                continue
             total_calls += 1
             envelope = dispatch(tool_ctx, call.name, call.arguments, iteration=round_index)
 

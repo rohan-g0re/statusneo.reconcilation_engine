@@ -70,6 +70,11 @@ EVENT_KINDS: frozenset[str] = frozenset(
         # reviewer auditing "the agent never computes a number" would grep for, and
         # burying it inside another kind is how a finding becomes invisible.
         "unsourced_figure",
+        # The provider ignored a forced `tool_choice` name and answered under a
+        # different one. Measured on DeepSeek; recorded rather than smoothed over,
+        # because a harness quietly repairing a provider contract violation is how
+        # the violation stops being visible to the next person who hits it.
+        "forced_tool_name_coerced",
     }
 )
 
