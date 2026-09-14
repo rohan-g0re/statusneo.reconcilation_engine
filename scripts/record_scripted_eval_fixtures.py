@@ -31,7 +31,7 @@ from recon.agents.grounding import render_clause_index, select_clauses  # noqa: 
 from recon.agents.harness import RunBudgets  # noqa: E402
 from recon.agents.journal import Journal  # noqa: E402
 from recon.agents.roles.coordinator import run_coordinator  # noqa: E402
-from recon.agents.rubric import CRITERIA  # noqa: E402
+from recon.agents.rubric import applicable_judge_criteria  # noqa: E402
 from recon.agents.schemas import ProposedAction  # noqa: E402
 from recon.agents.scorers import RecordedToolResult, ScoringInput  # noqa: E402
 from recon.agents.tools import CallLog, ToolContext, dispatch  # noqa: E402
@@ -98,7 +98,7 @@ class _ScriptedClient:
 
 def _judge_checklist(proposal: ProposedAction, tool_results: tuple[RecordedToolResult, ...], clauses, dossier) -> list:
     prelim = ScoringInput(proposal=proposal, evaluator_verdict=None, tool_results=tool_results, clauses=clauses, dossier=dossier)
-    return [c for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+    return applicable_judge_criteria(prelim)
 
 
 def _all_supported_evaluation(checklist, *, quote: str, source_ref: str, source_kind: str) -> dict[str, Any]:

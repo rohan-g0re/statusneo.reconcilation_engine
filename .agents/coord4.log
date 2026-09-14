@@ -1,0 +1,40 @@
+Traceback (most recent call last):
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\scripts\agent_smoke.py", line 188, in main
+    outcome = run_coordinator(
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\roles\coordinator.py", line 867, in run_coordinator
+    return run_until(
+           ^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\harness.py", line 217, in run_until
+    proposal = propose(ctx, critique, i)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\roles\coordinator.py", line 455, in __call__
+    proposal = ProposedAction.parse(call.arguments)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\schemas.py", line 476, in parse
+    _require_keys(payload, cls._FIELD_SCHEMAS, schema_name=name)
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\schemas.py", line 185, in _require_keys
+    raise SchemaError(
+recon.agents.schemas.SchemaError: ProposedAction payload is missing required field 'reasoning'.
+══════════════════════════════════════════════════════════════════════════════
+E-000006  MEDICAL  cursor 2026-07-01T23:59:59Z
+  disposition   EXCEPTION
+  verdicts      B-10 / C-08
+  reasons       DENIED, DENIED_WITH_REBATE_PAID
+  timeline      10 events, 0 unresolved
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+COORDINATOR  run 16d38339  model deepseek-v4-pro
+══════════════════════════════════════════════════════════════════════════════
+  RAISED SchemaError: ProposedAction payload is missing required field 'reasoning'.
+
+  journal   C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\data\agent_runs\16d38339b2aa4bcb827fb7ec8a610f49.jsonl
+  models    {'proposer': 'deepseek-v4-pro'}
+  tokens    {'prompt_tokens': 37161, 'completion_tokens': 7232, 'total_tokens': 44393, 'prompt_cache_hit_tokens': 12416, 'prompt_cache_miss_tokens': 24745}
+  tool calls (5):
+    - get_episode({"detail": "essential", "episode_id": "E-000006"})
+    - get_remittance_detail({"episode_id": "E-000006"})
+    - get_rebate_status({"episode_id": "E-000006"})
+    - calculate_reconciliation({"claim_id": "E-000006"})
+    - get_cash_match({"episode_id": "E-000006", "include_unallocated_deposits": true})

@@ -42,7 +42,7 @@ from recon.agents.harness import Evaluate, HarnessContext, Propose, RunBudgets, 
 from recon.agents.journal import Journal
 from recon.agents.prompts import evaluator as evaluator_prompt
 from recon.agents.prompts import proposer as proposer_prompt
-from recon.agents.rubric import CRITERIA, Outcome
+from recon.agents.rubric import Outcome, applicable_judge_criteria
 from recon.agents.schemas import EvaluatorVerdict, ProposedAction, SchemaError
 from recon.agents.scorers import RecordedToolResult, ScoringInput, render_tool_result
 from recon.agents.tools import ToolContext, dispatch, tool_names, wire_schemas
@@ -59,7 +59,10 @@ _READ_TOOL_NAMES: tuple[str, ...] = tuple(n for n in tool_names() if n != "creat
 #: `spec_prompts_roles.md` S:B.1, "Per-iteration tool budget: 3 rounds ..." -- no
 #: `AgentSettings` field carries a round count (only a call count -- see below), so
 #: this stays a module constant, reset fresh on every harness iteration.
-_PROPOSER_MAX_ROUNDS = 3
+#: Two rounds, not three. The proposer now asks for every tool it needs in one turn
+#: (see prompts/proposer.py), so a third round only ever buys a follow-up on an id
+#: discovered in the first batch -- rare, and not worth a round-trip on every run.
+_PROPOSER_MAX_ROUNDS = 2
 
 #: Ceiling on the escalation call to the thinking model.
 #:
@@ -70,6 +73,55 @@ _PROPOSER_MAX_ROUNDS = 3
 #: output; anything past this ceiling is the model reasoning for its own sake, and
 #: cutting it off costs a rescue attempt rather than a correct answer.
 _FALLBACK_MAX_TOKENS = 8_000
+
+#: Ceiling on any structured-output call, on any model.
+#:
+#: A `ProposedAction` runs to roughly 2,000 output tokens and an `EvaluatorVerdict` to
+#: about the same; the rest of a thinking model's budget goes on reasoning nobody
+#: reads. Measured on `deepseek-v4-pro` with no ceiling: one proposer emit produced
+#: 12,182 output tokens of which 11,246 were reasoning, and took 149 seconds -- for a
+#: payload of eight fields. Three of those in a two-iteration run is most of a
+#: ten-minute wait.
+#:
+#: This bounds thinking, not the answer. A verdict that genuinely needs more than this
+#: is not a verdict, and a truncated tool call fails closed anyway: `client.py`'s
+#: parser turns unparseable arguments into `{}` and the schema rejects it.
+_EMIT_MAX_TOKENS = 6_000
+
+#: The evaluator needs more room than the proposer, and the difference is structural.
+#:
+#: A `ProposedAction` is eight fields about one action. An `EvaluatorVerdict` is a
+#: reasoned finding for every applicable criterion -- thirteen of them on a typical
+#: episode, each with its own reasoning and cited span. On a thinking model the cap
+#: covers reasoning AND the emitted call from one budget, so a ceiling tight enough to
+#: bound the proposer leaves the evaluator having spent everything thinking with
+#: nothing left to answer with: measured, it hit the cap and produced no tool call at
+#: all, twice, and failed the run closed.
+#:
+#: Failing closed was the correct behaviour. The ceiling was the bug.
+_EVALUATOR_MAX_TOKENS = 16_000
+
+
+def _emit_ceiling(model: str, base: int) -> int:
+    """The output ceiling for a structured emit, adjusted for how the model spends it.
+
+    On a non-thinking model the whole budget goes to the answer, and `base` is
+    generous for one. On a thinking model the SAME budget covers reasoning and the
+    emitted call together, and the reasoning goes first -- so a ceiling sized for the
+    answer alone gets spent entirely on thinking and the tool call arrives truncated.
+
+    Measured both ways on `deepseek-v4-pro`: uncapped, one proposer emit produced
+    12,182 output tokens of which 11,246 were reasoning, for an eight-field payload.
+    Capped at 6,000, it returned a `ProposedAction` with `reasoning` missing outright
+    -- the cap had landed mid-object. Neither is the behaviour anyone wants, and the
+    answer is not a single number: it is that a thinking model needs headroom the
+    ceiling was never accounting for.
+
+    Fails closed either way. A truncated tool call parses to `{}` in `client.py` and
+    the schema rejects it; it never becomes a half-formed proposal.
+    """
+    return base if supports_forced_tool_choice(model) else max(base, _EVALUATOR_MAX_TOKENS)
+
 
 _PROPOSER_REPAIR_MESSAGE = (
     "That reply contained no emit_proposed_action tool call, so nothing was recorded.\n\n"
@@ -420,6 +472,7 @@ class _ProposerSession:
             client=self._client, model=self._model, messages=self._messages, tool_spec=EMIT_PROPOSED_ACTION_TOOL,
             forced_name="emit_proposed_action", repair_message=_PROPOSER_REPAIR_MESSAGE,
             journal=self._journal, agent="proposer", iteration=iteration,
+            max_tokens=_emit_ceiling(self._model, _EMIT_MAX_TOKENS),
         )
         proposal = ProposedAction.parse(call.arguments)
         self._messages.append(_withheld_reasoning_tool_call_message(call, proposal))
@@ -609,7 +662,7 @@ def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
 
 def _make_evaluate(
     *, client: LLMClient, model: str, journal: Journal, fence_nonce: str,
-    fallback_model: str | None = None,
+    fallback_model: str | None = None, rubric_profile: str = "core",
 ) -> Evaluate:
     def evaluate(ctx: HarnessContext, proposal: ProposedAction, iteration: int) -> EvaluatorVerdict:
         # Fresh trace, every iteration: no history from any previous round, and no
@@ -632,8 +685,31 @@ def _make_evaluate(
         # comment's intent even though neither function's actual code enforces the split
         # itself. Net effect, reported rather than silently accepted: G17 is never
         # actually graded through this composition as built -- see this coder's report.
-        applicable = [c for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+        # Deterministic criteria are free and all of them always run, vetoes
+        # included. The judge criteria are the ones that cost a reasoned finding
+        # each, so the profile trims THOSE -- see rubric.CORE_JUDGE_CRITERIA for
+        # which four carry the argument and why the other four are covered
+        # elsewhere. Nothing about the safety story changes with the profile.
+        applicable = applicable_judge_criteria(prelim, rubric_profile)
         checklist = tuple((c.criterion_id, c.question) for c in applicable)
+        if not checklist:
+            # An empty checklist means there is nothing to ask a judge, which can
+            # happen when every judge criterion is either inapplicable to this
+            # proposal or trimmed by the profile. Calling the model anyway asks it to
+            # grade nothing and gets a structurally-invalid verdict back; skipping it
+            # silently is worse, because the run then ends with no `evaluation` event
+            # and the journal shows a proposal that was never checked at all.
+            #
+            # Neither is acceptable, so this is a typed failure. The deterministic
+            # criteria still ran -- every veto is deterministic -- but a gate that
+            # consulted no judge is not the gate this design claims to have.
+            raise SchemaError(
+                "no judge criterion applies to this proposal under the "
+                f"{rubric_profile!r} rubric profile, so there is nothing for the "
+                "evaluator to grade; set RECON_AGENT_RUBRIC=full or widen "
+                "CORE_JUDGE_CRITERIA.",
+                repair_message="internal error: an empty checklist was assembled.",
+            )
 
         named = next((c for c in ctx.clauses if c.clause_id == proposal.grounding_clause_id), None)
         current = ctx.dossier.get("current") or {}
@@ -689,6 +765,7 @@ def _make_evaluate(
             client=client, model=model, messages=messages, tool_spec=EMIT_EVALUATION_TOOL,
             forced_name="emit_evaluation", repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
             journal=journal, agent="evaluator", iteration=iteration,
+            max_tokens=_emit_ceiling(model, _EVALUATOR_MAX_TOKENS),
         )
         try:
             verdict = EvaluatorVerdict.parse(call.arguments)
@@ -718,6 +795,7 @@ def _make_evaluate(
                 client=client, model=model, messages=messages, tool_spec=EMIT_EVALUATION_TOOL,
                 forced_name="emit_evaluation", repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
                 journal=journal, agent="evaluator", iteration=iteration,
+            max_tokens=_emit_ceiling(model, _EVALUATOR_MAX_TOKENS),
             )
             try:
                 verdict = EvaluatorVerdict.parse(call.arguments)
@@ -749,7 +827,7 @@ def _make_evaluate(
                     tool_spec=EMIT_EVALUATION_TOOL, forced_name="emit_evaluation",
                     repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
                     journal=journal, agent="evaluator", iteration=iteration,
-                    max_tokens=_FALLBACK_MAX_TOKENS,
+                    max_tokens=_emit_ceiling(fallback_model, _FALLBACK_MAX_TOKENS),
                 )
                 verdict = EvaluatorVerdict.parse(call.arguments)
 
@@ -801,6 +879,7 @@ def run_coordinator(
     evaluate = _make_evaluate(
         client=client, model=settings.evaluator_model, journal=journal,
         fence_nonce=tool_ctx.nonce, fallback_model=settings.evaluator_fallback_model,
+        rubric_profile=settings.rubric_profile,
     )
 
     resolved_budgets = budgets or RunBudgets(

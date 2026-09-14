@@ -35,7 +35,7 @@ import pytest
 from recon.agents.grounding import Clause
 from recon.agents.harness import HarnessContext, RunBudgets, run_until
 from recon.agents.journal import Journal
-from recon.agents.rubric import CRITERIA, MAX_ITERATIONS, THRESHOLD, EvaluatorUnavailable
+from recon.agents.rubric import CRITERIA, applicable_judge_criteria, MAX_ITERATIONS, THRESHOLD, EvaluatorUnavailable
 from recon.agents.schemas import (
     ActionEnum,
     CriterionFinding,
@@ -159,7 +159,7 @@ def _judge_applicable(dossier: dict[str, Any], proposal: ProposedAction) -> list
     exclusion for the same reason -- see this coder's report.
     """
     prelim = ScoringInput(proposal=proposal, evaluator_verdict=None, tool_results=(), clauses=(VALID_CLAUSE,), dossier=dossier)
-    return [c.criterion_id for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+    return [c.criterion_id for c in applicable_judge_criteria(prelim)]
 
 
 def _verdict_for(dossier: dict[str, Any], proposal: ProposedAction, overrides: dict[str, str]) -> EvaluatorVerdict:
@@ -291,7 +291,17 @@ def test_a_permanently_vetoed_score_stalls_after_three_flat_rounds_rather_than_r
 #: scenario in which a harness that trusted the evaluator's own optimism, or that
 #: checked the ceiling anywhere but the loop bound itself, could plausibly keep going
 #: past round 5 waiting for a threshold that never arrives.
+#: Criteria that never flip, so the score can climb every round and still never reach
+#: the threshold -- which is what makes the ceiling, rather than the gate, the thing
+#: that stops the loop.
+#:
+#: G6 is in here deliberately and must stay. The other four are all outside
+#: `rubric.CORE_JUDGE_CRITERIA`, so under the default "core" profile they are never
+#: graded at all -- and with nothing left contradicted the run reached `complete` on
+#: its first round and stopped testing the ceiling entirely. A fixture that silently
+#: stops exercising the thing it names is worse than one that fails.
 _PERMANENTLY_STUCK = {
+    "G6_evidence_supports_the_claim": "CONTRADICTED",  # core, and applicable to every proposal
     "G4_figures_are_labelled_correctly": "CONTRADICTED",
     "G9_recommendation_stays_advisory": "CONTRADICTED",
     "G12_action_addresses_reason_codes": "CONTRADICTED",
@@ -299,7 +309,6 @@ _PERMANENTLY_STUCK = {
 }
 #: criterion_id -> the first iteration (0-based) at which it flips SUPPORTED.
 _FLIPS_JUDGE = {
-    "G6_evidence_supports_the_claim": 2,
     "G7_artifacts_are_sufficient": 3,
     "G11_grounding_clause_supports_action": 4,
 }
@@ -321,14 +330,28 @@ def test_the_ceiling_stops_the_loop_even_though_the_score_climbs_every_round(tmp
             overrides[criterion_id] = "SUPPORTED" if iteration >= flip_at else "CONTRADICTED"
         return _verdict_for(_dossier(), proposal_, overrides)
 
-    outcome = run_until(propose, evaluate, _ctx(), journal=_journal(tmp_path))
+    # An explicit threshold, not the shipped default. The subject of this test is that
+    # the CEILING wins over the GATE, so the gate must be the thing that never fires --
+    # and pinning that here stops the test depending on the rubric's weights. It had
+    # been depending on them silently: trimming the judge checklist raised what a
+    # single contradicted criterion scores, the run cleared 80 on its first round, and
+    # the ceiling stopped being exercised at all while the test still passed.
+    budgets = RunBudgets(threshold=95.0)
+    outcome = run_until(propose, evaluate, _ctx(), journal=_journal(tmp_path), budgets=budgets)
 
     assert outcome.kind == "capped"
     assert outcome.iterations_run == MAX_ITERATIONS == 5
-    assert outcome.final_score < THRESHOLD
+    assert outcome.final_score < budgets.threshold
     trajectory = list(outcome.score_trajectory)
-    assert trajectory == sorted(trajectory)
-    assert len(set(trajectory)) == len(trajectory), "every round must score strictly higher than the last"
+    assert trajectory == sorted(trajectory), "the run must never regress -- a stall would stop it for the wrong reason"
+    assert trajectory[-1] > trajectory[0], "the score must genuinely climb, or the ceiling is not what stopped it"
+    # Deliberately NOT "every round strictly higher than the last". The property under
+    # test is that the ceiling beats a run which is improving and never stalls; whether
+    # every single round improves depends on how many criteria the profile grades and
+    # how the fixture's flips happen to land, which is incidental. Asserting it coupled
+    # this test to the rubric's weights, and trimming the checklist broke it while the
+    # thing it names -- the ceiling -- still worked perfectly.
+    assert len(set(trajectory)) >= 4, "the trajectory must move across most rounds"
 
 
 # ═══ 6. the evaluator never receives the proposer's reasoning ═══════════════════
@@ -428,7 +451,10 @@ def test_the_score_trajectory_is_journalled_every_round_and_on_run_finished(tmp_
             overrides[criterion_id] = "SUPPORTED" if iteration >= flip_at else "CONTRADICTED"
         return _verdict_for(_dossier(), proposal_, overrides)
 
-    outcome = run_until(propose, evaluate, _ctx(), journal=journal)
+    # Same explicit threshold as the ceiling test above, and for the same reason: this
+    # test is about the score trajectory being journalled every round, so it needs a
+    # run that uses every round rather than one that clears the gate early.
+    outcome = run_until(propose, evaluate, _ctx(), journal=journal, budgets=RunBudgets(threshold=95.0))
     assert outcome.kind == "capped"
 
     score_events = [e.fields["value"] for e in journal.events if e.kind == "score"]

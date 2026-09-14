@@ -80,6 +80,9 @@ class AgentSettings:
     #: row -- a capacity problem rather than a slip (design doc S10). Set to the same
     #: value as `evaluator_model`, or empty, to disable escalation.
     evaluator_fallback_model: str
+    #: "core" grades the four judge criteria that carry the argument; "full" grades
+    #: all eight. Deterministic criteria, including every veto, always run either way.
+    rubric_profile: str
     investigator_model: str
     max_iterations: int
     threshold: float
@@ -149,7 +152,13 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         # mattered was the day the provider's flash tier stopped answering and the
         # Investigator could not be pointed at a model that worked.
         "investigator_model": env("INVESTIGATOR_MODEL", "deepseek-chat"),
-        "max_iterations": int(env("MAX_ITERATIONS", "5")),
+        # Two, not five. Five is a backstop for a system being calibrated; a
+        # prototype demonstrating the loop needs exactly enough rounds to show that
+        # a critique feeds forward and the proposal changes, which is two. Measured:
+        # every run so far terminated on a gate condition inside two rounds anyway,
+        # so the ceiling was costing wall clock without ever changing an outcome.
+        "max_iterations": int(env("MAX_ITERATIONS", "2")),
+        "rubric_profile": env("RUBRIC", "core"),
         "threshold": float(env("THRESHOLD", "80.0")),
         "max_tool_rounds": 8,
         # 60s, not 120s. A healthy call on this provider is 2-10 seconds; the only

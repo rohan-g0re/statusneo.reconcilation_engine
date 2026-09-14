@@ -37,6 +37,8 @@ from recon.agents.scorers import (
 )
 
 __all__ = [
+    "CORE_JUDGE_CRITERIA",
+    "applicable_judge_criteria",
     "Grader",
     "VerdictLabel",
     "Criterion",
@@ -357,6 +359,64 @@ def merge_findings(*groups: dict[str, CriterionFinding]) -> dict[str, CriterionF
             raise ValueError(f"merge_findings: {sorted(overlap)} graded by more than one SCORERS entry")
         merged.update(group)
     return merged
+
+
+#: The judge criteria a demo run grades, and why these four.
+#:
+#: Every deterministic criterion is free -- it is Python, it costs no tokens and no
+#: latency, so all of them always run, including all four vetoes. The cost is entirely
+#: in the JUDGE criteria: each one asks the model for a reasoned finding with a cited
+#: span, and on a thinking model that is most of the wall clock.
+#:
+#: Eight judge criteria is the right answer for a system being calibrated. It is the
+#: wrong answer for a prototype whose job is to show what the loop DOES, where a
+#: reviewer watching eight near-identical findings scroll past learns nothing the
+#: fourth one did not already tell them. These four are the ones that carry the
+#: argument and are not already covered deterministically:
+#:
+#:   G6  does the evidence actually support the claim   -- the core judgement, and the
+#:                                                         one thing a human cannot
+#:                                                         check mechanically
+#:   G7  are the artifacts sufficient to act            -- is this a recommendation or
+#:                                                         a wish
+#:   G11 does the cited clause support the action       -- grounding is the design's
+#:                                                         whole thesis
+#:   G13 does it abstain when the data is insufficient  -- a named, graded requirement
+#:
+#: Dropped, and covered elsewhere: G4 (figures labelled correctly) sits next to the G3
+#: veto, G9 (stays advisory) next to the G8 veto, G12 and G14 are refinements rather
+#: than arguments. `RECON_AGENT_RUBRIC=full` grades all eight.
+CORE_JUDGE_CRITERIA: frozenset[str] = frozenset(
+    {
+        "G6_evidence_supports_the_claim",
+        "G7_artifacts_are_sufficient",
+        "G11_grounding_clause_supports_action",
+        "G13_abstains_when_insufficient",
+    }
+)
+
+
+def applicable_judge_criteria(prelim, profile: str = "core") -> list:
+    """The judge criteria to put on the evaluator's checklist, for one proposal.
+
+    The single definition. This selection was open-coded in four places -- the
+    coordinator, two fixture recorders and a test helper -- and when the criteria set
+    changed, one of them moved and three did not, which surfaces as
+    `evaluator_structurally_invalid: expected findings for [...] got [...]` from a
+    checklist and a verdict that disagree about what was asked.
+
+    `profile="core"` grades `CORE_JUDGE_CRITERIA`; anything else grades all of them.
+    Deterministic criteria are not selected here and are never trimmed: they cost no
+    tokens, and every veto is deterministic.
+    """
+    return [
+        c
+        for c in CRITERIA
+        if c.grader == "judge"
+        and c.weight > 0.0
+        and c.applies_when(prelim)
+        and (profile != "core" or c.criterion_id in CORE_JUDGE_CRITERIA)
+    ]
 
 
 def run_judge_criteria(ctx: ScoringInput) -> dict[str, CriterionFinding]:

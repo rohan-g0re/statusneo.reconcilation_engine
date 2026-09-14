@@ -26,7 +26,7 @@ from recon.agents.client import LLMResponse, ToolCall
 from recon.agents.config import load_agent_settings
 from recon.agents.harness import HarnessContext
 from recon.agents.journal import Journal
-from recon.agents.rubric import CRITERIA
+from recon.agents.rubric import applicable_judge_criteria
 from recon.agents.schemas import SchemaError
 from recon.agents.scorers import ScoringInput
 from recon.agents.tools import CallLog, ToolContext
@@ -169,7 +169,7 @@ def _judge_applicable_ids(dossier: dict[str, Any], proposal_action_args: dict[st
 
     proposal = ProposedAction.parse(proposal_action_args)
     prelim = ScoringInput(proposal=proposal, evaluator_verdict=None, tool_results=(), clauses=(), dossier=dossier)
-    return [c.criterion_id for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+    return [c.criterion_id for c in applicable_judge_criteria(prelim)]
 
 
 def _evaluator_verdict_args(criterion_ids: list[str], verdict: str = "SUPPORTED") -> dict[str, Any]:

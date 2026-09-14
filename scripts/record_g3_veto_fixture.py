@@ -38,7 +38,7 @@ from recon.agents.grounding import render_clause_index, select_clauses  # noqa: 
 from recon.agents.harness import RunBudgets  # noqa: E402
 from recon.agents.journal import Journal  # noqa: E402
 from recon.agents.roles.coordinator import run_coordinator  # noqa: E402
-from recon.agents.rubric import CRITERIA  # noqa: E402
+from recon.agents.rubric import applicable_judge_criteria  # noqa: E402
 from recon.agents.schemas import ProposedAction  # noqa: E402
 from recon.agents.scorers import ScoringInput  # noqa: E402
 from recon.agents.tools import CallLog, ToolContext  # noqa: E402
@@ -149,7 +149,7 @@ def main() -> int:
     # raises `evaluator_structurally_invalid` instead of the veto failure this fixture
     # exists to demonstrate.
     prelim = ScoringInput(proposal=proposal, evaluator_verdict=None, tool_results=(), clauses=clauses, dossier=dossier)
-    applicable = [c for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+    applicable = applicable_judge_criteria(prelim)
     print("judge checklist for this proposal:", [c.criterion_id for c in applicable])
 
     evaluation_args: dict[str, Any] = {

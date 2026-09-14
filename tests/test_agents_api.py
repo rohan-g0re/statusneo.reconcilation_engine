@@ -35,7 +35,7 @@ from recon.agents import api as agents_api  # noqa: E402
 from recon.agents.client import LLMResponse, ToolCall  # noqa: E402
 from recon.agents.config import load_agent_settings  # noqa: E402
 from recon.agents.grounding import select_clauses  # noqa: E402
-from recon.agents.rubric import CRITERIA, Outcome, Round  # noqa: E402
+from recon.agents.rubric import applicable_judge_criteria, Outcome, Round  # noqa: E402
 from recon.agents.schemas import ActionEnum, CriterionFinding, CriterionVerdict, ProposedAction  # noqa: E402
 from recon.agents.scorers import ScoringInput  # noqa: E402
 from recon.api import dossier as dossier_module  # noqa: E402
@@ -244,7 +244,7 @@ def _applicable_judge_criteria_ids(dossier: dict[str, Any], proposal: ProposedAc
     harness raises ``evaluator_structurally_invalid`` (``roles/coordinator.py``)."""
     clauses = select_clauses(dossier)
     prelim = ScoringInput(proposal=proposal, evaluator_verdict=None, tool_results=(), clauses=clauses, dossier=dossier)
-    return [c.criterion_id for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+    return [c.criterion_id for c in applicable_judge_criteria(prelim)]
 
 
 def _evaluation_args(criterion_ids: list[str]) -> dict[str, Any]:

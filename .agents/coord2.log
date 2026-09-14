@@ -1,0 +1,48 @@
+Traceback (most recent call last):
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\harness.py", line 303, in _evaluate_or_fail_closed
+    return evaluate(ctx, proposal, iteration)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\roles\coordinator.py", line 703, in evaluate
+    call = _emit_structured(
+           ^^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\roles\coordinator.py", line 259, in _emit_structured
+    raise SchemaError(
+recon.agents.schemas.SchemaError: evaluator_no_tool_call: emit_evaluation produced no tool call on 'deepseek-v4-pro' even after one repair turn.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\scripts\agent_smoke.py", line 188, in main
+    outcome = run_coordinator(
+              ^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\roles\coordinator.py", line 827, in run_coordinator
+    return run_until(
+           ^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\harness.py", line 237, in run_until
+    verdict = _evaluate_or_fail_closed(evaluate, ctx, proposal, journal, i, evaluator_model)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\src\recon\agents\harness.py", line 309, in _evaluate_or_fail_closed
+    raise EvaluatorUnavailable(f"evaluator failed at iteration {iteration}: {exc}") from exc
+recon.agents.rubric.EvaluatorUnavailable: evaluator failed at iteration 0: evaluator_no_tool_call: emit_evaluation produced no tool call on 'deepseek-v4-pro' even after one repair turn.
+══════════════════════════════════════════════════════════════════════════════
+E-000006  MEDICAL  cursor 2026-07-01T23:59:59Z
+  disposition   EXCEPTION
+  verdicts      B-10 / C-08
+  reasons       DENIED, DENIED_WITH_REBATE_PAID
+  timeline      10 events, 0 unresolved
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+COORDINATOR  run 8284ec21  model deepseek-v4-pro
+══════════════════════════════════════════════════════════════════════════════
+  RAISED EvaluatorUnavailable: evaluator failed at iteration 0: evaluator_no_tool_call: emit_evaluation produced no tool call on 'deepseek-v4-pro' even after one repair turn.
+
+  journal   C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\data\agent_runs\8284ec218b954116a805ccb7d4839531.jsonl
+  models    {'proposer': 'deepseek-v4-pro', 'evaluator': 'deepseek-v4-pro'}
+  tokens    {'prompt_tokens': 40682, 'completion_tokens': 20665, 'total_tokens': 61347, 'prompt_cache_hit_tokens': 17664, 'prompt_cache_miss_tokens': 23018}
+  tool calls (5):
+    - get_episode({"detail": "essential", "episode_id": "E-000006"})
+    - get_remittance_detail({"episode_id": "E-000006"})
+    - get_cash_match({"episode_id": "E-000006", "include_unallocated_deposits": true})
+    - get_rebate_status({"episode_id": "E-000006"})
+    - calculate_reconciliation({"claim_id": "E-000006"})
