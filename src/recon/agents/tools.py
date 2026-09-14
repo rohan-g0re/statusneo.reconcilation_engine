@@ -33,6 +33,7 @@ dict literal and finding none.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 import sqlite3
@@ -48,7 +49,7 @@ from recon.api import dossier as dossier_module
 from recon.db import connection as db_connection
 from recon.db import repository
 from recon.domain import verdicts
-from recon.domain.enums import AllocationBasis
+from recon.domain.enums import AllocationBasis, RecordKind
 from recon.reference import codes
 from recon.reference import errors as ref_errors
 
@@ -75,6 +76,7 @@ __all__ = [
     "calculate_reconciliation",
     "get_raw_record",
     "create_mock_work_item",
+    "mint_write_token",
 ]
 
 
@@ -99,6 +101,10 @@ class ToolContext:
     run_id: str
     now: str
     nonce: str
+    #: ``None`` means no commit is authorised this run. A non-``None`` value must be
+    #: the exact digest `mint_write_token` produces for the draft being committed --
+    #: since B5, ``create_mock_work_item`` verifies it against the incoming
+    #: arguments rather than accepting any non-``None`` string (reviewer finding 7).
     write_token: str | None
     call_log: "CallLog"
     journal: "Journal"
@@ -157,7 +163,6 @@ def canonical_args(args: dict[str, Any]) -> str:
 
 # ═══ shared constants ════════════════════════════════════════════════════════
 
-_EPISODE_ID_RE = re.compile(r"E-\d{6}")
 _DB_ERROR_MESSAGE = (
     "the reconciliation database could not be read for this call; the harness will retry."
 )
@@ -256,22 +261,26 @@ def _describe_or_none(code: str | None) -> str | None:
 # ═══ the untrusted-text fence, applied to dossier output ════════════════════
 #
 # "Every string reached through Projection.body or Projection.row is feed-derived
-# and is wrapped" (spec_tools.md SS5.2) -- derived from dossier._PROJECTIONS rather
-# than re-enumerated, so a projection key added tomorrow is wrapped automatically
-# and the two can never drift apart. This is the same "derive it, do not enumerate
-# it" argument the spec makes, applied literally: _WRAPPED_FACT_KEYS is built from
-# the live table, not copied from it.
+# and is wrapped" (spec_tools.md SS5.2) -- derived from dossier.RECORD_PROJECTIONS
+# rather than re-enumerated, so a projection key added tomorrow is wrapped
+# automatically and the two can never drift apart. This is the same "derive it, do
+# not enumerate it" argument the spec makes, applied literally: _WRAPPED_FACT_KEYS
+# is built from the live table, not copied from it.
+#
+# B8/reviewer finding 17: this used to read `dossier_module._PROJECTIONS`, another
+# layer's underscore-private. `api/dossier.py` now exports the same table under a
+# public name; `_PROJECTIONS` is kept there too, as an alias, for the other modules
+# that already import the private name directly.
 
 _WRAPPED_FACT_KEYS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
         str(kind): frozenset(projection.body) | frozenset(projection.row)
-        for kind, projection in dossier_module._PROJECTIONS.items()
+        for kind, projection in dossier_module.RECORD_PROJECTIONS.items()
     }
 )
 
 #: Explicit additions that do not come through a Projection (spec_tools.md SS5.2/5.1).
 _CASH_WRAPPED_FACT_KEYS = frozenset({"ach_trace_number", "trn02", "posting_date"})
-_CASH_NOT_WRAPPED = frozenset({"direction", "track", "basis", "allocated_cents"})
 _IDENTITY_WRAPPED_KEYS = frozenset(
     {"drug", "payer", "ndc11", "rx_number", "fill_number", "clm01", "pharmacy_npi", "billing_provider_npi"}
 )
@@ -340,19 +349,50 @@ def _wrap_keyed_list(items: list[dict[str, Any]], nonce: str, path_prefix: str) 
 
 
 def _project_timeline_event(event: dict[str, Any], index: int, nonce: str, *, essential: bool) -> dict[str, Any]:
+    """The one function every read tool uses to turn a raw dossier event into what a
+    model sees (spec_fixes_round1.md B3): wrap first, against the full projection
+    table, THEN trim to the tag's `essential` subset if asked. Wrapping before
+    trimming rather than after is what lets `_wrapped_fact` below pull one
+    non-essential fact out of the same wrapped dict a caller needs to hoist a value
+    to a top-level field (reviewer finding 3: `covered_entity_id` is feed-derived
+    but is not in any rebate tag's `essential`, so it has to come from here, wrapped,
+    not be read off the raw event and skip wrapping entirely).
+    """
     path = f"timeline[{index}]"
-    facts = event.get("facts", {}) or {}
+    wrapped_facts = _wrap_facts(event["tag"], event.get("facts", {}) or {}, nonce, path)
     if essential:
         essential_keys = set(event.get("essential") or ())
-        facts = {k: v for k, v in facts.items() if k in essential_keys}
+        wrapped_facts = {k: v for k, v in wrapped_facts.items() if k in essential_keys}
     return {
         "at": event["at"],
         "occurred_on": event.get("occurred_on"),
         "tag": event["tag"],
         "late": event.get("late", False),
-        "facts": _wrap_facts(event["tag"], facts, nonce, path),
+        "facts": wrapped_facts,
         "source": _wrap_source(event["tag"], event.get("source"), nonce, path),
     }
+
+
+def _wrapped_fact(event: dict[str, Any], index: int, nonce: str, key: str) -> Any:
+    """One fact of one timeline event, wrapped iff the projection table marks that
+    key feed-derived for this tag -- the same rule `_project_timeline_event` applies,
+    exposed for a caller that hoists a single fact out to a top-level field of its
+    own response shape instead of returning the whole projected event.
+
+    This is the fix for reviewer finding 3 (spec_fixes_round1.md B3): before this,
+    ``get_remittance_detail`` and ``get_cash_match`` hand-enumerated which of their
+    own fields to wrap, and the enumeration had drifted -- ``payment_method_code``,
+    ``payment_effective_date`` and the strings inside ``adjustments`` reached the
+    model unwrapped even though every one of them is in the same projection table
+    that already wraps ``get_episode``'s copy of the same fact correctly. Every read
+    tool now goes through this function or `_project_timeline_event`, never its own
+    ad hoc wrap list, so the two can no longer drift apart.
+    """
+    facts = event.get("facts", {}) or {}
+    if key not in facts:
+        return None
+    path = f"timeline[{index}]"
+    return _wrap_facts(event["tag"], {key: facts[key]}, nonce, path)[key]
 
 
 # ═══ 2.1 get_episode — the concise default ══════════════════════════════════
@@ -521,7 +561,12 @@ def get_rebate_status(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
         if not (is_rebate_tag or is_rebate_cash):
             continue
         if covered_entity_id is None:
-            covered_entity_id = event.get("facts", {}).get("covered_entity_id")
+            # reviewer finding 3: covered_entity_id is feed-derived (a TPA_QUALIFICATION/
+            # TPA_REBATE_REQUEST/etc. body field) but is not in any rebate tag's
+            # `essential` subset, so it must come from `_wrapped_fact` directly rather
+            # than from the essential-trimmed projected event below, which would have
+            # dropped it before it was ever wrapped.
+            covered_entity_id = _wrapped_fact(event, i, ctx.nonce, "covered_entity_id")
         rebate_events.append(_project_timeline_event(event, i, ctx.nonce, essential=True))
 
     unresolved_rebate = [
@@ -644,7 +689,16 @@ def _decode_reject_codes(pbm_id: str | None, reject_codes: list[str]) -> list[di
     return out
 
 
-def _decode_adjustment(payer_id: str | None, adjustment: dict[str, Any]) -> dict[str, Any]:
+def _adjustment_meaning(payer_id: str | None, adjustment: dict[str, Any]) -> dict[str, Any]:
+    """The decoded CARC/RARC meaning for one RAW (unwrapped) adjustment.
+
+    Reference lookups run against the code as the feed spelled it, never against
+    wrapped fence text -- decoding has to happen before wrapping. The caller merges
+    this onto the wrapped copy of the same adjustment (`_wrapped_fact(event, i,
+    nonce, "adjustments")`), which carries the feed-derived group_code/reason_code/
+    amount_cents/rarc; this function contributes only the four fields the reference
+    tables produce, which are not feed text and so are never fenced.
+    """
     group_code = adjustment.get("group_code")
     reason_code = adjustment.get("reason_code")
     rarc = adjustment.get("rarc")
@@ -664,15 +718,40 @@ def _decode_adjustment(payer_id: str | None, adjustment: dict[str, Any]) -> dict
         except KeyError:
             rarc_meaning = None
     return {
-        "group_code": group_code,
-        "reason_code": reason_code,
-        "amount_cents": adjustment.get("amount_cents"),
-        "rarc": rarc,
         "meaning": meaning,
         "canonical": canonical,
         "is_patient_responsibility": is_pr,
         "rarc_meaning": rarc_meaning,
     }
+
+
+def _has_collapsed_duplicate_delivery(conn: sqlite3.Connection, raw_id: Any, source_record_id: Any) -> bool:
+    """True iff this record's raw delivery was received more than once (D-1).
+
+    reviewer finding 9 (spec_fixes_round1.md B6): ``duplicate_remittances`` used to
+    be hardwired to ``0`` -- a wrong number born in Python, the one failure class
+    this project promises cannot happen, on a defect the dataset deliberately seeds.
+    This checks the real signature ``_insert_tree`` leaves on a collapsed duplicate
+    (``src/recon/ingest/pipeline.py:307-310``): the second delivery's raw_record row
+    exists, but the idempotency check short-circuits before *any* normalized_record
+    -- parent or child -- is written for it, so that raw_id has zero matching rows.
+
+    A shared ``source_record_id`` alone is not sufficient evidence: this dataset's
+    TPA feed reuses one id sequence across unrelated event types, so two distinct,
+    fully-normalized business records can legitimately share a source_record_id by
+    coincidence. The empty-normalized-record-set check is what tells a genuine
+    re-delivery apart from that coincidence.
+    """
+    if not isinstance(raw_id, int) or not source_record_id:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM raw_record r2"
+        " WHERE r2.source_record_id = :sid AND r2.raw_id != :raw_id"
+        "   AND NOT EXISTS (SELECT 1 FROM normalized_record n WHERE n.raw_id = r2.raw_id)"
+        " LIMIT 1",
+        {"sid": source_record_id, "raw_id": raw_id},
+    ).fetchone()
+    return row is not None
 
 
 def get_remittance_detail(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
@@ -700,7 +779,15 @@ def get_remittance_detail(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
     claim_lines: list[dict[str, Any]] = []
     plas: list[dict[str, Any]] = []
     denied = False
-    duplicate_remittance_count = 0
+    # reviewer finding 9 (B6): the RAW remittance document a duplicate delivery
+    # affects is identified by (raw_id, source_record_id) -- collected as a set
+    # because the SAME raw delivery can reach an episode's timeline as a REMITTANCE
+    # event (a PBM 835 that resolves 1:1 to one claim), as one or more
+    # REMITTANCE_CLAIM_LINE events (a medical 835 covering several claims, where only
+    # the line -- not the parent document -- crosswalks to this episode), or both;
+    # counting per-event rather than per distinct raw delivery would double-count a
+    # single re-delivered document that surfaces both ways.
+    remittance_sources: set[tuple[int, str]] = set()
 
     for i, event in enumerate(payload["timeline"]):
         tag = event["tag"]
@@ -711,62 +798,52 @@ def get_remittance_detail(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
             reject_codes_raw = facts.get("reject_codes") or []
             adjudication = {
                 "at": event["at"],
-                "response_status": _wrap_value(f"{path}.facts.response_status", facts.get("response_status"), ctx.nonce)
-                if facts.get("response_status") is not None
-                else None,
-                "reject_codes": _wrap_value(f"{path}.facts.reject_codes", reject_codes_raw, ctx.nonce),
+                "response_status": _wrapped_fact(event, i, ctx.nonce, "response_status"),
+                "reject_codes": _wrapped_fact(event, i, ctx.nonce, "reject_codes"),
                 "reject_code_meanings": _decode_reject_codes(payer_id, reject_codes_raw),
                 "total_amount_paid_cents": facts.get("total_amount_paid_cents"),
                 "patient_pay_amount_cents": facts.get("patient_pay_amount_cents"),
-                "submission_clarification_code": _wrap_value(
-                    f"{path}.facts.submission_clarification_code", facts.get("submission_clarification_code"), ctx.nonce
-                )
-                if facts.get("submission_clarification_code") is not None
-                else None,
+                "submission_clarification_code": _wrapped_fact(
+                    event, i, ctx.nonce, "submission_clarification_code"
+                ),
                 "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
             }
         elif tag == "MEDICAL_ACKNOWLEDGMENT" and acknowledgment is None:
             acknowledgment = {
                 "at": event["at"],
                 "accepted": facts.get("accepted"),
-                "stc01_composite": _wrap_value(f"{path}.facts.stc01_composite", facts.get("stc01_composite"), ctx.nonce)
-                if facts.get("stc01_composite") is not None
-                else None,
-                "stc12_free_form": _wrap_value(f"{path}.facts.stc12_free_form", facts.get("stc12_free_form"), ctx.nonce)
-                if facts.get("stc12_free_form") is not None
-                else None,
+                "stc01_composite": _wrapped_fact(event, i, ctx.nonce, "stc01_composite"),
+                "stc12_free_form": _wrapped_fact(event, i, ctx.nonce, "stc12_free_form"),
                 "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
             }
         elif tag == "PHARMACY_REVERSAL":
             reversals.append(
                 {
                     "at": event["at"],
-                    "reversal_reason": _wrap_value(
-                        f"{path}.facts.reversal_reason", facts.get("reversal_reason"), ctx.nonce
-                    )
-                    if facts.get("reversal_reason") is not None
-                    else None,
+                    "reversal_reason": _wrapped_fact(event, i, ctx.nonce, "reversal_reason"),
                     "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
                 }
             )
         elif tag == "REMITTANCE":
+            source = event.get("source") or {}
+            if source.get("raw_id") is not None and source.get("record_id"):
+                remittance_sources.add((source["raw_id"], source["record_id"]))
             remittances.append(
                 {
                     "at": event["at"],
                     "occurred_on": event.get("occurred_on"),
                     "late": event.get("late", False),
-                    "trn02": _wrap_value(f"{path}.facts.trn02", facts.get("trn02"), ctx.nonce)
-                    if facts.get("trn02") is not None
-                    else None,
+                    "trn02": _wrapped_fact(event, i, ctx.nonce, "trn02"),
                     "amount_cents": facts.get("amount_cents"),
-                    "payer_name": _wrap_value(f"{path}.facts.payer_name", facts.get("payer_name"), ctx.nonce)
-                    if facts.get("payer_name") is not None
-                    else None,
-                    "payer_tin": _wrap_value(f"{path}.facts.payer_tin", facts.get("payer_tin"), ctx.nonce)
-                    if facts.get("payer_tin") is not None
-                    else None,
-                    "payment_method_code": facts.get("payment_method_code"),
-                    "payment_effective_date": facts.get("payment_effective_date"),
+                    # reviewer finding 3: payer_name/payer_tin were already wrapped here;
+                    # payment_method_code and payment_effective_date were not, even
+                    # though both are in REMITTANCE's projection body alongside them.
+                    # Routing all four through `_wrapped_fact` is what makes that kind
+                    # of partial coverage impossible to reintroduce.
+                    "payer_name": _wrapped_fact(event, i, ctx.nonce, "payer_name"),
+                    "payer_tin": _wrapped_fact(event, i, ctx.nonce, "payer_tin"),
+                    "payment_method_code": _wrapped_fact(event, i, ctx.nonce, "payment_method_code"),
+                    "payment_effective_date": _wrapped_fact(event, i, ctx.nonce, "payment_effective_date"),
                     "claim_line_count": facts.get("claim_line_count"),
                     "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
                 }
@@ -775,28 +852,31 @@ def get_remittance_detail(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
             clp02 = facts.get("clp02_claim_status_code")
             if clp02 == codes.CLP02_DENIED:
                 denied = True
-            adjustments = [_decode_adjustment(payer_id, a) for a in (facts.get("adjustments") or [])]
+            # reviewer finding 3: the raw adjustments carry group_code/reason_code/rarc,
+            # which get_episode's generic recursive wrap already fences; this hand-built
+            # dict used to rebuild them unwrapped. Decode the meaning from the raw code
+            # (a reference lookup must never run against fenced text), then take the
+            # feed-derived fields from the wrapped copy of the same list.
+            raw_adjustments = facts.get("adjustments") or []
+            meanings = [_adjustment_meaning(payer_id, a) for a in raw_adjustments]
+            wrapped_adjustments = _wrapped_fact(event, i, ctx.nonce, "adjustments") or []
+            adjustments = [{**wrapped, **meaning} for wrapped, meaning in zip(wrapped_adjustments, meanings)]
+            line_source = event.get("source") or {}
+            if line_source.get("raw_id") is not None and line_source.get("record_id"):
+                remittance_sources.add((line_source["raw_id"], line_source["record_id"]))
             claim_lines.append(
                 {
                     "at": event["at"],
-                    "clp01": _wrap_value(f"{path}.facts.clp01", facts.get("clp01"), ctx.nonce)
-                    if facts.get("clp01") is not None
-                    else None,
-                    "clp07": _wrap_value(f"{path}.facts.clp07", facts.get("clp07"), ctx.nonce)
-                    if facts.get("clp07") is not None
-                    else None,
+                    "clp01": _wrapped_fact(event, i, ctx.nonce, "clp01"),
+                    "clp07": _wrapped_fact(event, i, ctx.nonce, "clp07"),
                     "clp02_claim_status_code": clp02,
                     "clp02_meaning": _CLP02_MEANINGS.get(clp02),
                     "charge_cents": facts.get("charge_cents"),
                     "payment_cents": facts.get("payment_cents"),
                     "patient_responsibility_cents": facts.get("patient_responsibility_cents"),
                     "adjustments": adjustments,
-                    "service_line": _wrap_value(f"{path}.facts.service_line", facts.get("service_line"), ctx.nonce)
-                    if facts.get("service_line") is not None
-                    else None,
-                    "service_lines": _wrap_value(f"{path}.facts.service_lines", facts.get("service_lines"), ctx.nonce)
-                    if facts.get("service_lines") is not None
-                    else None,
+                    "service_line": _wrapped_fact(event, i, ctx.nonce, "service_line"),
+                    "service_lines": _wrapped_fact(event, i, ctx.nonce, "service_lines"),
                     "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
                 }
             )
@@ -811,16 +891,26 @@ def get_remittance_detail(ctx: ToolContext, *, episode_id: str) -> ToolEnvelope:
             plas.append(
                 {
                     "at": event["at"],
-                    "reason_code": reason_code,
+                    # reviewer finding 3: reason_code is in PROVIDER_LEVEL_ADJUSTMENT's
+                    # projection body (alongside "reference", which WAS already wrapped
+                    # here) but was returned raw.
+                    "reason_code": _wrapped_fact(event, i, ctx.nonce, "reason_code"),
                     "amount_cents": facts.get("amount_cents"),
                     "meaning": meaning,
                     "sign": sign,
-                    "reference": _wrap_value(f"{path}.facts.reference", facts.get("reference"), ctx.nonce)
-                    if facts.get("reference") is not None
-                    else None,
+                    "reference": _wrapped_fact(event, i, ctx.nonce, "reference"),
                     "source": _wrap_source(tag, event.get("source"), ctx.nonce, path),
                 }
             )
+
+    # reviewer finding 9 (B6): counted from real raw_record/normalized_record state
+    # (see `_has_collapsed_duplicate_delivery`), never fabricated -- a wrong number
+    # born in Python is the one failure class this project promises cannot happen.
+    duplicate_remittance_count = sum(
+        1
+        for raw_id, record_id in remittance_sources
+        if _has_collapsed_duplicate_delivery(ctx.conn, raw_id, record_id)
+    )
 
     data: dict[str, Any] = {
         "_untrusted_nonce": ctx.nonce,
@@ -906,7 +996,12 @@ _MATCH_STRENGTH: Mapping[AllocationBasis, str] = MappingProxyType(
         AllocationBasis.RESIDUAL: "UNATTRIBUTED",
     }
 )
-assert set(_MATCH_STRENGTH) == set(AllocationBasis), "match-strength table must cover every AllocationBasis"
+# B8/reviewer finding 17: `assert` vanishes under `python -O` (the register at
+# `src/recon/api/dossier.py:463-478` uses the same `raise RuntimeError` house
+# pattern for exactly this reason -- a guard whose only job is to fire at import
+# time must not depend on how the interpreter was invoked).
+if set(_MATCH_STRENGTH) != set(AllocationBasis):  # pragma: no cover - guard whose job is to never fire
+    raise RuntimeError("match-strength table must cover every AllocationBasis")
 
 
 def get_cash_match(
@@ -957,23 +1052,42 @@ def get_cash_match(
         " ORDER BY n.norm_id",
         {"episode_id": episode_id, "cursor": ctx.cursor},
     ).fetchall()
+    # reviewer finding 3 (B3): this section reads the bank canonical body directly off
+    # SQL rather than through a dossier timeline event, so it used to hand-wrap three
+    # of the seven feed-derived BANK_TRANSACTION fields (description/company_name/
+    # company_entry_description) and silently skip posting_date, direction and
+    # company_id -- all three of which are in the same projection body. Routed
+    # through `_wrap_facts` with the projection-derived key set for this record kind
+    # instead, exactly as every other tool does, so the coverage can't drift again.
+    # This also corrects a pre-existing key-name bug: the canonical JSON stores this
+    # field as "direction" (src/recon/ingest/adapters.py:784), not "type", so the
+    # unwrapped predecessor of this code always read None here.
+    bank_tag = str(RecordKind.BANK_TRANSACTION)
     bank_transactions: list[dict[str, Any]] = []
     for row in bank_rows:
         body = json.loads(row["canonical"]) if row["canonical"] else {}
         path = f"bank_transactions[{len(bank_transactions)}]"
+        raw_facts = {
+            "posting_date": body.get("posting_date"),
+            "description": body.get("description"),
+            "company_name": body.get("company_name"),
+            "company_id": body.get("company_id"),
+            "company_entry_description": body.get("company_entry_description"),
+            "direction": body.get("direction"),
+            "trn02": row["trn02"],
+        }
+        wrapped = _wrap_facts(bank_tag, raw_facts, ctx.nonce, path)
         bank_transactions.append(
             {
                 "at": row["received_at"],
-                "direction": body.get("type"),
+                "direction": wrapped["direction"],
                 "amount_cents": row["amount_cents"],
-                "posting_date": body.get("posting_date"),
-                "description": _wrap_value(f"{path}.description", body.get("description"), ctx.nonce),
-                "company_name": _wrap_value(f"{path}.company_name", body.get("company_name"), ctx.nonce),
-                "company_entry_description": _wrap_value(
-                    f"{path}.company_entry_description", body.get("company_entry_description"), ctx.nonce
-                ),
-                "company_id": body.get("company_id"),
-                "trn02": _wrap_value(f"{path}.trn02", row["trn02"], ctx.nonce) if row["trn02"] else None,
+                "posting_date": wrapped["posting_date"],
+                "description": wrapped["description"],
+                "company_name": wrapped["company_name"],
+                "company_entry_description": wrapped["company_entry_description"],
+                "company_id": wrapped["company_id"],
+                "trn02": wrapped["trn02"] if row["trn02"] else None,
                 "running_balance_cents": (
                     int(round(float(body["running_balance"]) * 100)) if body.get("running_balance") else None
                 ),
@@ -1281,6 +1395,14 @@ def _redact_payload(payload: str) -> tuple[str, list[str]] | None:
         return f"{match.group('key')}{match.group('sep')}{_REDACTED_PHI}"
 
     text = _KV_PATTERN.sub(_sub, payload)
+    if not removed_kv and any(key in payload for key in _PHI_KEYS):
+        # reviewer finding 16: this fail-closed branch was unreachable because this
+        # function never returned None. A payload that is neither a JSON object nor
+        # matched by the keyed key=value fallback, but still names a PHI field
+        # somewhere the fallback's regex could not parse, must refuse rather than
+        # claim "0 keys redacted" and return the text anyway -- that would be
+        # reporting a payload as safe when it is merely unparsed.
+        return None
     return text, sorted(removed_kv)
 
 
@@ -1445,6 +1567,29 @@ _SCHEMA_WRITE: dict[str, Any] = {
 }
 
 
+def mint_write_token(*, episode_id: str, from_verdict_id: int | str, recommended_action: str, summary: str) -> str:
+    """The operator's confirmation, bound to the exact draft they saw.
+
+    reviewer finding 7 (spec_fixes_round1.md B5): before this, ``write_token``
+    authorised *any* commit merely by being non-``None`` -- once an operator
+    confirmed one draft, ``dry_run=false`` would succeed for a different episode, a
+    different action or a different summary within the same run. The digest is a
+    blake2b over ``episode_id|from_verdict_id|recommended_action|summary`` (the
+    ``summary`` being the exact stored form -- artifacts marker included -- the
+    draft showed the operator), so a token minted for one draft verifies against
+    that draft alone. The API layer calls this once, at the human gate, and hands
+    the digest back as ``write_token``; ``create_mock_work_item`` recomputes it from
+    the incoming arguments and refuses a mismatch with `hmac.compare_digest`.
+
+    ``from_verdict_id`` is ``work_item.from_verdict_id``'s own type (an integer
+    primary key), never model-supplied, so it is accepted as either and always
+    stringified before hashing -- the digest must be stable regardless of which
+    caller passes an ``int`` and which passes the ``str`` a JSON round-trip left it as.
+    """
+    material = "|".join((episode_id, str(from_verdict_id), recommended_action, summary))
+    return hashlib.blake2b(material.encode("utf-8"), digest_size=16).hexdigest()
+
+
 def _existing_work_item_payload(row: sqlite3.Row, *, dry_run: bool) -> dict[str, Any]:
     summary, artifacts = parse_artifacts(row["summary"])
     return {
@@ -1522,17 +1667,36 @@ def create_mock_work_item(
         )
     from_verdict_id = verdict.verdict_id
 
-    if not dry_run and ctx.write_token is None:
-        return err(
-            "not_permitted",
-            "committing a work item requires operator confirmation. Re-call with dry_run=true to "
-            "produce the draft; the reviewer accepts it in the interface, which is what authorises "
-            "the write.",
-        )
-
     stored_summary = summary.strip()
     if artifacts:
         stored_summary += ARTIFACT_MARKER + "; ".join(a.strip() for a in artifacts)
+
+    if not dry_run:
+        if ctx.write_token is None:
+            return err(
+                "not_permitted",
+                "committing a work item requires operator confirmation. Re-call with dry_run=true "
+                "to produce the draft; the reviewer accepts it in the interface, which is what "
+                "authorises the write.",
+            )
+        # reviewer finding 7 (B5): the token must authorise THIS exact draft, not
+        # merely be present. Recomputed from the incoming arguments -- the same
+        # material `mint_write_token` was given at the human gate -- and compared in
+        # constant time so a mismatch cannot be timed.
+        expected_token = mint_write_token(
+            episode_id=episode_id,
+            from_verdict_id=from_verdict_id,
+            recommended_action=recommended_action,
+            summary=stored_summary,
+        )
+        if not hmac.compare_digest(ctx.write_token, expected_token):
+            return err(
+                "not_permitted",
+                "the write token does not authorise this exact draft: the episode, verdict, action "
+                "and summary must match what the operator confirmed. Re-call with dry_run=true to "
+                "get a fresh draft and have the operator confirm this specific one before retrying "
+                "the commit.",
+            )
 
     select_sql = (
         "SELECT work_item_id, episode_id, from_verdict_id, recommended_action, created_at,"
@@ -1596,6 +1760,18 @@ def create_mock_work_item(
                 f'{existing["created_at"]} by {existing["created_by"]}). Nothing was written.'
             )
             return ok(data, message)
+
+    # Journal.py's `work_item_written` kind (spec_fixes_round1.md C6) is named for
+    # this layer's only write and, before this, nothing ever emitted it. Fired once
+    # a row genuinely landed -- not on the existing-item or dry-run returns above,
+    # both of which write nothing.
+    ctx.journal.event(
+        "work_item_written",
+        work_item_id=work_item_id,
+        episode_id=episode_id,
+        from_verdict_id=from_verdict_id,
+        recommended_action=recommended_action,
+    )
 
     data = {
         "created": True,
@@ -1779,13 +1955,31 @@ def dispatch(
         if prop_name not in args and "default" in prop_schema:
             args[prop_name] = prop_schema["default"]
 
+    # reviewer finding 5: a missing required argument used to reach `spec.fn(**args)`
+    # unchecked, raise a bare TypeError there, and get folded by the `except
+    # Exception` below into `db_error` -- a false, *retryable* claim about the
+    # database that made the harness re-issue the identical broken call and burn
+    # the tool budget on a lie. Required arguments are validated here instead, and
+    # named explicitly, before the function is ever invoked.
+    missing = [p for p in spec.parameters.get("required", ()) if p not in args]
+    if missing:
+        return err(
+            "invalid_input",
+            f"missing required argument(s) {sorted(missing)} for {name}. Required: "
+            f'{sorted(spec.parameters.get("required", []))}.',
+        )
+
     violation = _provenance_violation(ctx, args)
     if violation is not None:
         if not ctx.call_log.suppressed:
+            # Decision 3 (spec_fixes_round1.md): journal fields are `name`/
+            # `arguments`, matching what `journal.derive_state` reads -- not
+            # `tool`/`args`, which reconstructed as empty on every real run
+            # (reviewer finding 2).
             ctx.journal.event(
                 "injection_attempt_recorded",
-                tool=name,
-                args=args,
+                name=name,
+                arguments=args,
                 iteration=iteration,
                 severity="warn",
             )
@@ -1806,25 +2000,28 @@ def dispatch(
             )
 
     if not ctx.call_log.suppressed:
-        ctx.journal.event("tool_call", tool=name, args=args, iteration=iteration)
+        ctx.journal.event("tool_call", name=name, arguments=args, iteration=iteration)
 
     start = time.perf_counter()
     try:
         result = spec.fn(ctx, **args)
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
         ctx.journal.event(
             "tool_result",
-            tool=name,
+            name=name,
             status="error",
             error_type="db_error",
             iteration=iteration,
-            exc_info=True,
+            # B8/reviewer finding 17 (house style): repr(exc), never the literal
+            # `exc_info=True` -- a bare boolean records that a failure happened and
+            # discards which one, which is exactly what an audit trail must not do.
+            exc_info=repr(exc),
         )
         return err("db_error", _DB_ERROR_MESSAGE)
     except Exception as exc:  # pragma: no cover - defensive: no exception should escape
         ctx.journal.event(
             "tool_result",
-            tool=name,
+            name=name,
             status="error",
             error_type="db_error",
             iteration=iteration,
@@ -1836,7 +2033,7 @@ def dispatch(
     if not ctx.call_log.suppressed:
         ctx.journal.event(
             "tool_result",
-            tool=name,
+            name=name,
             status=result["status"],
             error_type=result["error_type"],
             bytes=len(json.dumps(result["data"], default=str)),

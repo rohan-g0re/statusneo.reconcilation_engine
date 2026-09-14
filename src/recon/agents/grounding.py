@@ -27,6 +27,8 @@ produces the byte-identical clause list (T10, below).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import hashlib
 import json
 import os
@@ -52,6 +54,7 @@ __all__ = [
     "GRAPH_PATH",
     "ALL_CLAUSES",
     "select_clauses",
+    "render_clause_index",
     "load_graph",
 ]
 
@@ -318,7 +321,41 @@ def load_graph(path: Path) -> tuple[dict[str, dict[str, Any]], int]:
 
             row_type = row.get("type")
             if row_type == "entity":
+                # reviewer finding 12 (spec_fixes_round1.md C5): a row missing `name`,
+                # `entityType` or `observations` used to raise a bare `KeyError` deep
+                # inside `_build_clauses`, far from this line number. Worse: an
+                # `observations` value that is a *string* rather than a list raised
+                # nothing at all -- `enumerate("abc")` iterates per character, so a
+                # string-shaped `observations` silently minted one garbage clause per
+                # letter. Both are caught here, at load time, with the offending line.
+                for key in ("name", "entityType", "observations"):
+                    if key not in row:
+                        raise GroundingContractError(
+                            f"{path}:{lineno} is an entity row missing {key!r}: {row!r}"
+                        )
                 name = row["name"]
+                if not isinstance(name, str) or not name:
+                    raise GroundingContractError(
+                        f"{path}:{lineno} has a non-string or empty 'name': {row!r}"
+                    )
+                if not isinstance(row["entityType"], str) or not row["entityType"]:
+                    raise GroundingContractError(
+                        f"{path}:{lineno} entity {name!r} has a non-string or empty "
+                        f"'entityType': {row!r}"
+                    )
+                observations = row["observations"]
+                if not isinstance(observations, list):
+                    raise GroundingContractError(
+                        f"{path}:{lineno} entity {name!r} has 'observations' of type "
+                        f"{type(observations).__name__}, not a list -- a string would "
+                        "iterate per character (enumerate('abc') yields 3 items) and mint "
+                        f"one garbage clause per letter with no error at all: {row!r}"
+                    )
+                if not all(isinstance(obs, str) for obs in observations):
+                    raise GroundingContractError(
+                        f"{path}:{lineno} entity {name!r} has a non-string element in "
+                        f"'observations': {row!r}"
+                    )
                 if name in entities:
                     duplicates.add(name)
                 entities[name] = row
@@ -469,5 +506,40 @@ def select_clauses(dossier: dict[str, Any]) -> tuple[Clause, ...]:
         if predicate(dossier):
             push(names)
 
-    clauses = [c for name in ordered[:MAX_ENTITIES] for c in _CLAUSES_BY_ENTITY[name]]
-    return tuple(clauses[:MAX_CLAUSES])
+    # reviewer finding 11 (spec_fixes_round1.md C4): `clauses[:MAX_CLAUSES]` on the
+    # flattened list truncated mid-entity whenever an entity's clauses straddled the
+    # boundary -- presenting that entity's caveats without its claim (or vice versa),
+    # which the docstring above already says is worse than omitting the entity
+    # altogether. Whole entities are dropped instead: walk the entity-capped order and
+    # stop *before* adding an entity that would push the running total over budget.
+    clauses: list[Clause] = []
+    for name in ordered[:MAX_ENTITIES]:
+        entity_clauses = _CLAUSES_BY_ENTITY[name]
+        if len(clauses) + len(entity_clauses) > MAX_CLAUSES:
+            break
+        clauses.extend(entity_clauses)
+    return tuple(clauses)
+
+
+def render_clause_index(clauses: Sequence[Clause]) -> str:
+    """The clauses as the text a prompt actually carries.
+
+    Both roles take ``grounding_clause_index`` as a *string*, and the proposer must
+    cite one clause by id -- so the rendering has to make the id quotable and the
+    claim readable in the same line. Grouped by entity, because the entity name is
+    the retrieval handle a model reasons with ("the 340B rebate track says...") while
+    the id is only the citation token.
+
+    This lives here rather than in each caller because a second rendering of the same
+    clauses is a second thing to keep in step with the citation scorer, which resolves
+    ``"KG:<entity name>"`` against ``Clause.entity``. One renderer, one authority --
+    the same lesson as ``render_tool_result`` (reviewer finding 18).
+    """
+    lines: list[str] = []
+    current_entity: str | None = None
+    for clause in clauses:
+        if clause.entity != current_entity:
+            current_entity = clause.entity
+            lines.append(f"\n### {clause.entity}  ({clause.entity_type})")
+        lines.append(f"- [{clause.clause_id}] {clause.text}")
+    return "\n".join(lines).strip()

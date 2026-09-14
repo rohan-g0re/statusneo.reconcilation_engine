@@ -23,6 +23,7 @@ import inspect
 import json
 import secrets
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -32,8 +33,26 @@ from recon.api import app as api_app
 from recon.api import dossier as dossier_module
 from recon.config import load_settings
 from recon.db import connection as db_connection
+from recon.domain.enums import AllocationBasis
 
 TOOLS_SOURCE = Path(tools.__file__).read_text(encoding="utf-8")
+
+_SRC_ROOT = Path(envelope.__file__).resolve().parents[2]  # .../src
+
+
+def test_the_dead_fence_format_appears_nowhere_in_src():
+    """Decision 1 (spec_fixes_round1.md): `envelope.py` is the single fence
+    authority; the angle-bracketed shape the prompts used to teach was never
+    emitted by any tool and must not survive anywhere in `src/`, not even as a
+    comment describing the old bug (which is why this module's own comments
+    describe it without spelling it out)."""
+    dead_literal = "UNTRUSTED_FEED_TEXT"
+    offenders = []
+    for path in _SRC_ROOT.rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        if dead_literal in text:
+            offenders.append(str(path.relative_to(_SRC_ROOT)))
+    assert not offenders, f"dead fence literal {dead_literal!r} still present in: {offenders}"
 
 
 # ═══ fixtures ════════════════════════════════════════════════════════════════
@@ -192,13 +211,179 @@ def test_untrusted_free_text_is_fenced_with_the_run_nonce_and_the_nonce_differs_
         conn.close()
 
 
-def test_every_projected_fact_key_is_a_subset_of_the_wrapped_set():
-    """spec_tools.md S5.2's invariant, true by construction: _WRAPPED_FACT_KEYS is
-    *derived* from dossier._PROJECTIONS rather than a hand-copied list, so this can
-    only fail if someone hard-codes a competing table later."""
-    for kind, projection in dossier_module._PROJECTIONS.items():
-        wrapped = tools._WRAPPED_FACT_KEYS[str(kind)]
-        assert (set(projection.body) | set(projection.row)) <= wrapped
+def test_open_marker_and_close_marker_compose_to_the_same_bytes_wrap_emits():
+    """spec_fixes_round1.md B1 (Decision 1): envelope.py is the single fence
+    authority; wrap() is now built FROM open_marker/close_marker rather than the
+    other way around, so this pins that composition rather than duplicating it."""
+    field_path, nonce, content = "identity.drug", "cafef00d", "ATORVASTATIN 20MG"
+    assert envelope.wrap(field_path, content, nonce) == (
+        envelope.open_marker(field_path, nonce) + content + envelope.close_marker(nonce)
+    )
+
+
+def test_contains_wrapper_markers_detects_a_closing_marker_alone():
+    """Reviewer finding 17: the previous implementation tested for "⟧/UNTRUSTED:" --
+    a CLOSE bracket -- where every marker this module emits starts with the OPEN
+    bracket, so a lone closing marker (with no matching opener in the same string)
+    could never be detected. This is the exact shape a model could copy forward
+    without the string ever containing a complete, matched pair."""
+    lone_closer = "...and that concludes the payer's note" + envelope.close_marker("deadbeef")
+    assert envelope.contains_wrapper_markers(lone_closer) is True
+    assert envelope.contains_wrapper_markers("ordinary text with no markers at all") is False
+
+
+def test_fence_regex_with_a_concrete_nonce_matches_only_that_runs_fence():
+    wrapped = envelope.wrap("x", "payload", "aaaaaaaa")
+    assert envelope.fence_regex("aaaaaaaa").fullmatch(wrapped)
+    assert envelope.fence_regex("bbbbbbbb").fullmatch(wrapped) is None
+    assert envelope.fence_regex(None).fullmatch(wrapped)  # None matches any nonce
+
+
+_ANY_FENCE = envelope.fence_regex()
+
+
+def _assert_all_leaves_fenced(value: Any, *, label: str) -> None:
+    """Every string anywhere inside `value` must be a complete, well-formed
+    UNTRUSTED fence. Mirrors `tools._wrap_value`'s own recursion (string / list /
+    dict / pass-through-otherwise), so it is the precise inverse check of what
+    wrapping is supposed to have done to this value.
+    """
+    if value is None:
+        return
+    if isinstance(value, str):
+        assert _ANY_FENCE.fullmatch(value), f"{label}: unfenced feed-derived string {value!r}"
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            _assert_all_leaves_fenced(item, label=f"{label}[{i}]")
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _assert_all_leaves_fenced(v, label=f"{label}.{k}")
+    # numbers/bools pass through unwrapped by design -- nothing to check.
+
+
+def test_every_feed_derived_field_is_fenced_across_all_four_read_tools(demo_conn, tmp_path):
+    """spec_fixes_round1.md B3 (reviewer finding 3).
+
+    Replaces `test_every_projected_fact_key_is_a_subset_of_the_wrapped_set`, which
+    asserted A subset-of (A union B) where both sides were derived from
+    `dossier._PROJECTIONS` -- a tautology that never called a tool or inspected a
+    single byte of real output. That is exactly how finding 3 shipped:
+    `get_remittance_detail` and `get_cash_match` hand-enumerated which of their own
+    fields to wrap, the enumeration drifted, and no test ever noticed because none
+    of them exercised those two tools' actual return values.
+
+    This calls all four episode-scoped read tools against the real demo database,
+    for every episode in it, and asserts every string leaf under a feed-derived
+    field name -- covered_entity_id, payment_method_code, payment_effective_date,
+    every adjustment's group_code/reason_code/rarc, and every BANK_TRANSACTION body
+    field including posting_date/direction/company_id -- is a complete fence in the
+    tool's own JSON-shaped output.
+    """
+    settings = load_settings("demo")
+    cursor = settings.max_cursor
+    episode_ids = [r["episode_id"] for r in demo_conn.execute("SELECT episode_id FROM episode ORDER BY episode_id")]
+    checked = 0
+
+    for episode_id in episode_ids:
+        ctx = make_ctx(demo_conn, tmp_path, cursor=cursor)
+
+        episode_result = tools.dispatch(ctx, "get_episode", {"episode_id": episode_id, "detail": "full"})
+        assert episode_result["status"] == "ok", episode_result["message"]
+        for event in episode_result["data"]["timeline"]:
+            wrapped_keys = tools._wrapped_keys_for_tag(event["tag"])
+            for key, value in event["facts"].items():
+                if key in wrapped_keys:
+                    checked += 1
+                    _assert_all_leaves_fenced(value, label=f"get_episode({episode_id}).timeline.facts.{key}")
+        for key in tools._IDENTITY_WRAPPED_KEYS:
+            value = episode_result["data"]["identity"].get(key)
+            if value is not None:
+                checked += 1
+                _assert_all_leaves_fenced(value, label=f"get_episode({episode_id}).identity.{key}")
+
+        rebate_result = tools.dispatch(ctx, "get_rebate_status", {"episode_id": episode_id})
+        assert rebate_result["status"] == "ok", rebate_result["message"]
+        if rebate_result["data"]["covered_entity_id"] is not None:
+            checked += 1
+            _assert_all_leaves_fenced(
+                rebate_result["data"]["covered_entity_id"],
+                label=f"get_rebate_status({episode_id}).covered_entity_id",
+            )
+        for event in rebate_result["data"]["events"]:
+            wrapped_keys = tools._wrapped_keys_for_tag(event["tag"])
+            for key, value in event["facts"].items():
+                if key in wrapped_keys:
+                    checked += 1
+                    _assert_all_leaves_fenced(value, label=f"get_rebate_status({episode_id}).events.facts.{key}")
+
+        remit_result = tools.dispatch(ctx, "get_remittance_detail", {"episode_id": episode_id})
+        assert remit_result["status"] == "ok", remit_result["message"]
+        rdata = remit_result["data"]
+        for block_name, keys in (
+            ("adjudication", ("response_status", "reject_codes", "submission_clarification_code")),
+            ("acknowledgment", ("stc01_composite", "stc12_free_form")),
+        ):
+            block = rdata.get(block_name)
+            if block:
+                for key in keys:
+                    if block.get(key) is not None:
+                        checked += 1
+                        _assert_all_leaves_fenced(
+                            block[key], label=f"get_remittance_detail({episode_id}).{block_name}.{key}"
+                        )
+        for reversal in rdata["reversals"]:
+            if reversal.get("reversal_reason") is not None:
+                checked += 1
+                _assert_all_leaves_fenced(
+                    reversal["reversal_reason"], label=f"get_remittance_detail({episode_id}).reversals.reversal_reason"
+                )
+        for remittance in rdata["remittances"]:
+            for key in ("trn02", "payer_name", "payer_tin", "payment_method_code", "payment_effective_date"):
+                if remittance.get(key) is not None:
+                    checked += 1
+                    _assert_all_leaves_fenced(
+                        remittance[key], label=f"get_remittance_detail({episode_id}).remittances.{key}"
+                    )
+        for line in rdata["claim_lines"]:
+            for key in ("clp01", "clp07", "service_line", "service_lines"):
+                if line.get(key) is not None:
+                    checked += 1
+                    _assert_all_leaves_fenced(line[key], label=f"get_remittance_detail({episode_id}).claim_lines.{key}")
+            for adj in line["adjustments"]:
+                for key in ("group_code", "reason_code", "rarc"):
+                    if adj.get(key) is not None:
+                        checked += 1
+                        _assert_all_leaves_fenced(
+                            adj[key], label=f"get_remittance_detail({episode_id}).claim_lines.adjustments.{key}"
+                        )
+        for pla in rdata["provider_level_adjustments"]:
+            for key in ("reason_code", "reference"):
+                if pla.get(key) is not None:
+                    checked += 1
+                    _assert_all_leaves_fenced(
+                        pla[key], label=f"get_remittance_detail({episode_id}).provider_level_adjustments.{key}"
+                    )
+
+        cash_result = tools.dispatch(ctx, "get_cash_match", {"episode_id": episode_id})
+        assert cash_result["status"] == "ok", cash_result["message"]
+        for tx in cash_result["data"]["bank_transactions"]:
+            # NOT "allocations[].direction", which is a computed IN/OUT/NONE literal
+            # sharing a field name with this feed-derived one -- scoping to
+            # bank_transactions specifically is what keeps that collision from
+            # producing a false failure.
+            for key in (
+                "posting_date", "direction", "description", "company_name",
+                "company_entry_description", "company_id", "trn02",
+            ):
+                if tx.get(key) is not None:
+                    checked += 1
+                    _assert_all_leaves_fenced(tx[key], label=f"get_cash_match({episode_id}).bank_transactions.{key}")
+        for allocation in cash_result["data"]["allocations"]:
+            assert allocation["direction"] in ("IN", "OUT", "NONE"), (
+                "allocations[].direction is a computed literal, never feed text, and must never be fenced"
+            )
+
+    assert checked > 20, "expected to exercise a meaningful number of feed-derived fields across the demo dataset"
 
 
 # ═══ the registry: declared once, used twice (spec_tools.md S6) ═════════════
@@ -613,18 +798,35 @@ def test_commit_without_a_write_token_is_not_permitted(demo_conn, tmp_path):
     assert after == before
 
 
+def _mint_token_for_draft(draft: dict) -> str:
+    """Mint the write token an operator confirming `draft` (a dry_run=True result's
+    ``data``) would be shown -- the real flow B5 establishes: the API layer mints
+    from the draft the human actually saw, never from an arbitrary string."""
+    return tools.mint_write_token(
+        episode_id=draft["episode_id"],
+        from_verdict_id=draft["from_verdict_id"],
+        recommended_action=draft["recommended_action"],
+        summary=draft["summary"],
+    )
+
+
 def test_commit_with_a_write_token_creates_exactly_one_row_and_repeating_it_is_idempotent(
     demo_conn, tmp_path
 ):
     before = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
-    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor, write_token="operator-confirmed")
     args = {
         "episode_id": "E-000022",
         "recommended_action": "APPEAL",
         "summary": "Appeal the denial citing the medical necessity documentation on file.",
-        "dry_run": False,
     }
-    first = tools.dispatch(ctx, "create_mock_work_item", args)
+    settings = load_settings("demo")
+    draft_ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor)
+    draft = tools.dispatch(draft_ctx, "create_mock_work_item", {**args, "dry_run": True})
+    assert draft["status"] == "ok"
+    token = _mint_token_for_draft(draft["data"])
+
+    ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor, write_token=token)
+    first = tools.dispatch(ctx, "create_mock_work_item", {**args, "dry_run": False})
     assert first["status"] == "ok"
     assert first["data"]["created"] is True
     work_item_id = first["data"]["work_item_id"]
@@ -632,13 +834,92 @@ def test_commit_with_a_write_token_creates_exactly_one_row_and_repeating_it_is_i
     after_first = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
     assert after_first == before + 1
 
-    second = tools.dispatch(ctx, "create_mock_work_item", args)
+    second = tools.dispatch(ctx, "create_mock_work_item", {**args, "dry_run": False})
     assert second["status"] == "ok"
     assert second["data"]["created"] is False
     assert second["data"]["work_item_id"] == work_item_id
 
     after_second = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
     assert after_second == after_first, "idempotent key (episode_id, from_verdict_id, recommended_action)"
+
+
+def test_an_arbitrary_non_none_write_token_is_no_longer_sufficient(demo_conn, tmp_path):
+    """reviewer finding 7 (spec_fixes_round1.md B5): before the fix, the ONLY check
+    was `ctx.write_token is not None`, so any non-None string authorised any commit.
+    A plausible-looking but un-minted token must now be refused."""
+    before = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor, write_token="operator-confirmed")
+    result = tools.dispatch(
+        ctx,
+        "create_mock_work_item",
+        {
+            "episode_id": "E-000027",
+            "recommended_action": "ESCALATE",
+            "summary": "Escalate this case; it exceeds what routine handling can resolve here.",
+            "dry_run": False,
+        },
+    )
+    after = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
+    assert result["status"] == "error"
+    assert result["error_type"] == "not_permitted"
+    assert after == before
+
+
+def test_a_token_minted_for_one_draft_does_not_authorise_a_different_episode_or_action(demo_conn, tmp_path):
+    """reviewer finding 7, the exact reproduced bypass: confirming ONE draft used to
+    let dry_run=false succeed for a different episode, action or summary in the same
+    run, because the only check was "is write_token set", never "for what". Minting
+    against episode E-000028/APPEAL and spending the token against E-000029/WRITE_OFF
+    must fail -- and the mismatched attempt must write nothing."""
+    settings = load_settings("demo")
+    before = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
+
+    confirmed_draft_ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor)
+    confirmed_draft = tools.dispatch(
+        confirmed_draft_ctx,
+        "create_mock_work_item",
+        {
+            "episode_id": "E-000028",
+            "recommended_action": "APPEAL",
+            "summary": "Appeal the denial citing the medical necessity documentation on file.",
+            "dry_run": True,
+        },
+    )
+    assert confirmed_draft["status"] == "ok"
+    token_for_e28_appeal = _mint_token_for_draft(confirmed_draft["data"])
+
+    # Same run, same operator confirmation -- but a DIFFERENT episode and action.
+    hijack_ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor, write_token=token_for_e28_appeal)
+    hijacked = tools.dispatch(
+        hijack_ctx,
+        "create_mock_work_item",
+        {
+            "episode_id": "E-000029",
+            "recommended_action": "WRITE_OFF",
+            "summary": "Write off the remaining balance; further pursuit is not cost effective.",
+            "dry_run": False,
+        },
+    )
+    assert hijacked["status"] == "error"
+    assert hijacked["error_type"] == "not_permitted"
+
+    # The legitimately-confirmed draft must still be spendable with its own token.
+    legit_ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor, write_token=token_for_e28_appeal)
+    legit = tools.dispatch(
+        legit_ctx,
+        "create_mock_work_item",
+        {
+            "episode_id": "E-000028",
+            "recommended_action": "APPEAL",
+            "summary": "Appeal the denial citing the medical necessity documentation on file.",
+            "dry_run": False,
+        },
+    )
+    assert legit["status"] == "ok"
+    assert legit["data"]["created"] is True
+
+    after = demo_conn.execute("SELECT COUNT(*) AS n FROM work_item").fetchone()["n"]
+    assert after == before + 1, "only the legitimately-confirmed draft may have written a row"
 
 
 def test_recommended_action_outside_the_seven_is_invalid_input_listing_all_seven(demo_conn, tmp_path):
@@ -710,18 +991,20 @@ def test_an_artifact_with_a_semicolon_separator_is_rejected(demo_conn, tmp_path)
 
 
 def test_required_artifacts_round_trip_through_the_stored_summary(demo_conn, tmp_path):
-    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor, write_token="ok")
-    result = tools.dispatch(
-        ctx,
-        "create_mock_work_item",
-        {
-            "episode_id": "E-000026",
-            "recommended_action": "RESUBMIT",
-            "summary": "Resubmit the corrected claim with the identifiers listed below.",
-            "dry_run": False,
-            "required_artifacts": ["CMS-1500 corrected claim", "TRN 021000020000194"],
-        },
-    )
+    args = {
+        "episode_id": "E-000026",
+        "recommended_action": "RESUBMIT",
+        "summary": "Resubmit the corrected claim with the identifiers listed below.",
+        "required_artifacts": ["CMS-1500 corrected claim", "TRN 021000020000194"],
+    }
+    settings = load_settings("demo")
+    draft_ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor)
+    draft = tools.dispatch(draft_ctx, "create_mock_work_item", {**args, "dry_run": True})
+    assert draft["status"] == "ok"
+    token = _mint_token_for_draft(draft["data"])
+
+    ctx = make_ctx(demo_conn, tmp_path, cursor=settings.max_cursor, write_token=token)
+    result = tools.dispatch(ctx, "create_mock_work_item", {**args, "dry_run": False})
     assert result["status"] == "ok"
     stored = demo_conn.execute(
         "SELECT summary FROM work_item WHERE work_item_id = ?", (result["data"]["work_item_id"],)
@@ -780,3 +1063,161 @@ def test_raw_id_supplied_as_a_bool_is_rejected_even_though_bool_is_an_int_subcla
     ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
     result = tools.dispatch(ctx, "get_raw_record", {"raw_id": True})
     assert result["error_type"] == "invalid_input"
+
+
+def test_a_missing_required_argument_is_invalid_input_not_a_retryable_db_error(demo_conn, tmp_path):
+    """reviewer finding 5 (spec_fixes_round1.md B4): before this, a missing required
+    argument reached `spec.fn(**args)` unchecked, raised a bare TypeError there, and
+    the broad `except Exception` folded it into `db_error` -- a false, *retryable*
+    claim about the database that would make the harness re-issue the identical
+    broken call forever. Every read tool requires `episode_id` (or `claim_id`), so
+    calling each with an empty argument dict must name the missing field, not lie
+    about the database."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    for spec in tools.TOOLS:
+        required = spec.parameters.get("required") or []
+        if not required:
+            continue
+        result = tools.dispatch(ctx, spec.name, {})
+        assert result["status"] == "error", (spec.name, result)
+        assert result["error_type"] == "invalid_input", (spec.name, result)
+        assert result["retryable"] is False, (spec.name, result)
+        for field_name in required:
+            assert field_name in result["message"], (spec.name, result["message"])
+
+
+# ═══ journal field names: name / arguments, not tool / args ═════════════════
+
+
+def test_dispatch_journals_tool_call_and_tool_result_under_name_and_arguments(demo_conn, tmp_path):
+    """Decision 3 / reviewer finding 2 (spec_fixes_round1.md): `journal.derive_state`
+    reads `name`/`arguments` off a `tool_call` event; `dispatch` used to write
+    `tool`/`args`, so the tool-call trace of every real run reconstructed empty.
+    Built by actually calling `tools.dispatch` and reading the real `Journal`, per
+    the spec's own instruction that this class of test must never use a hand-written
+    fixture again."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    tools.dispatch(ctx, "get_episode", {"episode_id": "E-000006"}, iteration=3)
+
+    call_events = [ev for ev in ctx.journal.events if ev.kind == "tool_call"]
+    result_events = [ev for ev in ctx.journal.events if ev.kind == "tool_result"]
+    assert call_events and result_events
+
+    for ev in call_events + result_events:
+        assert "tool" not in ev.fields, ev.fields
+        assert "args" not in ev.fields, ev.fields
+
+    assert call_events[0].fields["name"] == "get_episode"
+    assert call_events[0].fields["arguments"] == {"episode_id": "E-000006", "detail": "essential"}
+    assert result_events[0].fields["name"] == "get_episode"
+
+    # derive_state (journal.py) is the actual consumer this field rename exists for.
+    from recon.agents.journal import derive_state
+
+    state = derive_state(ctx.journal.events)
+    assert len(state.tool_calls) == 1
+    assert state.tool_calls[0].name == "get_episode"
+    assert state.tool_calls[0].arguments == {"episode_id": "E-000006", "detail": "essential"}
+
+
+def test_a_blocked_injection_attempt_is_journaled_under_name_and_arguments(demo_conn, tmp_path):
+    """The same rename applies to `injection_attempt_recorded`, dispatch's other
+    tool-shaped journal event. Provenance-checking (spec_tools.md S5.4b) only flags
+    a string argument that both (a) is 12+ characters and (b) appears inside an
+    untrusted span already returned this run -- built here from a real feed-derived
+    timeline fact rather than a hand-typed fixture."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    first = tools.dispatch(ctx, "get_episode", {"episode_id": "E-000006", "detail": "full"})
+    assert first["status"] == "ok"
+
+    poisoned_raw = None
+    for event in first["data"]["timeline"]:
+        for value in (event.get("facts") or {}).values():
+            if isinstance(value, str) and value.startswith(envelope.UNTRUSTED_OPEN):
+                unwrapped = envelope.unwrap(value)
+                if len(unwrapped) >= 12:
+                    poisoned_raw = unwrapped
+                    break
+        if poisoned_raw:
+            break
+    assert poisoned_raw is not None, "expected at least one long feed-derived fact on E-000006 at full detail"
+
+    result = tools.dispatch(ctx, "get_episode", {"episode_id": poisoned_raw})
+    assert result["status"] == "error"
+    assert result["error_type"] == "not_permitted"
+
+    events = [ev for ev in ctx.journal.events if ev.kind == "injection_attempt_recorded"]
+    assert events, "expected an injection_attempt_recorded event"
+    assert events[0].fields["name"] == "get_episode"
+    assert events[0].fields["arguments"] == {"episode_id": poisoned_raw, "detail": "essential"}
+    assert "tool" not in events[0].fields and "args" not in events[0].fields
+
+
+# ═══ counts.duplicate_remittances is a real count, not a hardwired 0 ═════════
+
+
+def test_duplicate_remittances_counts_a_genuine_d1_redelivery(demo_conn, tmp_path):
+    """reviewer finding 9 (spec_fixes_round1.md B6): `counts.duplicate_remittances`
+    was hardwired to 0 and never incremented -- a wrong number born in Python, on a
+    defect (D-1) the dataset deliberately seeds. E-000023's REMITTANCE record
+    (source_record_id MED-835-000017) is delivered twice in the curated demo profile
+    -- the second delivery collapses to zero normalized_record rows, which is the
+    real signature `_has_collapsed_duplicate_delivery` looks for."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_remittance_detail", {"episode_id": "E-000023"})
+    assert result["status"] == "ok"
+    assert result["data"]["counts"]["duplicate_remittances"] >= 1
+
+
+def test_duplicate_remittances_is_zero_when_no_redelivery_occurred(demo_conn, tmp_path):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_remittance_detail", {"episode_id": "E-000006"})
+    assert result["status"] == "ok"
+    assert result["data"]["counts"]["duplicate_remittances"] == 0
+
+
+# ═══ get_raw_record's fail-closed redaction path (spec_tools.md S7.4) ═══════
+
+
+def test_redact_payload_fails_closed_when_a_phi_key_name_is_unparseable(demo_conn, tmp_path):
+    """reviewer finding 16 (spec_fixes_round1.md B7): `_redact_payload` never
+    returned None, so the fail-closed branch `get_raw_record` relies on was dead
+    code. A payload that is neither valid JSON nor matched by the keyed key=value
+    fallback, but still names a PHI field somewhere the fallback cannot parse, must
+    refuse rather than claim "0 keys redacted" and hand the text back anyway."""
+    unparseable = 'cardholder_id -> "ABC123" (fixed-width segment, not key=value)'
+    assert tools._redact_payload(unparseable) is None
+
+    # Sanity: ordinary non-JSON text with no PHI key name at all is unaffected.
+    assert tools._redact_payload("just a plain feed line with no PHI markers") is not None
+
+    # Sanity: the keyed key=value fallback still succeeds on text it can parse.
+    parseable = "cardholder_id: ABC123, bin: 123456"
+    redacted, removed = tools._redact_payload(parseable)
+    assert "ABC123" not in redacted
+    assert "cardholder_id" in removed
+
+
+# ═══ B8: the agent layer no longer imports another layer's underscore-private ═
+
+
+def test_tools_module_does_not_import_dossiers_underscore_private_projections():
+    """reviewer finding 17 (spec_fixes_round1.md B8): `tools.py` used to read
+    `dossier_module._PROJECTIONS` directly. `api/dossier.py` now exports the same
+    table as `RECORD_PROJECTIONS`; this pins that `tools.py`'s CODE was updated to
+    the public name rather than merely gaining a second, unused import. (Comment
+    lines are excluded -- this module's own comments cite the old private name
+    while explaining the fix, which is not the thing being guarded against.)"""
+    code_lines = [line for line in TOOLS_SOURCE.splitlines() if not line.strip().startswith("#")]
+    assert not any("dossier_module._PROJECTIONS" in line for line in code_lines)
+    assert "dossier_module.RECORD_PROJECTIONS" in TOOLS_SOURCE
+    assert dossier_module.RECORD_PROJECTIONS is dossier_module._PROJECTIONS
+
+
+def test_no_bare_assert_guards_the_match_strength_table():
+    """reviewer finding 17: `assert` vanishes under `python -O`, so a guard whose
+    only job is to fire at import time must not depend on how the interpreter was
+    invoked. Confirms the module still imports cleanly (the guard did not fire) and
+    that the source no longer spells the check as a bare `assert`."""
+    assert "assert set(_MATCH_STRENGTH)" not in TOOLS_SOURCE
+    assert set(tools._MATCH_STRENGTH) == set(AllocationBasis)

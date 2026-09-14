@@ -83,12 +83,20 @@ class LLMClient(Protocol):
     def complete(
         self,
         *,
+        agent: str,
+        # reviewer finding (spec_fixes_round1.md C1): the role issuing this call
+        # ("proposer", "evaluator", "investigator", ...) -- threaded straight into
+        # the `llm_request`/`llm_response`/`llm_error` journal events so proposer/
+        # evaluator independence (design doc S1) is verifiable after the fact
+        # instead of assumed. Required, not defaulted: a call that cannot name its
+        # agent should not silently journal unlabeled.
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        iteration: int | None = None,
     ) -> LLMResponse: ...
 
 
@@ -215,6 +223,11 @@ class OpenAICompatClient:
         self._owns_client = client is None
         self._client = client if client is not None else httpx.Client(timeout=timeout_s)
         self._sleep = sleep
+        # reviewer finding 13 (spec_fixes_round1.md C3): `Journal`'s own `_SECRET_PATTERN`
+        # only catches keys shaped exactly "sk-" + alnum, so "sk-proj-...", "sk-or-v1-..."
+        # and a non-"sk" gateway token all passed through unredacted. Registering the
+        # actual configured key here scrubs it byte-for-byte regardless of shape.
+        self._journal.redact_literal(api_key)
 
     def close(self) -> None:
         if self._owns_client:
@@ -278,19 +291,33 @@ class OpenAICompatClient:
     def complete(
         self,
         *,
+        agent: str,
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        iteration: int | None = None,
     ) -> LLMResponse:
         body = self._build_body(model, messages, tools, tool_choice, max_tokens, temperature)
         digest = request_digest(model, messages, tools, tool_choice)
 
-        # Logged before the call, with the exact outgoing body, so a crash mid-request
-        # still leaves a byte-reconstructable request in the journal (design doc S6).
-        self._journal.event("llm_request", digest=digest, model=model, body=body)
+        # `agent` on every event, not only `model` -- reviewer finding (spec_fixes_round1.md
+        # C1): without it `derive_state.models` cannot be keyed per role, so
+        # proposer/evaluator independence was assumed rather than checkable. Logged
+        # before the call, with the exact outgoing body, so a crash mid-request still
+        # leaves a byte-reconstructable request in the journal (design doc S6).
+        #
+        # `iteration` exists so this can be the ONLY journaller of llm_* events. The
+        # roles used to emit their own agent-tagged pair alongside this one, back when
+        # `agent` did not exist here; that logged the messages a role had assembled
+        # rather than the bytes that actually went out, and double-counted every call
+        # in `derive_state`. One journaller, sited where the request leaves the
+        # process, is what makes "model-visible means logged" literally true.
+        self._journal.event(
+            "llm_request", agent=agent, iteration=iteration, digest=digest, model=model, body=body
+        )
 
         result: LLMResponse | None = None
         failure: LLMError | None = None
@@ -306,13 +333,14 @@ class OpenAICompatClient:
             # what makes "model-visible means logged" true even on the failure path.
             if failure is not None:
                 self._journal.event(
-                    "llm_error", digest=digest, model=model,
+                    "llm_error", agent=agent, iteration=iteration, digest=digest, model=model,
                     status=failure.status, body=failure.body, attempts=failure.attempts,
                 )
             elif result is not None:
                 self._journal.event(
-                    "llm_response", digest=digest, model=result.model,
-                    finish_reason=result.finish_reason, usage=result.usage, raw=result.raw,
+                    "llm_response", agent=agent, iteration=iteration, digest=digest,
+                    model=result.model, finish_reason=result.finish_reason,
+                    usage=result.usage, raw=result.raw,
                 )
 
 
@@ -336,15 +364,20 @@ class RecordingClient:
     def complete(
         self,
         *,
+        agent: str,
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        iteration: int | None = None,
     ) -> LLMResponse:
+        # Forwarded, never journaled here -- `inner` (if it is an OpenAICompatClient)
+        # is what stamps `agent` onto the llm_request/llm_response pair; this class's
+        # only job is mirroring the exchange onto the fixture file.
         response = self._inner.complete(
-            messages=messages, model=model, tools=tools, tool_choice=tool_choice,
+            agent=agent, messages=messages, model=model, tools=tools, tool_choice=tool_choice,
             max_tokens=max_tokens, temperature=temperature,
         )
         record = {
@@ -407,13 +440,21 @@ class ReplayClient:
     def complete(
         self,
         *,
+        agent: str,
         messages: list[dict[str, Any]],
         model: str,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        iteration: int | None = None,
     ) -> LLMResponse:
+        # Accepted for LLMClient signature parity (a role must be able to swap a live
+        # client for a replay client with no call-site change) but not part of the
+        # match key: `request_digest` is deliberately over (model, messages, tools,
+        # tool_choice) only -- "the same request" is a property of what was asked,
+        # not of who is asking -- and this class does no journaling of its own to tag.
+        del agent
         digest = request_digest(model, messages, tools, tool_choice)
         payload = self._by_digest.get(digest)
         if payload is None:

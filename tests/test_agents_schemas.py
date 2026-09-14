@@ -46,6 +46,8 @@ from typing import Any
 import pytest
 
 from recon.agents import schemas
+from recon.agents import tools as agent_tools
+from recon.agents.envelope import UNTRUSTED_CLOSE, UNTRUSTED_OPEN
 from recon.agents.prompts import _shared, evaluator, investigator, proposer
 
 # ═══ 1/2/3 — declaration order, shape, and the closed action vocabulary ═══════
@@ -370,6 +372,126 @@ def test_all_three_prompts_embed_the_byte_identical_untrusted_text_rule():
         assert _shared.UNTRUSTED_TEXT_RULE in text, f"{name} is missing UNTRUSTED_TEXT_RULE verbatim"
 
 
+def test_all_three_prompts_embed_the_byte_identical_no_self_fence_rule():
+    """D3 (`spec_fixes_round1.md` Decision 2): only a tool result may ever carry a
+    fence, so a fence in a role's own output is a structural failure. New shared
+    constant, same "byte-identical in all three" discipline as the two rules above.
+    """
+    for name, text in (
+        ("investigator", investigator.INVESTIGATOR_SYSTEM_PROMPT),
+        ("proposer", proposer.PROPOSER_SYSTEM_PROMPT),
+        ("evaluator", evaluator.EVALUATOR_SYSTEM_PROMPT),
+    ):
+        assert _shared.NO_SELF_FENCE_RULE in text, f"{name} is missing NO_SELF_FENCE_RULE verbatim"
+
+
+# ═══ Round-1 fixes (`.agents/specs/spec_fixes_round1.md`), Fixer D ════════════
+#
+# D1 -- the prompts named tools (`get_episode_dossier`, `get_bank_match`) that the
+#       registry does not define.
+# D2 -- all three prompts taught a fence shape (`<<<UNTRUSTED_FEED_TEXT nonce="...">>>`)
+#       no tool ever emits; the real one is `envelope.wrap()`'s `⟦UNTRUSTED:...#nonce⟧`.
+# D4 -- `prompts/proposer.REPROMPT_TEMPLATE` was a second, unused feed-forward
+#       mechanism alongside the one the harness actually calls (`rubric.build_critique`).
+
+
+def _all_prompt_strings(module: Any) -> str:
+    """Every exported *string* constant of a prompt module, concatenated.
+
+    Deliberately covers every user-turn / repair-turn / tool-description template a
+    module defines, not just its system prompt -- `ITERATION_1_USER_TURN` is exactly
+    where D1's `get_episode_dossier` bug lived in `investigator.py` and `proposer.py`.
+    The `isinstance` check skips the function exports (`render`, `render_iteration1_user_turn`, ...).
+    """
+    return "\n".join(value for name in module.__all__ if isinstance(value := getattr(module, name), str))
+
+
+#: Forced-function output names: the single call the Proposer/Evaluator must end
+#: their turn with (`schemas.ProposedAction`/`EvaluatorVerdict`'s own structured
+#: output, wired through `tool_choice`). These follow the same `verb_noun` shape as
+#: a real tool but are never entries in `tools.DISPATCH` -- a structurally different
+#: mechanism from the read/write registry `tool_names()` reports on, so they are a
+#: documented exception rather than a gap in the check below.
+_NON_REGISTRY_TOOL_CALLS = frozenset({"emit_proposed_action", "emit_evaluation"})
+
+#: The `verb_noun` shape every real tool (`get_*`/`calculate_*`/`create_*` in
+#: `tools.TOOLS`) and every forced-output call (`emit_*`) in this codebase follows.
+_TOOL_SHAPED_IDENTIFIER = re.compile(
+    r"\b(?:get|calculate|create|emit|list|update|delete|fetch|set|dispatch)_[a-z][a-z0-9_]*\b"
+)
+
+
+def test_every_tool_shaped_identifier_mentioned_in_a_prompt_is_a_real_tool():
+    """D1: `investigator.py` and `proposer.py` told the model to call
+    `get_episode_dossier`; the registry (`tools.py`) has `get_episode`. Rather than
+    re-checking that one literal string (there may be more, and a future edit could
+    introduce a different one), grep every prompt module's exported text for
+    anything shaped like a tool name and check it against the live registry.
+    """
+    real_tools = agent_tools.tool_names()
+    assert real_tools, "tools.tool_names() returned nothing -- this test would pass vacuously"
+
+    for module in (investigator, proposer, evaluator):
+        text = _all_prompt_strings(module)
+        mentioned = set(_TOOL_SHAPED_IDENTIFIER.findall(text))
+        unknown = mentioned - real_tools - _NON_REGISTRY_TOOL_CALLS
+        assert not unknown, f"{module.__name__} names {sorted(unknown)}, which tools.tool_names() does not recognise"
+
+
+def test_no_prompt_teaches_the_old_untrusted_feed_text_fence_literal():
+    """D2: all three prompts used to teach `<<<UNTRUSTED_FEED_TEXT nonce="...">>>` /
+    `<<<END_UNTRUSTED_FEED_TEXT ...>>>`, a shape no tool ever emits. The literal
+    must not appear anywhere a model can read it.
+    """
+    for module in (investigator, proposer, evaluator):
+        text = _all_prompt_strings(module)
+        assert "UNTRUSTED_FEED_TEXT" not in text, f"{module.__name__} still teaches the old fence literal"
+    assert "UNTRUSTED_FEED_TEXT" not in _shared.UNTRUSTED_TEXT_RULE
+    assert "UNTRUSTED_FEED_TEXT" not in _shared.NONCE_RULE
+
+
+def test_untrusted_text_rule_and_both_nonce_rules_teach_the_real_envelope_fence():
+    """The replacement text names the actual delimiters `envelope.wrap()` emits --
+    imported from `envelope.py` (Decision 1's single fence authority), not spelled
+    out a second time in this module -- rather than a fence no tool produces.
+    """
+    open_tag = UNTRUSTED_OPEN + "UNTRUSTED:"
+    close_tag = UNTRUSTED_OPEN + "/UNTRUSTED:"
+
+    assert open_tag in _shared.UNTRUSTED_TEXT_RULE
+    assert close_tag in _shared.UNTRUSTED_TEXT_RULE
+    assert UNTRUSTED_CLOSE in _shared.UNTRUSTED_TEXT_RULE
+
+    assert open_tag in _shared.NONCE_RULE  # the Investigator/Proposer nonce rule
+    assert open_tag in evaluator.EVALUATOR_SYSTEM_PROMPT  # the Evaluator's own nonce rule
+
+
+def test_proposer_module_deleted_the_dead_reprompt_feed_forward_mechanism():
+    """D4: two feed-forward mechanisms existed -- `rubric.build_critique`, which
+    `roles/coordinator.py` actually calls between iterations, and this module's own
+    `REPROMPT_TEMPLATE` / `NOT_ADDRESSED_ENTRY_TEMPLATE` / `CONTRADICTED_ENTRY_TEMPLATE`
+    plus their `render_*` functions, which nothing in `src/` or `tests/` called. The
+    unused mechanism is deleted rather than kept as a second, silently-dead answer.
+    """
+    for dead_name in (
+        "REPROMPT_TEMPLATE",
+        "NOT_ADDRESSED_ENTRY_TEMPLATE",
+        "CONTRADICTED_ENTRY_TEMPLATE",
+        "render_reprompt",
+        "render_not_addressed_entry",
+        "render_contradicted_entry",
+    ):
+        assert not hasattr(proposer, dead_name), f"proposer.{dead_name} should have been deleted (D4)"
+        assert dead_name not in proposer.__all__
+
+
+def test_proposer_prompt_version_digests_only_the_symbols_the_module_still_defines():
+    assert proposer.PROMPT_VERSION == _shared.prompt_version(
+        proposer.PROPOSER_SYSTEM_PROMPT,
+        proposer.ITERATION_1_USER_TURN,
+    )
+
+
 # ═══ 9 — the evaluator never asks for a score or a confidence number ═════════
 
 
@@ -457,7 +579,6 @@ def test_investigator_prompt_never_uses_an_action_enum_word_as_a_recommendation(
     [
         investigator.INVESTIGATOR_SYSTEM_PROMPT,
         proposer.PROPOSER_SYSTEM_PROMPT,
-        proposer.REPROMPT_TEMPLATE,
         evaluator.EVALUATOR_SYSTEM_PROMPT,
     ],
 )

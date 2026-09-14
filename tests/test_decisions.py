@@ -192,7 +192,7 @@ def test_repository_exposes_no_update_or_delete():
 
 @pytest.mark.parametrize(
     "table",
-    ["raw_record", "normalized_record", "episode", "verdict", "verdict_reason"],
+    ["raw_record", "normalized_record", "episode", "verdict", "verdict_reason", "work_item"],
 )
 def test_immutability_triggers_exist(table: str):
     schema = migrate.schema_sql()
@@ -217,6 +217,81 @@ def test_immutability_triggers_actually_fire(conn):
         conn.execute("UPDATE raw_record SET payload = '{\"x\":1}' WHERE raw_id = 1")
     with pytest.raises(sqlite3.IntegrityError, match="immutable"):
         conn.execute("DELETE FROM raw_record WHERE raw_id = 1")
+
+
+# ═══ E1 — work_item: the agent's only write target has to be append-only too ═══
+#
+# Reviewer finding 6: work_item was the one mutable-looking table in this file with
+# no append-only triggers, while the tool description the model reads
+# (``src/recon/agents/tools.py:1386-1387``) asserts "the table it writes to has no
+# update and no delete". These tests reproduce the gap directly against the schema,
+# the same way ``test_immutability_triggers_actually_fire`` does for ``raw_record``.
+
+
+def _insert_work_item_lineage(conn) -> None:
+    """Minimal episode + verdict lineage so a work_item row can be inserted.
+
+    Mirrors the chain ``test_xor_is_a_check_not_a_convention`` already builds above;
+    a verdict row is layered on top because ``work_item.from_verdict_id`` requires one.
+    """
+    conn.executescript(
+        "INSERT INTO ingest_batch(source_file, source_system, file_sha256, record_count, loaded_at)"
+        " VALUES ('f.jsonl','PBM_ADJUDICATION','sha-w',1,'2026-01-01T00:00:00Z');"
+        "INSERT INTO raw_record(batch_id, source_system, source_record_id, source_line_no,"
+        " payload, payload_sha256, received_at)"
+        " VALUES (1,'PBM_ADJUDICATION','R-1',1,'{}','p-w','2026-01-01T00:00:00Z');"
+        "INSERT INTO normalized_record(raw_id, record_kind, source_system, adapter_version,"
+        " received_at, idempotency_key, canonical)"
+        " VALUES (1,'PHARMACY_CLAIM','PBM_ADJUDICATION','1.0.0','2026-01-01T00:00:00Z','k-w','{}');"
+        "INSERT INTO episode(episode_id, reimbursement_track, anchor_norm_id, ndc11,"
+        " date_of_service, quantity_milli, pharmacy_npi, rx_number, fill_number, clm01,"
+        " billing_provider_npi, created_from_received_at)"
+        " VALUES ('EP-W1','PHARMACY',1,'00071015523','2026-01-01',30000,'1234567893',"
+        "'7845102','00',NULL,NULL,'2026-01-01T00:00:00Z');"
+        "INSERT INTO verdict(episode_id, cursor_at, computed_at, engine_version,"
+        " reference_fingerprint, episode_disposition, reimbursement_disposition,"
+        " rebate_disposition, reimbursement_verdict_code, rebate_verdict_code)"
+        " VALUES ('EP-W1','2026-01-01T23:59:59Z','2026-01-01T00:00:00Z','1.0.0','fp-1',"
+        "'PENDING','PENDING',NULL,'A-01','C-00');"
+        "INSERT INTO work_item(episode_id, created_at, created_by, at_cursor,"
+        " from_verdict_id, summary, recommended_action)"
+        " VALUES ('EP-W1','2026-01-01T00:00:00Z','agent:test@model','2026-01-01T23:59:59Z',"
+        " 1,'a summary long enough to satisfy the twenty-char minimum','ABSTAIN');"
+    )
+
+
+def test_work_item_immutability_triggers_actually_fire(conn):
+    """``work_item`` must be append-only in the database, not only in the tool's prose."""
+    import sqlite3
+
+    _insert_work_item_lineage(conn)
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute("UPDATE work_item SET summary = 'changed after the fact' WHERE work_item_id = 1")
+    with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+        conn.execute("DELETE FROM work_item WHERE work_item_id = 1")
+
+
+def test_work_item_idempotency_is_a_unique_index_not_a_python_race(conn):
+    """``ux_work_item_idempotent`` backs the tool's idempotency promise with a constraint.
+
+    Before this index existed, "calling it twice with the same episode, verdict and
+    action does not create a second item" held only because
+    ``create_mock_work_item`` happened to SELECT before it INSERTed -- a check-then-act
+    race with nothing behind it, which also meant the tool's own
+    ``except sqlite3.IntegrityError`` recovery branch was unreachable dead code
+    (reviewer finding 6).
+    """
+    import sqlite3
+
+    _insert_work_item_lineage(conn)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO work_item(episode_id, created_at, created_by, at_cursor,"
+            " from_verdict_id, summary, recommended_action)"
+            " VALUES ('EP-W1','2026-01-01T00:00:01Z','agent:test@model',"
+            " '2026-01-01T23:59:59Z', 1,"
+            " 'a second summary long enough to satisfy the minimum','ABSTAIN')"
+        )
 
 
 # ═══ A9 / A22 — three dispositions, reopened is a flag ══════════════════════

@@ -379,3 +379,117 @@ def test_relations_parse_but_are_not_clauses(graph_rows: list[dict], tmp_path):
     bad_path = _write_graph_variant(tmp_path, drop_relation_target)
     with pytest.raises(grounding.GroundingContractError):
         grounding.load_graph(bad_path)
+
+
+# ═══ C4 (spec_fixes_round1.md) ═══════════════════════════════════════════════════
+#
+# reviewer finding 11: `select_clauses` used to slice the *flattened* clause list at
+# `MAX_CLAUSES`, which can land inside a single entity's run of observations and split
+# it -- presenting that entity's caveats without its claim (or vice versa), which is
+# exactly what the docstring three lines above the old code already said was worse
+# than omitting the entity outright. Below: force `MAX_CLAUSES` down to a value that
+# lands strictly inside a real entity's clause run and assert that entity is dropped
+# whole, never split -- this fails against the pre-fix `clauses[:MAX_CLAUSES]` slice,
+# which would include exactly one clause from the straddling entity.
+
+
+def test_selection_drops_whole_entities_rather_than_truncating_mid_entity(monkeypatch):
+    import recon.agents.grounding as grounding
+
+    dossier = _sample_dossier()
+    full = grounding.select_clauses(dossier)
+
+    entities_in_order: list[str] = []
+    for c in full:
+        if not entities_in_order or entities_in_order[-1] != c.entity:
+            entities_in_order.append(c.entity)
+    assert len(entities_in_order) >= 2, "the sample dossier must route to at least two entities"
+
+    counts = {e: len(grounding._CLAUSES_BY_ENTITY[e]) for e in entities_in_order}
+    running = 0
+    cap: int | None = None
+    target_entity: str | None = None
+    for e in entities_in_order:
+        if counts[e] >= 2:
+            cap = running + 1  # lands one clause into this entity's run, not past it
+            target_entity = e
+            break
+        running += counts[e]
+    assert cap is not None, "need an entity with 2+ observations to force a mid-entity cap"
+
+    monkeypatch.setattr(grounding, "MAX_CLAUSES", cap)
+    result = grounding.select_clauses(dossier)
+
+    result_by_entity: dict[str, int] = {}
+    for c in result:
+        result_by_entity[c.entity] = result_by_entity.get(c.entity, 0) + 1
+
+    assert target_entity not in result_by_entity, (
+        f"{target_entity!r} straddles the clause cap and must be dropped whole, "
+        "not truncated to a partial clause set"
+    )
+    for entity, n in result_by_entity.items():
+        assert n == counts[entity], f"{entity!r} was included with {n} of its {counts[entity]} clauses"
+
+
+# ═══ C5 (spec_fixes_round1.md) ═══════════════════════════════════════════════════
+#
+# reviewer finding 12: a graph entity row missing `name`/`entityType`/`observations`
+# raised a bare `KeyError` deep inside `_build_clauses`, far from the offending line
+# -- and, worse, an `observations` value that was accidentally a *string* (rather
+# than a list of strings) raised nothing at all: `enumerate("a sentence")` iterates
+# per character, minting one garbage clause per letter with no error whatsoever. That
+# is silent corruption of a runtime dependency (CLAUDE.md, "THE GRAPH IS A RUNTIME
+# DEPENDENCY"), worse than a crash. `load_graph` now validates entity row shape at
+# load time, before any of it reaches `_build_clauses`.
+
+
+def test_load_graph_raises_a_grounding_contract_error_on_an_entity_row_missing_observations(tmp_path):
+    def drop_observations(rows: list[dict]) -> None:
+        for r in rows:
+            if r["type"] == "entity" and r["name"] == "Disposition":
+                del r["observations"]
+                return
+        raise AssertionError("Disposition entity not found to corrupt")
+
+    bad_path = _write_graph_variant(tmp_path, drop_observations)
+    import recon.agents.grounding as grounding
+
+    with pytest.raises(grounding.GroundingContractError, match="observations"):
+        grounding.load_graph(bad_path)
+
+
+def test_load_graph_rejects_a_string_shaped_observations_field_instead_of_silently_iterating_it_per_character(
+    tmp_path,
+):
+    """The nasty case named in C5: `observations` accidentally flattened to a bare
+    string by an upstream bug, reproduced exactly as it would occur from a
+    build-script typo (e.g. ``"; ".join(observations)`` where a list was expected)."""
+
+    def flatten_to_a_string(rows: list[dict]) -> None:
+        for r in rows:
+            if r["type"] == "entity" and r["name"] == "Disposition":
+                r["observations"] = "this got joined into one string by accident"
+                return
+        raise AssertionError("Disposition entity not found to corrupt")
+
+    bad_path = _write_graph_variant(tmp_path, flatten_to_a_string)
+    import recon.agents.grounding as grounding
+
+    with pytest.raises(grounding.GroundingContractError, match="not a list"):
+        grounding.load_graph(bad_path)
+
+
+def test_load_graph_rejects_a_non_string_element_inside_observations(tmp_path):
+    def poison_one_observation(rows: list[dict]) -> None:
+        for r in rows:
+            if r["type"] == "entity" and r["name"] == "Disposition":
+                r["observations"] = [r["observations"][0], 12345]
+                return
+        raise AssertionError("Disposition entity not found to corrupt")
+
+    bad_path = _write_graph_variant(tmp_path, poison_one_observation)
+    import recon.agents.grounding as grounding
+
+    with pytest.raises(grounding.GroundingContractError, match="non-string element"):
+        grounding.load_graph(bad_path)

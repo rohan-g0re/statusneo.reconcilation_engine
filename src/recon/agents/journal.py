@@ -64,6 +64,12 @@ EVENT_KINDS: frozenset[str] = frozenset(
         "iteration_started", "iteration_finished",
         "work_item_written",
         "injection_attempt_recorded",
+        # A figure survived the repair turn without appearing in any tool result --
+        # the assignment's central constraint failing in the open. It earns its own
+        # kind rather than riding on an `llm_response` field: this is the one event a
+        # reviewer auditing "the agent never computes a number" would grep for, and
+        # burying it inside another kind is how a finding becomes invisible.
+        "unsourced_figure",
     }
 )
 
@@ -74,25 +80,43 @@ _RESERVED_KEYS: frozenset[str] = frozenset({"seq", "at", "run_id", "kind"})
 
 # Matches the shape of a DeepSeek/OpenAI-style secret key. Long enough (8+ chars
 # after the prefix) that it will not eat ordinary words starting "sk-".
+#
+# reviewer finding 13 (spec_fixes_round1.md C3): this pattern alone is not enough --
+# it only catches keys shaped exactly "sk-" + alnum, so "sk-proj-..." and
+# "sk-or-v1-..." (both contain hyphens the character class excludes) and any non-"sk"
+# gateway token pass through unredacted. `Journal.redact_literal` below closes that
+# gap by scrubbing the *actual configured* secret byte-for-byte, whatever its shape,
+# in addition to this pattern -- the pattern stays as a catch-all for keys nobody
+# told the journal about (e.g. one pasted into a proposal's free text).
 _SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9]{8,}")
 _REDACTED = "sk-***REDACTED***"
+_REDACTED_LITERAL = "***REDACTED-KEY***"
+
+#: A registered literal secret shorter than this is refused (see `Journal.redact_literal`)
+#: rather than accepted and over-applied -- a one- or two-character "key" would redact
+#: unrelated ordinary text throughout the journal, which is its own kind of corruption.
+_MIN_LITERAL_SECRET_LEN = 8
 
 
-def _redact(value: Any) -> Any:
-    """Scrub anything matching an API-key shape, recursively.
+def _redact(value: Any, literal_secrets: tuple[str, ...] = ()) -> Any:
+    """Scrub anything matching an API-key shape, plus any registered literal secret,
+    recursively.
 
     Applied to every event's fields before they are written *or* mirrored in
     memory, so ``Journal.events`` (documented as "the in-memory mirror of what was
     written") never disagrees with the file on disk about what was redacted.
     """
     if isinstance(value, str):
-        return _SECRET_PATTERN.sub(_REDACTED, value)
+        value = _SECRET_PATTERN.sub(_REDACTED, value)
+        for secret in literal_secrets:
+            value = value.replace(secret, _REDACTED_LITERAL)
+        return value
     if isinstance(value, dict):
-        return {key: _redact(item) for key, item in value.items()}
+        return {key: _redact(item, literal_secrets) for key, item in value.items()}
     if isinstance(value, list):
-        return [_redact(item) for item in value]
+        return [_redact(item, literal_secrets) for item in value]
     if isinstance(value, tuple):
-        return tuple(_redact(item) for item in value)
+        return tuple(_redact(item, literal_secrets) for item in value)
     return value
 
 
@@ -120,10 +144,27 @@ class Journal:
         self._now = now
         self._seq = 0
         self._events: list[JournalEvent] = []
+        self._literal_secrets: tuple[str, ...] = ()
         # newline="" pins the on-disk line ending to exactly "\n" on every platform
         # (including Windows' default text-mode translation), matching the JSONL
         # convention `read_journal` and the fixture reader in `client.py` assume.
         self._fh = self._path.open("w", encoding="utf-8", newline="")
+
+    def redact_literal(self, secret: str | None) -> None:
+        """Register a secret to be scrubbed byte-for-byte, in addition to the
+        ``sk-``-shape pattern `_redact` already applies.
+
+        ``OpenAICompatClient`` calls this once, at construction, with its configured
+        ``api_key`` -- the fix for reviewer finding 13 (spec_fixes_round1.md C3): the
+        regex alone misses ``sk-proj-...``, ``sk-or-v1-...`` and any non-``sk`` gateway
+        token, but the journal always knows the literal value the caller must never
+        leak, regardless of what shape it happens to be. A falsy or too-short value is
+        a silent no-op rather than an error -- ``replay`` mode legitimately has no key
+        at all, and a key shorter than `_MIN_LITERAL_SECRET_LEN` would over-redact
+        unrelated text.
+        """
+        if secret and len(secret) >= _MIN_LITERAL_SECRET_LEN:
+            self._literal_secrets = (*self._literal_secrets, secret)
 
     def event(self, kind: str, **fields: Any) -> JournalEvent:
         if kind not in EVENT_KINDS:
@@ -136,7 +177,7 @@ class Journal:
                 f"{sorted(_RESERVED_KEYS)}"
             )
 
-        redacted_fields = {key: _redact(item) for key, item in fields.items()}
+        redacted_fields = {key: _redact(item, self._literal_secrets) for key, item in fields.items()}
         record = JournalEvent(
             seq=self._seq, at=self._now(), run_id=self._run_id, kind=kind, fields=redacted_fields,
         )

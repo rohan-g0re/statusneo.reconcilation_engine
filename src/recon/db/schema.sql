@@ -433,7 +433,12 @@ CREATE INDEX ix_alloc_residual ON cash_allocation(basis, caused_by_received_at);
 
 -- ═══ WORK ITEM -- the agent's only write target ════════════════════════════
 -- Beyond the six required tables.  The agent flags a human; it never moves money and
--- never writes a ledger entry.  Append-only: there is no close and no update.
+-- never writes a ledger entry.  Append-only: there is no close and no update -- and,
+-- like every other append-only table above, that is now a trigger rather than a
+-- habit (reviewer finding 6: this was the one mutable-looking table with no
+-- enforcement, while the tool description the model reads promises "the table it
+-- writes to has no update and no delete" -- a claim the schema previously did not
+-- back).
 CREATE TABLE work_item (
   work_item_id       INTEGER PRIMARY KEY,
   episode_id         TEXT    NOT NULL REFERENCES episode(episode_id),
@@ -444,6 +449,18 @@ CREATE TABLE work_item (
   summary            TEXT    NOT NULL,
   recommended_action TEXT    NOT NULL
 ) STRICT;
+-- The idempotency key behind "calling it twice with the same episode, verdict and
+-- action does not create a second item" (also promised by the tool description).
+-- Without this index that promise was a check-then-act race in Python with no
+-- constraint behind it, which also meant the tool's own `except
+-- sqlite3.IntegrityError` recovery branch could never fire (reviewer finding 6).
+CREATE UNIQUE INDEX ux_work_item_idempotent
+  ON work_item(episode_id, from_verdict_id, recommended_action);
 CREATE INDEX ix_work_item_episode ON work_item(episode_id);
 
-PRAGMA user_version = 2;
+CREATE TRIGGER trg_work_item_no_update BEFORE UPDATE ON work_item
+  BEGIN SELECT RAISE(ABORT, 'work_item is append-only: no update and no delete'); END;
+CREATE TRIGGER trg_work_item_no_delete BEFORE DELETE ON work_item
+  BEGIN SELECT RAISE(ABORT, 'work_item is append-only: no update and no delete'); END;
+
+PRAGMA user_version = 3;

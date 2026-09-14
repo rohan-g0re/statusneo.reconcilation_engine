@@ -19,7 +19,13 @@ in the prompt." They belong to whichever harness module owns the loop, not here.
 
 from __future__ import annotations
 
-from recon.agents.prompts._shared import NO_ARITHMETIC_RULE, NONCE_RULE, UNTRUSTED_TEXT_RULE, prompt_version
+from recon.agents.prompts._shared import (
+    NO_ARITHMETIC_RULE,
+    NO_SELF_FENCE_RULE,
+    NONCE_RULE,
+    UNTRUSTED_TEXT_RULE,
+    prompt_version,
+)
 
 __all__ = [
     "INVESTIGATOR_SYSTEM_PROMPT",
@@ -95,7 +101,7 @@ _CITATIONS = (
     "phrases like \"see the remittance\".\n\n"
     "  [[raw:R]]     the immutable source row with raw_id R. Use this whenever the\n"
     "                event has one — it is stable forever.\n"
-    "  [[event:N]]   timeline event #N of the get_episode_dossier result. Use only\n"
+    "  [[event:N]]   timeline event #N of the get_episode result. Use only\n"
     "                for CASH and VERDICT events, which have no source row.\n"
     "  [[calc:F]]    field F of the most recent calculate_reconciliation result,\n"
     "                e.g. [[calc:reimbursement_variance_cents]]\n"
@@ -184,6 +190,8 @@ INVESTIGATOR_SYSTEM_PROMPT = (
     + _INVESTIGATOR_INJECTION_SENTENCE
     + NONCE_RULE
     + "\n\n"
+    + NO_SELF_FENCE_RULE
+    + "\n\n"
     + _OUTPUT
     + _RUN_CONTEXT
 )
@@ -192,7 +200,7 @@ INVESTIGATOR_SYSTEM_PROMPT = (
 #: `episode_id`, `cursor`.
 ITERATION_1_USER_TURN = (
     "Explain episode {episode_id} as of {cursor}.\n"
-    "Start with get_episode_dossier. Call whatever else you need before you write."
+    "Start with get_episode. Call whatever else you need before you write."
 )
 
 #: `spec_prompts_roles.md` §A.2, "Cap." Sent with `tool_choice: "none"` after round 5

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from pathlib import Path
 
 import httpx
 import pytest
@@ -66,7 +65,7 @@ class _StubClient:
     def __init__(self, response: LLMResponse) -> None:
         self._response = response
 
-    def complete(self, *, messages, model, tools=None, tool_choice=None, max_tokens=None, temperature=None) -> LLMResponse:
+    def complete(self, *, agent, messages, model, tools=None, tool_choice=None, max_tokens=None, temperature=None, iteration=None) -> LLMResponse:
         return self._response
 
 
@@ -93,10 +92,10 @@ def test_a_recorded_exchange_replays_byte_identically_through_replayclient_with_
     fixture_dir = tmp_path / "fixtures"
     recorder = RecordingClient(_StubClient(_sample_response()), fixture_dir, run_id="run-1")
     messages = [{"role": "user", "content": "hi"}]
-    original = recorder.complete(messages=messages, model="deepseek-chat")
+    original = recorder.complete(agent="proposer", messages=messages, model="deepseek-chat")
 
     replay = ReplayClient(recorder.path)
-    replayed = replay.complete(messages=messages, model="deepseek-chat")
+    replayed = replay.complete(agent="proposer", messages=messages, model="deepseek-chat")
 
     assert replayed == original
 
@@ -107,63 +106,142 @@ def test_a_recorded_exchange_replays_byte_identically_through_replayclient_with_
 def test_replayclient_raises_replaymiss_naming_the_digest_on_an_unrecorded_request(tmp_path):
     fixture_dir = tmp_path / "fixtures"
     recorder = RecordingClient(_StubClient(_sample_response()), fixture_dir, run_id="run-2")
-    recorder.complete(messages=[{"role": "user", "content": "recorded"}], model="deepseek-chat")
+    recorder.complete(agent="proposer", messages=[{"role": "user", "content": "recorded"}], model="deepseek-chat")
 
     replay = ReplayClient(recorder.path)
     unseen_messages = [{"role": "user", "content": "never recorded"}]
     expected_digest = request_digest("deepseek-chat", unseen_messages, None, None)
 
     with pytest.raises(ReplayMiss) as excinfo:
-        replay.complete(messages=unseen_messages, model="deepseek-chat")
+        replay.complete(agent="proposer", messages=unseen_messages, model="deepseek-chat")
 
     assert excinfo.value.digest == expected_digest
     assert expected_digest in str(excinfo.value)
 
 
 # ═══ 3. derive_state reconstructs run_id, both model ids, iteration count, tool calls
+#
+# Rewritten per spec_fixes_round1.md Decision 3 / C2: the previous version of this
+# test validated a hand-written fixture that named a tool, `get_episode_dossier`,
+# which was never in the registry (the real names are `get_episode` / `get_cash_match`
+# / etc. -- tools.py:1650-1666) and used journal field names (`tool`/`args`) that
+# `dispatch` happened to emit but `derive_state` never read. It tested the mock, not
+# the system, which is exactly how reviewer finding 2 shipped unnoticed. This version
+# builds its tool-call trace by calling `tools.dispatch` for real against a generated
+# demo database (the same pattern `tests/test_agents_tools.py` uses), and its
+# llm_request/llm_response trace by calling a real `OpenAICompatClient` against a
+# mock transport -- so both the tool-call reconstruction (Decision 3) and the
+# per-agent model reconstruction (C1) are exercised end to end, not simulated.
+#
+# Decision 3 pins the journal field names to `name`/`arguments`; `dispatch` itself
+# (tools.py:1809 et al, Fixer B's file) still journals `tool`/`args` as this file is
+# written. If that rename has not landed yet, the `state.tool_calls[i].name` /
+# `.arguments` assertions below are the ones that will fail -- which is the correct,
+# intended signal, not a bug in this test.
 
 
-def _write_two_iteration_run(path: Path) -> None:
-    journal = Journal(path, "run-3", now=_clock())
-    journal.event("run_started", role="workflow_coordinator", episode_id="E-1", cursor="2026-01-01T23:59:59Z")
-    for i in range(2):
-        journal.event("iteration_started", iteration=i)
-        journal.event("llm_request", iteration=i, agent="proposer", model="deepseek-chat")
-        journal.event(
-            "llm_response", iteration=i, agent="proposer",
-            usage={"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+def test_derive_state_reconstructs_run_id_both_model_ids_iteration_count_and_tool_calls_from_a_journal_built_by_real_dispatch_and_complete(tmp_path):
+    from recon.agents import tools
+    from recon.api import app as api_app
+    from recon.config import load_settings
+    from recon.db import connection as db_connection
+
+    settings = load_settings("demo", data_dir=tmp_path / "data")
+    api_app.build_dataset(settings)
+    conn = db_connection.connect(settings.db_path)
+    journal_path = tmp_path / "run-3.jsonl"
+    try:
+        journal = Journal(journal_path, "run-3", now=_clock())
+        tool_ctx = tools.ToolContext(
+            conn=conn, cursor=settings.max_cursor, role="exception_investigator",
+            model_id="deepseek-chat", run_id="run-3", now="2026-01-01T00:00:00Z",
+            nonce="deadbeef", write_token=None, call_log=tools.CallLog(), journal=journal,
         )
-        journal.event("tool_call", iteration=i, id=f"call-{i}", name="get_episode_dossier", arguments={"episode_id": "E-1"})
-        journal.event("tool_result", iteration=i, id=f"call-{i}", status="ok")
-        journal.event("proposal", iteration=i, action="RESUBMIT", reasoning="because")
-        journal.event("llm_request", iteration=i, agent="evaluator", model="deepseek-v4-pro")
-        journal.event(
-            "llm_response", iteration=i, agent="evaluator",
-            usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9},
-        )
-        journal.event("evaluation", iteration=i, overall_reasoning="looks fine")
-        journal.event("score", iteration=i, value=60.0 + i * 25)
-        journal.event("gate", iteration=i, decision="continue" if i == 0 else "complete")
-        journal.event("iteration_finished", iteration=i)
-    journal.event("run_finished", outcome="complete", final_score=85.0, wall_ms=1234)
-    journal.close()
 
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=_raw_payload())
 
-def test_derive_state_reconstructs_run_id_both_model_ids_iteration_count_and_tool_calls_from_the_file_alone(tmp_path):
-    path = tmp_path / "run-3.jsonl"
-    _write_two_iteration_run(path)
+        journal.event("run_started", role="workflow_coordinator", episode_id="E-000006", cursor=settings.max_cursor)
+        episode_ids = ["E-000006", "E-000007"]  # distinct per iteration: get_episode
+        # blocks an identical repeated call within the same run (spec_tools.md S4).
+        with _fake_client(handler) as http_client:
+            llm_client = OpenAICompatClient(
+                base_url="https://api.deepseek.com", api_key=None, journal=journal,
+                client=http_client, sleep=lambda seconds: None,
+            )
+            for i in range(2):
+                journal.event("iteration_started", iteration=i)
+                llm_client.complete(
+                    agent="proposer", messages=[{"role": "user", "content": "go"}], model="deepseek-chat",
+                )
+                tool_result = tools.dispatch(
+                    tool_ctx, "get_episode", {"episode_id": episode_ids[i]}, iteration=i,
+                )
+                assert tool_result["status"] == "ok"
+                journal.event("proposal", iteration=i, action="RESUBMIT", reasoning="because")
+                llm_client.complete(
+                    agent="evaluator", messages=[{"role": "user", "content": "grade"}], model="deepseek-v4-pro",
+                )
+                journal.event("evaluation", iteration=i, overall_reasoning="looks fine")
+                journal.event("score", iteration=i, value=60.0 + i * 25)
+                journal.event("gate", iteration=i, decision="continue" if i == 0 else "complete")
+                journal.event("iteration_finished", iteration=i)
+        journal.event("run_finished", outcome="complete", final_score=85.0, wall_ms=1234)
+        journal.close()
+    finally:
+        conn.close()
 
     # From the file alone: no journal instance, no other input.
-    events = read_journal(path)
+    events = read_journal(journal_path)
     state = derive_state(events)
 
     assert state.run_id == "run-3"
     assert state.models == {"proposer": "deepseek-chat", "evaluator": "deepseek-v4-pro"}
     assert len(state.iterations) == 2
     assert len(state.tool_calls) == 2
+    assert [tc.name for tc in state.tool_calls] == ["get_episode", "get_episode"]
+    # `dispatch` journals `args` (now `arguments`) *after* merging schema defaults in,
+    # so the optional `detail` property is present even though this test never passed
+    # it explicitly (tools.py's own default-application step, ahead of the call).
+    assert [tc.arguments for tc in state.tool_calls] == [
+        {"episode_id": "E-000006", "detail": "essential"},
+        {"episode_id": "E-000007", "detail": "essential"},
+    ]
     assert state.outcome == "complete"
     assert state.final_score == 85.0
-    assert state.token_usage["total_tokens"] == 6 + 9 + 6 + 9
+    # 4 calls to `OpenAICompatClient.complete`, each returning `_raw_payload()`'s
+    # fixed usage (12 total_tokens).
+    assert state.token_usage["total_tokens"] == 12 * 4
+
+
+# ═══ 3b. the `agent` tag itself: C1's regression test, decoupled from C2's dispatch
+# dependency above so a failure in one does not mask the other ═══════════════════
+
+
+def test_openai_compat_client_stamps_the_agent_tag_onto_every_llm_event(tmp_path):
+    """reviewer finding (spec_fixes_round1.md C1): `OpenAICompatClient.complete()` used
+    to journal `llm_request`/`llm_response` with no `agent` field at all, even though
+    `journal.py`'s own docstring names `agent` as what lets `derive_state` report the
+    proposer's and evaluator's model ids separately. Exercised directly here, with no
+    dependency on `tools.dispatch` or Decision 3's rename."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_raw_payload())
+
+    path = tmp_path / "agent-tag.jsonl"
+    journal = Journal(path, "run-agent-tag", now=_clock())
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.deepseek.com", api_key=None, journal=journal,
+            client=http_client, sleep=lambda seconds: None,
+        )
+        client.complete(agent="evaluator", messages=[{"role": "user", "content": "hi"}], model="deepseek-v4-pro")
+    journal.close()
+
+    events = read_journal(path)
+    by_kind = {e.kind: e for e in events}
+    assert by_kind["llm_request"].fields["agent"] == "evaluator"
+    assert by_kind["llm_response"].fields["agent"] == "evaluator"
 
 
 # ═══ 4. the journal never writes the api key ════════════════════════════════
@@ -262,7 +340,7 @@ def test_a_429_followed_by_a_200_succeeds_after_retry(tmp_path):
             base_url="https://api.deepseek.com", api_key=None, journal=journal,
             client=http_client, sleep=lambda seconds: None,
         )
-        result = client.complete(messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
+        result = client.complete(agent="proposer", messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
     journal.close()
 
     assert result.content == "ok"
@@ -283,7 +361,7 @@ def test_three_429s_raise_llmerror_carrying_attempts_equal_three(tmp_path):
             client=http_client, sleep=lambda seconds: None,
         )
         with pytest.raises(LLMError) as excinfo:
-            client.complete(messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
+            client.complete(agent="proposer", messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
     journal.close()
 
     assert excinfo.value.attempts == 3
@@ -311,7 +389,7 @@ def test_every_outgoing_request_body_in_the_journal_round_trips_to_what_was_sent
             journal=journal, client=http_client, sleep=lambda seconds: None,
         )
         messages = [{"role": "user", "content": "round trip me"}]
-        client.complete(messages=messages, model="deepseek-chat", temperature=0.2, max_tokens=64)
+        client.complete(agent="proposer", messages=messages, model="deepseek-chat", temperature=0.2, max_tokens=64)
     journal.close()
 
     assert len(sent_bodies) == 1
@@ -328,3 +406,50 @@ def test_every_outgoing_request_body_in_the_journal_round_trips_to_what_was_sent
         logged_body["model"], logged_body["messages"], logged_body.get("tools"), logged_body.get("tool_choice"),
     )
     assert recomputed_digest == request_events[0].fields["digest"]
+
+
+# ═══ 11. the configured key is redacted literally, whatever its shape (C3) ══
+
+
+@pytest.mark.parametrize(
+    "secret",
+    [
+        "sk-proj-AbCdEfGh12345678IjKlMnOp",  # an OpenAI project-key shape: extra hyphenated segment
+        "sk-or-v1-4b2b6e2a9c1d4f3e8a7b6c5d4e3f2a1b",  # an OpenRouter key shape
+        "gwk_9f8e7d6c5b4a3210fedcba9876543210",  # a non-"sk" gateway token
+    ],
+    ids=["sk-proj", "sk-or-v1", "non-sk-gateway-token"],
+)
+def test_the_configured_api_key_is_redacted_literally_even_when_its_shape_does_not_match_the_regex(tmp_path, secret):
+    """reviewer finding 13 (spec_fixes_round1.md C3): `_SECRET_PATTERN` only matches
+    `sk-[A-Za-z0-9]{8,}`, so a key with a hyphenated extra segment (`sk-proj-...`,
+    `sk-or-v1-...`) or no `sk` prefix at all passed straight through the pattern-based
+    redaction untouched. `OpenAICompatClient` now registers its configured `api_key`
+    with the journal verbatim (`Journal.redact_literal`), so it is scrubbed regardless
+    of shape -- reproduced here by putting the key inside an ordinary message, the way
+    a stray paste into a prompt would."""
+    journal_path = tmp_path / "literal-redact.jsonl"
+    journal = Journal(journal_path, "run-literal-redact", now=_clock())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_raw_payload())
+
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.deepseek.com", api_key=secret, journal=journal,
+            client=http_client, sleep=lambda seconds: None,
+        )
+        client.complete(
+            agent="proposer",
+            messages=[{"role": "user", "content": f"the key is {secret}, do not repeat it"}],
+            model="deepseek-chat",
+        )
+    journal.close()
+
+    text = journal_path.read_text(encoding="utf-8")
+    assert secret not in text
+    assert "REDACTED" in text
+
+    # The in-memory mirror must agree with the file -- same invariant as test 4 above.
+    events = read_journal(journal_path)
+    assert secret not in json.dumps([e.fields for e in events])

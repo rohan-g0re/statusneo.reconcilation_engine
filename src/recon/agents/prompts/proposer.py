@@ -11,11 +11,17 @@ worth restating:
   whichever member reads most reasonable under constrained decoding -- anchoring each
   option to a verdict the tool results actually contain gives the decoder something
   concrete to check against, not just a label to prefer.
-* The re-prompt template (§B.2) withholds the *previous* proposal's `reasoning` from
-  history (replaced with `"[withheld]"`) while keeping its action, evidence and
-  artifacts -- so the model sees what it proposed and cannot re-read its own argument
-  to defend it. That substitution happens in the harness's message-history management
-  (roles.py), not in this module; this module only owns the re-prompt text itself.
+* §B.2's own re-prompt template (with its withheld-`reasoning` history substitution)
+  described a *second*, parallel feed-forward mechanism that turned out never to be
+  wired up: the harness (`roles/coordinator.py`) builds every iteration-2+ user turn
+  from `rubric.build_critique`'s single string instead, which structurally cannot leak
+  `reasoning` because it never receives the proposal at all -- see `rubric.py`. Per
+  `.agents/specs/spec_fixes_round1.md` Fixer D4, having both a used and an unused
+  feed-forward implementation in the codebase is exactly the kind of drift this round
+  of fixes exists to close, so the unused one (`REPROMPT_TEMPLATE`,
+  `NOT_ADDRESSED_ENTRY_TEMPLATE`, `CONTRADICTED_ENTRY_TEMPLATE`, and their `render_*`
+  functions) has been deleted from this module rather than kept as a second, silently
+  dead answer to "how does the proposer learn what it got wrong."
 
 Budgets (3 rounds, 8 calls per iteration; iteration cap; acceptance threshold) are
 absent from every string here by design -- design §2: they "live in the orchestration
@@ -25,20 +31,20 @@ the number instead of the evidence.
 
 from __future__ import annotations
 
-from recon.agents.prompts._shared import NO_ARITHMETIC_RULE, NONCE_RULE, UNTRUSTED_TEXT_RULE, prompt_version
+from recon.agents.prompts._shared import (
+    NO_ARITHMETIC_RULE,
+    NO_SELF_FENCE_RULE,
+    NONCE_RULE,
+    UNTRUSTED_TEXT_RULE,
+    prompt_version,
+)
 
 __all__ = [
     "PROPOSER_SYSTEM_PROMPT",
     "ITERATION_1_USER_TURN",
-    "REPROMPT_TEMPLATE",
-    "NOT_ADDRESSED_ENTRY_TEMPLATE",
-    "CONTRADICTED_ENTRY_TEMPLATE",
     "PROMPT_VERSION",
     "render",
     "render_iteration1_user_turn",
-    "render_reprompt",
-    "render_not_addressed_entry",
-    "render_contradicted_entry",
 ]
 
 
@@ -220,6 +226,8 @@ PROPOSER_SYSTEM_PROMPT = (
     + _PROPOSER_INJECTION_SENTENCE
     + NONCE_RULE
     + "\n\n"
+    + NO_SELF_FENCE_RULE
+    + "\n\n"
     + _EVIDENCE_SPANS
     + _HOW_TO_REPLY
     + _RUN_CONTEXT
@@ -228,68 +236,24 @@ PROPOSER_SYSTEM_PROMPT = (
 #: `spec_prompts_roles.md` §B.1, "Iteration-1 user turn." Placeholders: `episode_id`, `cursor`.
 ITERATION_1_USER_TURN = (
     "Propose the next action for episode {episode_id} as of {cursor}.\n"
-    "Start with get_episode_dossier. Gather evidence before you decide."
+    "Start with get_episode. Gather evidence before you decide."
 )
 
-#: `spec_prompts_roles.md` §B.2, "Re-prompt template, iterations 2..N." Appended as a
-#: user message; the previous `emit_proposed_action` call stays in history with its
-#: `reasoning` argument replaced by `"[withheld]"` (harness responsibility, not this
-#: module's). Placeholders: `n`, `not_addressed_block`, `contradicted_block`.
-REPROMPT_TEMPLATE = (
-    "Iteration {n}. Your previous proposal was graded against the checklist by an\n"
-    "evaluator that never saw your reasoning. Below is only what was wrong. Nothing\n"
-    "that passed is repeated, and there is no score for you to move.\n\n"
-    "NOT ADDRESSED — the material was silent on these. Argument cannot fix them; only\n"
-    "evidence can.\n"
-    "{not_addressed_block}\n\n"
-    "CONTRADICTED — the evaluator found a span that cuts against these.\n"
-    "{contradicted_block}\n\n"
-    "Do this, in order.\n\n"
-    "1. Go back to the tools. For each gap above, name the call that would close it\n"
-    "   and make that call. If you already called that tool, call it at a different\n"
-    "   depth — get_episode_dossier(detail=\"full\"), or get_raw_record on the raw_id\n"
-    "   behind the event — or call a tool you have not used yet.\n"
-    "2. Read what comes back before you decide anything.\n"
-    "3. If the new evidence changes the action, change the action. If it changes only\n"
-    "   the artifacts, change the artifacts. If it closes nothing, put the gap into\n"
-    "   missing_evidence in the evaluator's own words.\n\n"
-    "Do not restate, defend, rephrase or re-justify your previous proposal. The\n"
-    "evaluator does not remember your argument and cannot be persuaded by a better\n"
-    "one; it grades the evidence you attach. A proposal that changes its wording and\n"
-    "not its evidence scores exactly the same and wastes a round.\n\n"
-    "If, after those calls, the evidence that would close a NOT ADDRESSED gap does not\n"
-    "exist in this system, set blocked: true and name the missing record in\n"
-    "blocked_reason. That is a correct outcome, not a failure.\n\n"
-    "Reply with one call to emit_proposed_action."
-)
-
-#: `spec_prompts_roles.md` §B.2, one entry per NOT_ADDRESSED finding. The spec's
-#: `{finding.reasoning}` dotted placeholder is flattened to `{finding_reasoning}` here:
-#: `str.format` has no attribute-traversal story consistent with this module's
-#: "explicit named placeholders" contract, so the harness passes the already-extracted
-#: string rather than the `CriterionFinding` object.
-NOT_ADDRESSED_ENTRY_TEMPLATE = (
-    "- {criterion_id} — {criterion_question}\n"
-    "  Evaluator's note: {finding_reasoning}\n"
-    "  A tool result stating this would close it."
-)
-
-#: `spec_prompts_roles.md` §B.2, one entry per CONTRADICTED finding. Same flattening as
-#: `NOT_ADDRESSED_ENTRY_TEMPLATE`, applied to both `{finding.reasoning}` and
-#: `{finding.cited_span.quote}` / `{finding.cited_span.source_ref}`.
-CONTRADICTED_ENTRY_TEMPLATE = (
-    "- {criterion_id} — {criterion_question}\n"
-    "  Evaluator's note: {finding_reasoning}\n"
-    "  Span it relied on: \"{span_quote}\"  (source: {span_source_ref})"
-)
+# `spec_prompts_roles.md` §B.2 described a second feed-forward mechanism here --
+# REPROMPT_TEMPLATE / NOT_ADDRESSED_ENTRY_TEMPLATE / CONTRADICTED_ENTRY_TEMPLATE and
+# their render_reprompt / render_not_addressed_entry / render_contradicted_entry
+# functions -- built around a per-finding not_addressed/contradicted split that
+# `harness.Propose`'s single `critique: str` parameter cannot carry. The harness that
+# actually runs (`roles/coordinator.py`) feeds every iteration-2+ turn with
+# `rubric.build_critique`'s output instead (see this module's docstring). Nothing in
+# `src/` or `tests/` called the functions this block used to define -- confirmed by
+# grep before deletion -- so per `.agents/specs/spec_fixes_round1.md` Fixer D4 the
+# unused mechanism is removed rather than kept as a second answer to the same question.
 
 #: Digest of every versioned prompt string in this module.
 PROMPT_VERSION = prompt_version(
     PROPOSER_SYSTEM_PROMPT,
     ITERATION_1_USER_TURN,
-    REPROMPT_TEMPLATE,
-    NOT_ADDRESSED_ENTRY_TEMPLATE,
-    CONTRADICTED_ENTRY_TEMPLATE,
 )
 
 
@@ -319,45 +283,3 @@ def render(
 def render_iteration1_user_turn(*, episode_id: str, cursor: str) -> str:
     """Fill the iteration-1 user turn."""
     return ITERATION_1_USER_TURN.format(episode_id=episode_id, cursor=cursor)
-
-
-def render_reprompt(*, n: int, not_addressed_block: str, contradicted_block: str) -> str:
-    """Fill the iterations-2..N re-prompt template.
-
-    `not_addressed_block`/`contradicted_block` are pre-rendered text -- the
-    concatenation of zero or more `render_not_addressed_entry`/
-    `render_contradicted_entry` calls, joined by the harness, which is where the
-    per-run list of `CriterionFinding`s lives.
-    """
-    return REPROMPT_TEMPLATE.format(
-        n=n,
-        not_addressed_block=not_addressed_block,
-        contradicted_block=contradicted_block,
-    )
-
-
-def render_not_addressed_entry(*, criterion_id: str, criterion_question: str, finding_reasoning: str) -> str:
-    """Fill one NOT ADDRESSED bullet of the re-prompt template."""
-    return NOT_ADDRESSED_ENTRY_TEMPLATE.format(
-        criterion_id=criterion_id,
-        criterion_question=criterion_question,
-        finding_reasoning=finding_reasoning,
-    )
-
-
-def render_contradicted_entry(
-    *,
-    criterion_id: str,
-    criterion_question: str,
-    finding_reasoning: str,
-    span_quote: str,
-    span_source_ref: str,
-) -> str:
-    """Fill one CONTRADICTED bullet of the re-prompt template."""
-    return CONTRADICTED_ENTRY_TEMPLATE.format(
-        criterion_id=criterion_id,
-        criterion_question=criterion_question,
-        finding_reasoning=finding_reasoning,
-        span_quote=span_quote,
-        span_source_ref=span_source_ref,
-    )

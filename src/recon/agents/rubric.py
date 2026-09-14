@@ -293,6 +293,21 @@ CRITERIA: tuple[Criterion, ...] = (
 
 _CRITERIA_BY_ID: dict[str, Criterion] = {c.criterion_id: c for c in CRITERIA}
 
+#: The 75.0-weight group `run_judge_criteria` may claim: G4, G6, G7, G9, G11,
+#: G12, G13, G14 -- every "judge"-graded criterion with weight > 0.0. Computed
+#: once here (A6, harness-coder-found composition bug) so the partition between
+#: `run_judge_criteria` and `run_tracked_criteria` is enforced by construction
+#: rather than by the two functions happening to agree: G17 is also
+#: judge-graded but weight=0.0, and `EvaluatorVerdict.per_criterion` "none
+#: omitted" (schemas.py) means a real evaluator always includes a G17 finding,
+#: so the old `run_judge_criteria` -- which took every id in `per_criterion`
+#: unconditionally -- claimed G17 too. `run_tracked_criteria` independently
+#: re-reads the same list for G17, so `merge_findings` raised the moment an
+#: evaluator actually graded it.
+_JUDGE_WEIGHTED_CRITERIA_IDS: frozenset[str] = frozenset(
+    c.criterion_id for c in CRITERIA if c.grader == "judge" and c.weight > 0.0
+)
+
 
 # ═══ the formula ═════════════════════════════════════════════════════════════════
 
@@ -356,7 +371,14 @@ def run_judge_criteria(ctx: ScoringInput) -> dict[str, CriterionFinding]:
     """
     if ctx.evaluator_verdict is None:
         raise EvaluatorUnavailable("run_judge_criteria called with no evaluator_verdict")
-    return {f.criterion_id: f for f in ctx.evaluator_verdict.per_criterion}
+    # A6: restricted to the weighted judge group -- see `_JUDGE_WEIGHTED_CRITERIA_IDS`'s
+    # comment. Without this filter, G17 (judge-graded, weight 0.0) landed here AND in
+    # `run_tracked_criteria`, and `merge_findings` raises on that overlap.
+    return {
+        f.criterion_id: f
+        for f in ctx.evaluator_verdict.per_criterion
+        if f.criterion_id in _JUDGE_WEIGHTED_CRITERIA_IDS
+    }
 
 
 def run_tracked_criteria(ctx: ScoringInput) -> dict[str, CriterionFinding]:

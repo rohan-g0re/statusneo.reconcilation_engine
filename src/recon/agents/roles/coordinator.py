@@ -1,0 +1,506 @@
+"""The Workflow Coordinator: wires a Proposer session and an Evaluator call into
+`harness.run_until`.
+
+Two models, two very different structured-output paths (`.agents/specs/spec_contracts.md`
+S:2): the Proposer (`deepseek-chat`) accepts a forced `tool_choice`, so structured output
+is unconditional there; the Evaluator (`deepseek-v4-pro`, thinking) returns HTTP 400 on a
+forced `tool_choice` and must be driven with `"auto"` plus a one-shot transcription
+repair (`spec_prompts_roles.md` S:C.4). `_emit_structured` below is the one function that
+knows how to get either model to reliably produce one specific tool call, branching on
+`client.supports_forced_tool_choice(model)` rather than on a hard-coded model name -- so
+a future model swap changes nothing here.
+
+**The Evaluator never sees the Proposer's `reasoning`.** `EvaluatorInput` (this module)
+has no `reasoning` field at all -- unrepresentable, not filtered, matching
+`spec_prompts_roles.md` S:C.2's own load-bearing exclusion and its own prescribed test
+shape ("`EvaluatorInput` has no `reasoning` field -- unrepresentable, not filtered").
+`render_evaluator_user_turn` builds the request from `EvaluatorInput` alone, every
+iteration, from scratch -- there is no code path from the Proposer's conversation into
+the Evaluator's.
+
+**A work item is proposed, never written, here.** Every tool schema this module wires
+for either role excludes `create_mock_work_item` by construction
+(`_READ_TOOL_NAMES`, shared with `roles/investigator.py`'s own exclusion) -- the model
+is never even offered the write tool, so it cannot call it regardless of what it
+decides. The one write path in the whole agent layer is the UI's *Add to-do* button
+(design S:8.6), which is outside this module entirely.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Any
+
+from recon.agents.client import LLMClient, LLMResponse, ToolCall, supports_forced_tool_choice
+from recon.agents.config import AgentSettings
+from recon.agents.grounding import Clause, select_clauses
+from recon.agents.harness import Evaluate, HarnessContext, Propose, RunBudgets, run_until
+from recon.agents.journal import Journal
+from recon.agents.prompts import evaluator as evaluator_prompt
+from recon.agents.prompts import proposer as proposer_prompt
+from recon.agents.rubric import CRITERIA, Outcome
+from recon.agents.schemas import EvaluatorVerdict, ProposedAction, SchemaError
+from recon.agents.scorers import RecordedToolResult, ScoringInput, render_tool_result
+from recon.agents.tools import ToolContext, dispatch, tool_names, wire_schemas
+
+__all__ = [
+    "EvaluatorInput",
+    "render_evaluator_user_turn",
+    "run_coordinator",
+]
+
+#: Shared with `roles/investigator.py`: the write tool is never offered to a model.
+_READ_TOOL_NAMES: tuple[str, ...] = tuple(n for n in tool_names() if n != "create_mock_work_item")
+
+#: `spec_prompts_roles.md` S:B.1, "Per-iteration tool budget: 3 rounds ..." -- no
+#: `AgentSettings` field carries a round count (only a call count -- see below), so
+#: this stays a module constant, reset fresh on every harness iteration.
+_PROPOSER_MAX_ROUNDS = 3
+
+_PROPOSER_REPAIR_MESSAGE = (
+    "That reply contained no emit_proposed_action tool call, so nothing was recorded.\n\n"
+    "Do not reconsider the proposal. Transcribe the action, evidence, artifacts and "
+    "reasoning you already settled on into a single emit_proposed_action call. Change "
+    "nothing. Add no text before or after the call."
+)
+
+EMIT_PROPOSED_ACTION_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "emit_proposed_action",
+        "description": (
+            "Record the proposed action and its evidence. This is the only way a "
+            "proposal is recorded -- a proposal written as prose is discarded unread."
+        ),
+        "parameters": ProposedAction.json_schema(),
+    },
+}
+
+EMIT_EVALUATION_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "emit_evaluation",
+        "description": evaluator_prompt.EMIT_EVALUATION_TOOL_DESCRIPTION,
+        "parameters": EvaluatorVerdict.json_schema(),
+    },
+}
+
+
+# ═══ the one function that gets either model to reliably emit one tool call ═════════
+
+
+def _find_tool_call(response: LLMResponse, name: str) -> ToolCall | None:
+    for call in response.tool_calls:
+        if call.name == name:
+            return call
+    return None
+
+
+def _emit_structured(
+    *,
+    client: LLMClient,
+    model: str,
+    messages: list[dict[str, Any]],
+    tool_spec: dict[str, Any],
+    forced_name: str,
+    repair_message: str,
+    journal: Journal,
+    agent: str,
+    iteration: int,
+) -> ToolCall:
+    """Get exactly one call to `forced_name`, branching on
+    `client.supports_forced_tool_choice(model)` (`.agents/specs/spec_contracts.md` S:2).
+
+    On a forcible model: one call, forced. A forced call that still comes back without
+    the named tool call would be a provider bug, not a modelled case in the spec, so
+    that raises immediately rather than entering the repair path built for the other
+    model.
+
+    On a non-forcible model (`deepseek-v4-pro`): `tool_choice="auto"` first. If that
+    reply contains no call to `forced_name`, exactly one repair turn runs --
+    `repair_message`, a transcription instruction, never a re-ask -- at temperature 0
+    regardless of the first call's temperature (`spec_prompts_roles.md` S:C.4: "The
+    obvious repair wording ... produces a second, different evaluation. That is
+    intrinsic self-correction between two attempts by the same model" -- Huang et al.,
+    95.5 -> 91.5 -> 89.0 on GSM8K). A second failure raises `SchemaError`; the caller
+    (`_make_evaluate`) lets it propagate, and `harness._evaluate_or_fail_closed` turns
+    it into `EvaluatorUnavailable` one layer up -- this function does not know or care
+    which typed exception the harness wants, only that it must not return a fabricated
+    tool call.
+    """
+    forced = supports_forced_tool_choice(model)
+    tool_choice: str | dict[str, Any] = {"type": "function", "function": {"name": forced_name}} if forced else "auto"
+
+    response = client.complete(
+        agent=agent, iteration=iteration, messages=messages, model=model,
+        tools=[tool_spec], tool_choice=tool_choice,
+    )
+    call = _find_tool_call(response, forced_name)
+    if call is not None:
+        return call
+
+    if forced:
+        raise SchemaError(
+            f"{forced_name} was forced via tool_choice on {model!r} but the response carried no "
+            "matching tool call.",
+            repair_message=repair_message,
+        )
+
+    # spec_prompts_roles.md S:C.4: the prose assistant turn stays in history --
+    # deleting it would make "transcribe what you already wrote" meaningless.
+    messages.append({"role": "assistant", "content": response.content or ""})
+    messages.append({"role": "user", "content": repair_message})
+    response = client.complete(
+        agent=agent, iteration=iteration, messages=messages, model=model,
+        tools=[tool_spec], tool_choice="auto", temperature=0.0,
+    )
+    call = _find_tool_call(response, forced_name)
+    if call is None:
+        raise SchemaError(
+            f"evaluator_no_tool_call: {forced_name} produced no tool call on {model!r} even after "
+            "one repair turn.",
+            repair_message=repair_message,
+        )
+    return call
+
+
+def _assistant_tool_call_message(response: LLMResponse) -> dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": response.content,
+        "tool_calls": [
+            {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.raw_arguments}}
+            for c in response.tool_calls
+        ],
+    }
+
+
+def _withheld_reasoning_tool_call_message(call: ToolCall, proposal: ProposedAction) -> dict[str, Any]:
+    """B.2: the previous `emit_proposed_action` call stays in history with its
+    `reasoning` argument replaced by `"[withheld]"` -- action, evidence and artifacts
+    are kept so the proposer sees what it proposed, but it cannot re-read its own
+    argument to defend it."""
+    withheld_args = dict(call.arguments)
+    withheld_args["reasoning"] = "[withheld]"
+    return {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {"id": call.id, "type": "function", "function": {"name": "emit_proposed_action", "arguments": json.dumps(withheld_args, default=str)}}
+        ],
+    }
+
+
+# ═══ the Proposer session -- one instance per run, callable across every iteration ═══
+
+
+class _ProposerSession:
+    """Persistent conversation across harness iterations for one episode
+    (`spec_prompts_roles.md` S:B.2). Implements `harness.Propose`.
+
+    Unlike the Evaluator, the Proposer keeps its own history: only its previous
+    `reasoning` argument is withheld (see `_withheld_reasoning_tool_call_message`), so
+    it does not have to re-discover the episode from scratch on every iteration the way
+    "researches again from the documents" is enforced structurally for the *Evaluator*.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: LLMClient,
+        model: str,
+        tool_ctx: ToolContext,
+        episode_id: str,
+        cursor: str,
+        verdict_glossary: str,
+        grounding_clause_index: str,
+        journal: Journal,
+        max_calls_per_iteration: int,
+    ) -> None:
+        self._client = client
+        self._model = model
+        self._tool_ctx = tool_ctx
+        self._episode_id = episode_id
+        self._cursor = cursor
+        self._journal = journal
+        self._max_calls = max_calls_per_iteration
+        self._system_prompt = proposer_prompt.render(
+            episode_id=episode_id, cursor=cursor, verdict_glossary=verdict_glossary,
+            grounding_clause_index=grounding_clause_index, fence_nonce=tool_ctx.nonce,
+        )
+        self._messages: list[dict[str, Any]] = []
+
+    def __call__(self, ctx: HarnessContext, critique: str | None, iteration: int) -> ProposedAction:
+        if not self._messages:
+            self._messages = [
+                {"role": "system", "content": self._system_prompt},
+                {
+                    "role": "user",
+                    "content": proposer_prompt.render_iteration1_user_turn(episode_id=self._episode_id, cursor=self._cursor),
+                },
+            ]
+        else:
+            if critique is None:
+                raise ValueError("every iteration after the first must carry a critique (spec_grounding_rubric.md S:6.1)")
+            # spec_grounding_rubric.md S:6 ("this IS the harness spec") builds the
+            # feed-forward as rubric.build_critique's single string, appended verbatim
+            # as the next user turn. prompts/proposer.py's own richer REPROMPT_TEMPLATE
+            # / render_not_addressed_entry / render_contradicted_entry
+            # (spec_prompts_roles.md S:B.2) is a different document's version of the
+            # same idea, built around a per-finding not_addressed/contradicted split
+            # `harness.Propose`'s single `critique: str` cannot carry -- it is not used
+            # here. See this coder's report.
+            self._messages.append({"role": "user", "content": critique})
+
+        read_tools = wire_schemas(_READ_TOOL_NAMES)
+        calls_made = 0
+        for _round in range(_PROPOSER_MAX_ROUNDS):  # per-iteration budget, reset every call (S:B.1)
+            response = self._client.complete(
+                agent="proposer", iteration=iteration, messages=self._messages,
+                model=self._model, tools=read_tools, tool_choice="auto",
+            )
+            if not response.tool_calls:
+                self._messages.append({"role": "assistant", "content": response.content or ""})
+                break
+
+            self._messages.append(_assistant_tool_call_message(response))
+            budget_hit = False
+            for call in response.tool_calls:
+                if calls_made >= self._max_calls:
+                    budget_hit = True
+                    break
+                calls_made += 1
+                envelope = dispatch(self._tool_ctx, call.name, call.arguments, iteration=iteration)
+                ctx.tool_results.append(RecordedToolResult(name=call.name, arguments=call.arguments, envelope=envelope))
+                # Reviewer finding 18: same renderer the citation scorer verifies
+                # against, so a verbatim quote of what the model saw cannot fail a veto.
+                self._messages.append({"role": "tool", "tool_call_id": call.id, "content": render_tool_result(envelope)})
+            if budget_hit or calls_made >= self._max_calls:
+                break
+
+        call = _emit_structured(
+            client=self._client, model=self._model, messages=self._messages, tool_spec=EMIT_PROPOSED_ACTION_TOOL,
+            forced_name="emit_proposed_action", repair_message=_PROPOSER_REPAIR_MESSAGE,
+            journal=self._journal, agent="proposer", iteration=iteration,
+        )
+        proposal = ProposedAction.parse(call.arguments)
+        self._messages.append(_withheld_reasoning_tool_call_message(call, proposal))
+        self._messages.append({"role": "tool", "tool_call_id": call.id, "content": "recorded"})
+        return proposal
+
+
+# ═══ the Evaluator call -- fresh trace, every iteration ═════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluatorInput:
+    """Exactly the sections `spec_prompts_roles.md` S:C.2 puts in the user turn.
+
+    Deliberately has **no `reasoning` field** -- unrepresentable, not filtered, which
+    is the load-bearing exclusion S:C.2 itself names as the property a test must prove
+    structurally rather than by a runtime check that could be forgotten.
+    """
+
+    episode: dict[str, Any]
+    tool_results: tuple[RecordedToolResult, ...]
+    proposal_view: dict[str, Any]
+    named_clause: Clause | None
+    mapped_clauses: tuple[Clause, ...]
+    checklist: tuple[tuple[str, str], ...]  # (criterion_id, question)
+
+
+def _norm(s: str) -> str:
+    """Deliberately duplicates `scorers._norm`'s two-line body rather than importing a
+    private symbol across the module boundary (that function is not exported, and this
+    coder does not own `scorers.py`). This `verified` flag is informational only, shown
+    to the Evaluator as a hint -- the *authoritative* G5 check is still
+    `scorers.citation_verifies_by_substring`, run by the harness after the Evaluator
+    replies."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", s)).strip()
+
+
+def _span_source_text(
+    source_ref: str, tool_results: tuple[RecordedToolResult, ...], clauses: tuple[Clause, ...]
+) -> str | None:
+    if source_ref.startswith("KG:"):
+        entity = source_ref[len("KG:") :]
+        texts = [c.text for c in clauses if c.entity == entity]
+        return "\n".join(texts) if texts else None
+    m = re.match(r"^tool_result#(\d+)", source_ref)
+    if not m or not (1 <= int(m.group(1)) <= len(tool_results)):
+        return None
+    return render_tool_result(tool_results[int(m.group(1)) - 1].envelope)
+
+
+def _span_verified(span: Any, tool_results: tuple[RecordedToolResult, ...], clauses: tuple[Clause, ...]) -> bool:
+    source = _span_source_text(span.source_ref, tool_results, clauses)
+    if source is None:
+        return False
+    return _norm(source).find(_norm(span.quote)) != -1
+
+
+def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
+    """`spec_prompts_roles.md` S:C.2's six included sections, in order."""
+    parts: list[str] = ["## Episode", json.dumps(inp.episode, sort_keys=True, default=str), ""]
+
+    parts.append("## Tool results")
+    for i, tr in enumerate(inp.tool_results, start=1):
+        parts.append(f"### tool_result#{i} — {tr.name}({json.dumps(tr.arguments, sort_keys=True, default=str)})")
+        parts.append(render_tool_result(tr.envelope))
+    parts.append("")
+
+    parts += ["## The proposal", json.dumps(inp.proposal_view, sort_keys=True, default=str), ""]
+
+    parts.append("## Grounding clauses")
+    seen_ids: set[str] = set()
+    ordered_clauses = ([inp.named_clause] if inp.named_clause is not None else []) + list(inp.mapped_clauses)
+    for c in ordered_clauses:
+        if c.clause_id in seen_ids:
+            continue
+        seen_ids.add(c.clause_id)
+        parts.append(f"[{c.clause_id}] {c.entity} ({c.entity_type})\n{c.text}")
+    parts.append("")
+
+    parts.append("## Checklist")
+    for criterion_id, question in inp.checklist:
+        parts.append(f"- [{criterion_id}] {question}")
+    parts.append("")
+
+    parts.append(evaluator_prompt.FINAL_LINE)  # recency reinforcement, S:C.4
+    return "\n".join(parts)
+
+
+def _make_evaluate(*, client: LLMClient, model: str, journal: Journal, fence_nonce: str) -> Evaluate:
+    def evaluate(ctx: HarnessContext, proposal: ProposedAction, iteration: int) -> EvaluatorVerdict:
+        # Fresh trace, every iteration: no history from any previous round, and no
+        # channel into the Proposer's own conversation -- design S:1, "the reviewer
+        # gets to skip this extraneous context ... and re-discover any context it
+        # needs." Only the current proposal and the current, freshly-read dossier are
+        # ever assembled into `EvaluatorInput`.
+        prelim = ScoringInput(
+            proposal=proposal, evaluator_verdict=None, tool_results=tuple(ctx.tool_results),
+            clauses=ctx.clauses, dossier=ctx.dossier,
+        )
+        # `weight > 0.0` excludes G17_rationale_is_not_a_retelling even though it is
+        # grader=="judge": rubric.run_judge_criteria takes every finding in
+        # EvaluatorVerdict.per_criterion unconditionally, and rubric.run_tracked_criteria
+        # separately re-reads the SAME list looking for a G17 entry -- so a verdict that
+        # actually graded G17 would make rubric.merge_findings see it in both groups and
+        # raise on the overlap. rubric.py's own SCORERS comment lists exactly eight ids
+        # next to run_judge_criteria ("# G4 G6 G7 G9 G11 G12 G13 G14") and G17 separately
+        # next to run_tracked_criteria ("# G16 G17"), so this exclusion matches that
+        # comment's intent even though neither function's actual code enforces the split
+        # itself. Net effect, reported rather than silently accepted: G17 is never
+        # actually graded through this composition as built -- see this coder's report.
+        applicable = [c for c in CRITERIA if c.grader == "judge" and c.weight > 0.0 and c.applies_when(prelim)]
+        checklist = tuple((c.criterion_id, c.question) for c in applicable)
+
+        named = next((c for c in ctx.clauses if c.clause_id == proposal.grounding_clause_id), None)
+        current = ctx.dossier.get("current") or {}
+        episode_view = {
+            "episode_id": ctx.dossier.get("episode_id"),
+            "cursor": ctx.dossier.get("cursor"),
+            "track": (ctx.dossier.get("identity") or {}).get("track"),
+            "episode_disposition": current.get("episode_disposition"),
+            "reimbursement_verdict": current.get("reimbursement_verdict"),
+            "rebate_verdict": current.get("rebate_verdict"),
+            "reason_codes": current.get("reason_codes", []),
+            "cross_track_flags": current.get("cross_track_flags", []),
+        }
+        proposal_view = {
+            # NOTE: no "reasoning" key -- the load-bearing exclusion (S:C.2).
+            "evidence": [
+                {
+                    "quote": e.quote,
+                    "source_kind": e.source_kind.value,
+                    "source_ref": e.source_ref,
+                    "verified": _span_verified(e, tuple(ctx.tool_results), ctx.clauses),
+                }
+                for e in proposal.evidence
+            ],
+            "grounding_clause_id": proposal.grounding_clause_id,
+            "action": proposal.action.value,
+            "required_artifacts": list(proposal.required_artifacts),
+            "missing_evidence": list(proposal.missing_evidence),
+            "blocked": proposal.blocked,
+            "blocked_reason": proposal.blocked_reason,
+        }
+        inp = EvaluatorInput(
+            episode=episode_view, tool_results=tuple(ctx.tool_results), proposal_view=proposal_view,
+            named_clause=named, mapped_clauses=ctx.clauses, checklist=checklist,
+        )
+
+        system = evaluator_prompt.render(
+            episode_id=str(episode_view["episode_id"]), cursor=str(episode_view["cursor"]), fence_nonce=fence_nonce,
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": render_evaluator_user_turn(inp)},
+        ]
+
+        call = _emit_structured(
+            client=client, model=model, messages=messages, tool_spec=EMIT_EVALUATION_TOOL,
+            forced_name="emit_evaluation", repair_message=evaluator_prompt.REPAIR_TRANSCRIPTION_TURN,
+            journal=journal, agent="evaluator", iteration=iteration,
+        )
+        verdict = EvaluatorVerdict.parse(call.arguments)
+
+        expected_ids = [cid for cid, _q in checklist]
+        actual_ids = [f.criterion_id for f in verdict.per_criterion]
+        if actual_ids != expected_ids:
+            # S:C.3: "any failure is a STRUCTURAL failure ... it never falls back to
+            # accepting the proposal." A mismatched or reordered checklist is exactly
+            # such a failure and gets no repair attempt -- only a missing tool call
+            # does (handled inside _emit_structured).
+            raise SchemaError(
+                f"evaluator_structurally_invalid: expected findings for {expected_ids} in order, "
+                f"got {actual_ids}.",
+                repair_message="internal error: the checklist sent does not match the findings returned.",
+            )
+        return verdict
+
+    return evaluate
+
+
+# ═══ the entry point: build both roles, hand them to the harness ═══════════════════
+
+
+def run_coordinator(
+    *,
+    client: LLMClient,
+    tool_ctx: ToolContext,
+    settings: AgentSettings,
+    dossier: dict[str, Any],
+    verdict_glossary: str,
+    grounding_clause_index: str,
+    journal: Journal,
+    budgets: RunBudgets | None = None,
+) -> Outcome:
+    """Build the Proposer session and the Evaluator closure and hand them to
+    `harness.run_until`. The only place in the agent layer that constructs both roles
+    for one run -- everything above this function is plumbing that never talks to a
+    model by itself.
+    """
+    clauses = select_clauses(dossier)
+    ctx = HarnessContext(dossier=dossier, clauses=clauses)
+
+    session = _ProposerSession(
+        client=client, model=settings.proposer_model, tool_ctx=tool_ctx,
+        episode_id=str(dossier["episode_id"]), cursor=str(dossier["cursor"]),
+        verdict_glossary=verdict_glossary, grounding_clause_index=grounding_clause_index,
+        journal=journal, max_calls_per_iteration=settings.max_tool_rounds,
+    )
+    evaluate = _make_evaluate(client=client, model=settings.evaluator_model, journal=journal, fence_nonce=tool_ctx.nonce)
+
+    resolved_budgets = budgets or RunBudgets(
+        max_iterations=settings.max_iterations, threshold=settings.threshold, token_budget=settings.token_budget,
+    )
+    propose: Propose = session
+    return run_until(
+        propose, evaluate, ctx,
+        journal=journal, budgets=resolved_budgets,
+        proposer_model=settings.proposer_model, evaluator_model=settings.evaluator_model,
+    )

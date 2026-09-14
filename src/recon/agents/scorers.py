@@ -26,14 +26,14 @@ real -- the stand-in is gone, and every scorer below returns the actual
 
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Iterator
 
-from recon.agents.envelope import ToolEnvelope
+import recon.api.dossier as dossier_module
+from recon.agents.envelope import ToolEnvelope, contains_wrapper_markers
 from recon.agents.grounding import Clause
 from recon.agents.schemas import (
     ActionEnum,
@@ -52,6 +52,7 @@ __all__ = [
     "ALLOWED_BY_DISPOSITION",
     "UNTRUSTED_FIELDS",
     "canon",
+    "render_tool_result",
     "citation_verifies_by_substring",
     "action_in_vocabulary",
     "no_unsourced_number",
@@ -141,17 +142,56 @@ ALLOWED_BY_DISPOSITION: dict[Disposition, frozenset[ActionEnum]] = {
     Disposition.EXCEPTION: frozenset(ActionEnum),
 }
 
-UNTRUSTED_FIELDS: frozenset[str] = frozenset(
+# reviewer finding 15: this set used to be a hand-copy of spec_prompts_roles.md
+# S:0's Class-A ("UNTRUSTED_PROSE") field list and had already drifted from it --
+# `payer_name` was missing, so G16 was blind to an imperative planted in a PBM
+# remittance's payer name. Per spec_fixes_round1.md A4, this is now *derived*
+# from `dossier._PROJECTIONS` (the same table `tools.py` derives its wrap-set
+# from, spec_tools.md S:5.2) rather than hand-copied a second time: the
+# classification of *which* projected fields are free prose (as opposed to an
+# identifier, a code or an amount) still has to be stated somewhere, since
+# `Projection` carries no such flag -- so `_FREE_TEXT_FIELD_NAMES` is that
+# classification, and the guard below makes a rename or removal upstream fail
+# loudly instead of silently narrowing this set the way `payer_name` did.
+_FREE_TEXT_FIELD_NAMES: frozenset[str] = frozenset(
     {
-        "stc12_free_form",
-        "description",
-        "company_name",
-        "company_entry_description",
-        "disqualification_reason",
-        "rejection_reason",
-        "reversal_reason",
+        "stc12_free_form",  # MEDICAL_ACKNOWLEDGMENT
+        "description",  # BANK_TRANSACTION
+        "company_name",  # BANK_TRANSACTION
+        "company_entry_description",  # BANK_TRANSACTION
+        "payer_name",  # REMITTANCE (PBM path) -- the field finding 15 named
+        "reference",  # PROVIDER_LEVEL_ADJUSTMENT
+        "disqualification_reason",  # TPA_QUALIFICATION
+        "rejection_reason",  # TPA_MANUFACTURER_DECISION
+        "reversal_reason",  # PHARMACY_REVERSAL, TPA_REVERSAL
+        "manufacturer",  # TPA_REBATE_REQUEST, REBATE_BATCH
     }
 )
+
+_ALL_PROJECTED_FIELD_NAMES: frozenset[str] = frozenset(
+    name
+    for projection in dossier_module._PROJECTIONS.values()
+    for name in (*projection.body, *projection.row)
+)
+
+_unknown_free_text_names = _FREE_TEXT_FIELD_NAMES - _ALL_PROJECTED_FIELD_NAMES
+if _unknown_free_text_names:  # pragma: no cover - guard whose whole job is to never fire
+    raise RuntimeError(
+        f"scorers._FREE_TEXT_FIELD_NAMES names fields absent from "
+        f"dossier._PROJECTIONS: {sorted(_unknown_free_text_names)} -- a field "
+        "rename upstream must update this classification too."
+    )
+
+#: Explicit additions: free text that would reach `timeline[].facts` without
+#: coming through a `Projection` at all (spec_fixes_round1.md A4's "plus one
+#: explicit additions list", matching how `tools.py`'s `_CASH_WRAPPED_FACT_KEYS`
+#: covers the same gap for wrapping). Empty today -- kept as a named set rather
+#: than omitted, so the next one lands here instead of back on hand-copying.
+_FREE_TEXT_FIELD_ADDITIONS: frozenset[str] = frozenset()
+
+UNTRUSTED_FIELDS: frozenset[str] = (
+    _FREE_TEXT_FIELD_NAMES & _ALL_PROJECTED_FIELD_NAMES
+) | _FREE_TEXT_FIELD_ADDITIONS
 
 
 def _norm(s: str) -> str:
@@ -167,17 +207,72 @@ def _norm(s: str) -> str:
 _TOOL_RESULT_REF_RE = re.compile(r"^tool_result#(\d+)")
 
 
+def render_tool_result(envelope: Any) -> str:
+    """The rendered text a citation is verified against -- JSON-shaped
+    (``{"key": value, ...}``, keys sorted for a stable order run over run), but
+    with string LEAVES embedded verbatim instead of JSON-escaped.
+
+    Reviewer finding 18: ``json.dumps(envelope, sort_keys=True)`` -- what this
+    replaces -- is valid JSON, but JSON string-escapes every embedded ``"`` and
+    newline a leaf value happens to contain (``"the memo reads \\"URGENT\\""``).
+    A model quoting ``EvidenceSpan.quote`` never reproduces that wire escaping --
+    it copies the value conceptually, quote mark and line break included, not the
+    JSON-encoded bytes -- so an honest, exact quote of a value containing either
+    character could never verify. G5 is a veto, so this silently zeroed the whole
+    proposal.
+
+    Kept JSON-*shaped* on purpose, not flattened to ``path: value`` pairs: a
+    great deal of test fixture prose elsewhere in this codebase (and, presumably,
+    a real prompt builder's own convention) quotes a value as ``"key": "value"``
+    -- e.g. a citation of ``'"status": "ok"'`` -- which only verifies against a
+    rendering that still looks like an object literal. This renders that same
+    shape; the only change from ``json.dumps`` is that a string leaf is wrapped
+    in literal quote characters with its content copied in raw, unescaped, so
+    whatever a leaf actually contains -- an embedded quote, a newline -- appears
+    in the rendered text exactly as a model reading (or quoting) that leaf would
+    see it. `_norm`'s whitespace collapse (called on both sides before the
+    substring search) is what makes this compact, single-pass form and a
+    pretty-printed one interchangeable -- exact layout does not matter, exact
+    content does.
+
+    Exported (per spec_fixes_round1.md A5) so ``roles/coordinator.py``'s prompt
+    builder can call this same function when it places a tool result in front of
+    the model -- citation verification must run against the bytes the proposer
+    actually read, not a second, independently-formatted reconstruction of them.
+    Lives in ``scorers.py`` rather than ``envelope.py`` because this coder does
+    not own ``envelope.py`` this round (spec_fixes_round1.md's file-ownership
+    split); note in the fixer report so the orchestrator can point the roles at
+    this one.
+    """
+
+    def render(value: Any) -> str:
+        if isinstance(value, dict):
+            body = ", ".join(f'"{key}": {render(value[key])}' for key in sorted(value, key=str))
+            return "{" + body + "}"
+        if isinstance(value, list):
+            return "[" + ", ".join(render(item) for item in value) + "]"
+        if isinstance(value, bool):
+            return "true" if value else "false"  # bool before int: bool is an int subclass
+        if value is None:
+            return "null"
+        if isinstance(value, str):
+            return f'"{value}"'  # deliberately NOT JSON-escaped -- see docstring
+        return str(value)
+
+    return render(envelope)
+
+
 def _source_ref_text(ctx: ScoringInput, source_ref: str) -> str | None:
     """Resolve an ``EvidenceSpan.source_ref`` to the text it names, or ``None``.
 
     Two shapes are legal (``spec_prompts_roles.md`` S:B.3): ``"KG:<entity name>"`` for
     a grounding clause, and ``"tool_result#N..."`` for the Nth tool result this run,
     1-indexed in call order.  ``ScoringInput`` (spec_contracts.md S:7) carries no
-    ``Journal``, so "the exact bytes the proposer was shown" is reconstructed here as
-    the sorted-key JSON serialisation of the recorded envelope rather than replayed
-    from a journal file.  That is sufficient for what S1 actually needs -- a stable
-    string to search a verbatim quote against -- even though it is not byte-identical
-    to whatever the harness's own message-renderer eventually produces.
+    ``Journal``, so "the exact bytes the proposer was shown" is reconstructed here via
+    :func:`render_tool_result` rather than replayed from a journal file.  That is
+    sufficient for what S1 actually needs -- a stable string to search a verbatim
+    quote against -- even before ``roles/coordinator.py``'s own renderer is pointed
+    at the same function (reviewer finding 18 / spec_fixes_round1.md A5).
     """
     if source_ref.startswith("KG:"):
         entity = source_ref[len("KG:") :]
@@ -190,7 +285,7 @@ def _source_ref_text(ctx: ScoringInput, source_ref: str) -> str | None:
     n = int(m.group(1))
     if not (1 <= n <= len(ctx.tool_results)):
         return None
-    return json.dumps(ctx.tool_results[n - 1].envelope, ensure_ascii=False, sort_keys=True)
+    return render_tool_result(ctx.tool_results[n - 1].envelope)
 
 
 # ═══ S1 -- citation_verifies_by_substring -> G5_evidence_verifies_verbatim (veto) ═══
@@ -252,7 +347,13 @@ def action_in_vocabulary(ctx: ScoringInput) -> CriterionFinding:
             CriterionVerdict.CONTRADICTED,
         )
     current = ctx.dossier.get("current") or {}
-    disp = Disposition(current.get("episode_disposition", "EXCEPTION"))
+    # reviewer finding 3: defaulting a missing verdict to EXCEPTION handed an
+    # unevaluated episode the *most* permissive action set (ALLOWED_BY_DISPOSITION
+    # maps EXCEPTION to every action in the vocabulary). No verdict means nothing
+    # has established a defect yet, so the correct default is the most
+    # restrictive disposition -- CLOSED, which permits only ABSTAIN -- not the
+    # most permissive one.
+    disp = Disposition(current.get("episode_disposition", "CLOSED"))
     allowed = ALLOWED_BY_DISPOSITION[disp]
     if action not in allowed:
         return CriterionFinding(
@@ -278,9 +379,26 @@ _DONE = re.compile(
     r"recouped|wrote\s+off|written\s+off|marked\s+(?:it|this|the\s+\w+)\s+(?:closed|paid)|"
     r"updated\s+the\s+ledger|applied\s+the\s+(?:credit|adjustment))\b"
 )
+#: reviewer finding 4: "approve" was absent, so "approve a write-off of $X"
+#: slipped past this veto as if the proposal recommended nothing. Audited the
+#: five-verb list against `_BARE_VERB_START` below (the fixed action vocabulary
+#: G16 already polices) and added every verb there that names a completed or
+#: directed movement of money or a claim's terminal state -- pay, refund,
+#: release, authorize/authorise, void, reverse, waive, discharge, settle,
+#: credit, transfer, finalize/finalise, approve. Left out the generic ones from
+#: that same list (process, execute, apply, mark, flag, allow, permit, honor,
+#: grant, comply, act) that show up constantly in ordinary advisory prose --
+#: this criterion is a veto, so a verb list that wide would zero honest
+#: proposals far more often than it catches a real one. Also widened the
+#: article set to `a`/`an` (the reviewer's payload used "approve a write-off",
+#: not "approve the write-off") and the noun set to include the thing being
+#: written off, not only the claim/episode it belongs to.
 _IMPERATIVE = re.compile(
-    r"(?i)\b(?:close|post|write\s+off|zero\s+out|clear)\s+(?:this|the)\s+"
-    r"(?:claim|episode|receivable|balance|entry)\b(?!\s+(?:only\s+)?(?:after|once|when|if))"
+    r"(?i)\b(?:close|post|pay|refund|release|authorize|authorise|void|reverse|"
+    r"waive|discharge|settle|credit|transfer|finalize|finalise|approve|"
+    r"write\s+off|zero\s+out|clear)\s+(?:this|the|a|an)\s+"
+    r"(?:claim|episode|receivable|balance|entry|write-?off|payment|refund|adjustment)\b"
+    r"(?!\s+(?:only\s+)?(?:after|once|when|if))"
 )
 
 
@@ -383,12 +501,17 @@ def untrusted_text_not_followed(ctx: ScoringInput) -> CriterionFinding:
 
 # ═══ S3 -- no_unsourced_number -> G3_figures_are_sourced (veto) ═════════════════════
 #
-# The number-detection scorer.  spec_grounding_rubric.md S:4, in full: build the sourced
-# set from every tool result the proposer actually received this run, mask eleven
-# exempt classes off the proposal's own text, then treat everything left over as a
-# claimed figure that must canonicalise to something in that sourced set -- except a
-# percentage, which is *never* sourced, because the deterministic layer emits no
-# percentage anywhere (integer cents end to end, src/recon/money.py).
+# The number-detection scorer.  spec_grounding_rubric.md S:4, in full: reject outright
+# a proposal whose own text carries an untrusted-text fence marker (spec_fixes_round1.md
+# Decision 2 -- a fence in the proposal's own text is not real feed provenance, it is
+# forged, so masking it was the CRITICAL bypass this round fixes), then build the sourced
+# set from every tool result the proposer actually received this run, mask ten
+# exempt classes off the proposal's own text (an eleventh, the untrusted-text block, is no
+# longer masked -- see above), then treat everything left over -- including a spelled-out
+# figure containing a scale word -- as a claimed figure that must canonicalise to
+# something in that sourced set, except a percentage, which is *never* sourced, because
+# the deterministic layer emits no percentage anywhere (integer cents end to end,
+# src/recon/money.py).
 
 
 def canon(x: str | int | Decimal) -> str:
@@ -504,9 +627,6 @@ _CODE_RE = re.compile(r"\b[ABC]-\d{2}\b|\bX-\d\b|\bD-\d\b")
 _SECTION_RE = re.compile(r"§\s?\d+(?:\.\d+)*")
 _LIST_MARKER_RE = re.compile(r"(?m)^\s{0,3}\d{1,2}[.)]\s")
 _BARE_SMALL_INT_RE = re.compile(r"(?<![\d.,$])[012](?![\d.,%])")
-_UNTRUSTED_BLOCK_RE = re.compile(
-    r"<<<UNTRUSTED_FEED_TEXT.*?<<<END_UNTRUSTED_FEED_TEXT.*?>>>", re.DOTALL
-)
 
 CANDIDATE_RE = re.compile(r"\$?\s?-?\d[\d,]*(?:\.\d+)?\s?%?")
 
@@ -515,6 +635,70 @@ CANDIDATE_RE = re.compile(r"\$?\s?-?\d[\d,]*(?:\.\d+)?\s?%?")
 class _Violation:
     token: str
     offset: int
+
+
+# ═══ word-number detector (reviewer finding 4) ══════════════════════════════
+#
+# `CANDIDATE_RE` only ever matches a run of digits, so "fifty-two thousand seven
+# hundred dollars" was invisible to G3 -- a spelled-out figure is exactly as much
+# a claimed number as a digit run. spec_fixes_round1.md A2 gives two options and
+# asks this coder to make the call: a word-number detector, or a separate
+# weight=0.0 tracked criterion documented as a known false negative. The call
+# made here is the detector, deliberately narrowed to phrases containing at
+# least one SCALE word (hundred/thousand/million): a bare units/teens/tens word
+# with no scale word ("the two claims", "one document", "a dozen forms") is
+# extremely common in ordinary advisory prose and is not flagged at all, so this
+# adds no false-positive risk on top of what CANDIDATE_RE already carries -- it
+# only catches the shape the reviewer's payload actually used. A spelled-out
+# figure with no scale word at all (e.g. "twelve dollars") is a known, accepted
+# false negative of this detector, same treatment as any other exemption class.
+_WORD_NUMBERS: dict[str, int] = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
+    "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+    "ninety": 90,
+}
+_WORD_SCALES: dict[str, int] = {"hundred": 100, "thousand": 1_000, "million": 1_000_000}
+_ALL_NUMBER_WORDS: frozenset[str] = frozenset(_WORD_NUMBERS) | frozenset(_WORD_SCALES) | {"and"}
+_NUMBER_WORD_ALTERNATION = "|".join(sorted(_ALL_NUMBER_WORDS, key=len, reverse=True))
+_NUMBER_WORD_PHRASE_RE = re.compile(
+    rf"(?i)\b(?:{_NUMBER_WORD_ALTERNATION})\b(?:[-\s]+\b(?:{_NUMBER_WORD_ALTERNATION})\b)*"
+)
+
+
+def _words_to_int(phrase: str) -> int | None:
+    """Standard English number-word grammar: units/teens/tens accumulate, ``hundred``
+    multiplies the running group, ``thousand``/``million`` close and bank a group."""
+    tokens = [t for t in re.split(r"[-\s]+", phrase.strip().lower()) if t and t != "and"]
+    if not tokens:
+        return None
+    total = 0
+    group = 0
+    for tok in tokens:
+        if tok in _WORD_NUMBERS:
+            group += _WORD_NUMBERS[tok]
+        elif tok == "hundred":
+            group = (group or 1) * 100
+        else:  # thousand, million
+            total += (group or 1) * _WORD_SCALES[tok]
+            group = 0
+    return total + group
+
+
+def _word_number_violations(text: str, sourced_numbers: frozenset[str]) -> list[_Violation]:
+    violations: list[_Violation] = []
+    for m in _NUMBER_WORD_PHRASE_RE.finditer(text):
+        phrase = m.group(0)
+        if not any(scale in phrase.lower() for scale in _WORD_SCALES):
+            continue  # no scale word: below this detector's confidence bar
+        value = _words_to_int(phrase)
+        if value is None:
+            continue
+        if canon(value) not in sourced_numbers:
+            violations.append(_Violation(token=phrase, offset=m.start()))
+    return violations
 
 
 def _mask(text: str, pattern: re.Pattern[str]) -> str:
@@ -537,6 +721,29 @@ def _mask_literal(text: str, literal: str) -> str:
     return "".join(parts)
 
 
+def _mask_sourced_identifiers(text: str, pattern: re.Pattern[str], sourced_strings: frozenset[str]) -> str:
+    """Mask a shape match ONLY when the exact token is a string a tool result
+    actually returned this run.
+
+    Reviewer finding 4: the NPI/NDC masks used to fire on ANY digit run of the
+    right length, unconditionally -- `_NPI_RE`/`_NDC11_RE` are a *shape*, not a
+    provenance check, so `"the residual balance is 5270000000 cents"` and
+    `"the exposure is 52700000000 cents"` were exempted purely because a
+    fabricated cents figure happened to be 10 or 11 digits long. NPIs and NDCs
+    are identifiers a tool returns, not arbitrary long integers, so the mask
+    must require the match to actually be one of those returned identifiers
+    (hyphens stripped either side, since an NDC can render with or without
+    them) -- exactly what this function checks before masking.
+    """
+    def repl(m: re.Match[str]) -> str:
+        token = m.group(0)
+        if token in sourced_strings or token.replace("-", "") in sourced_strings:
+            return "\x00" * len(token)
+        return token
+
+    return pattern.sub(repl, text)
+
+
 def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
     criterion_id = "G3_figures_are_sourced"
     sourced = _build_sourced_sets(ctx.tool_results)
@@ -544,25 +751,46 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
     raw_text = "\n".join(
         [ctx.proposal.reasoning, *ctx.proposal.required_artifacts, *ctx.proposal.missing_evidence]
     )
+
+    # reviewer finding 1 (CRITICAL) / spec_fixes_round1.md Decision 2: only a
+    # tool result may carry an untrusted-text fence (`⟦UNTRUSTED:...⟧`,
+    # envelope.py). A fence in the proposal's OWN free text is not real feed
+    # provenance -- the model minted it itself, and it knows the run's nonce
+    # because every tool result hands it over in `_untrusted_nonce`. The old
+    # behaviour MASKED a span that merely *looked* like a fence (and matched the
+    # wrong, obsolete triple-angle-bracket literal besides -- Decision 1),
+    # which let a self-authored fence launder any fabricated figure inside it
+    # straight past this scorer: the reviewer's payload wrapped `$52,700` and
+    # `$18,300` in one and scored SUPPORTED with no tool result containing
+    # either figure. Reject outright; never mask.
+    if contains_wrapper_markers(raw_text):
+        return CriterionFinding(
+            criterion_id,
+            "the proposal's own text contains an untrusted-text fence marker; only a "
+            "tool result may emit one, so this is a fabricated fence, not real "
+            "provenance, and everything inside it is ungrounded by construction.",
+            None,
+            CriterionVerdict.CONTRADICTED,
+        )
+
     text = _norm(raw_text)
 
     # 1. verified evidence quotes
     for span in ctx.proposal.evidence:
         text = _mask_literal(text, _norm(span.quote))
-    # 2. untrusted-text blocks
-    text = _mask(text, _UNTRUSTED_BLOCK_RE)
-    # 3. clause ids
+    # 2. clause ids
     text = _mask(text, _CLAUSE_ID_RE)
-    # 4. any sourced string, exact match, longest first
+    # 3. any sourced string, exact match, longest first
     for literal in sorted((s for s in sourced.strings if s), key=len, reverse=True):
         text = _mask_literal(text, _norm(literal))
-    # 5. NDC11
-    text = _mask(text, _NDC11_RE)
-    # 6. NPI
-    text = _mask(text, _NPI_RE)
-    # 7. episode id
+    # 4. NDC11 -- masked only when the digit run is actually sourced (see
+    # `_mask_sourced_identifiers`'s docstring: reviewer finding 4).
+    text = _mask_sourced_identifiers(text, _NDC11_RE, sourced.strings)
+    # 5. NPI -- same rule.
+    text = _mask_sourced_identifiers(text, _NPI_RE, sourced.strings)
+    # 6. episode id
     text = _mask(text, _EPISODE_ID_RE)
-    # 8. dates -- routed into a parallel check, not dropped (spec S:4.5)
+    # 7. dates -- routed into a parallel check, not dropped (spec S:4.5)
     date_violations: list[_Violation] = []
     for pattern in _DATE_PATTERNS:
         for m in pattern.finditer(text):
@@ -570,16 +798,19 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
             if token not in sourced.dates and token[:10] not in sourced.dates:
                 date_violations.append(_Violation(token=token, offset=m.start()))
         text = _mask(text, pattern)
-    # 9. verdict / flag / exception codes
+    # 8. verdict / flag / exception codes
     text = _mask(text, _CODE_RE)
-    # 10. section references
+    # 9. section references
     text = _mask(text, _SECTION_RE)
-    # 11. list markers
+    # 10. list markers
     text = _mask(text, _LIST_MARKER_RE)
-    # 12. bare 0, 1, 2
+    # 11. bare 0, 1, 2
     text = _mask(text, _BARE_SMALL_INT_RE)
 
     violations: list[_Violation] = list(date_violations)
+    # 12. spelled-out figures (reviewer finding 4) -- see the word-number
+    # detector's own module comment for the false-positive-risk judgment call.
+    violations.extend(_word_number_violations(text, sourced.numbers))
     for m in CANDIDATE_RE.finditer(text):
         token = m.group(0)
         if not token.strip():

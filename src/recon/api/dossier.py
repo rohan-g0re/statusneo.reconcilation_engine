@@ -67,7 +67,7 @@ from recon.db import repository
 from recon.domain.enums import RecordKind
 from recon.reference import drugs, entities
 
-__all__ = ["build_dossier", "TimelineEvent"]
+__all__ = ["build_dossier", "TimelineEvent", "RECORD_PROJECTIONS"]
 
 
 @dataclass
@@ -355,7 +355,14 @@ class Projection:
     simple: tuple[str, ...] = ()
 
 
-_PROJECTIONS: dict[RecordKind, Projection] = {
+#: Public name (spec_fixes_round1.md B8): the agent layer (`recon.agents.tools`)
+#: reads this table to derive which fields are feed-derived and must be fenced
+#: before a model sees them -- importing another layer's underscore-private to do
+#: that was itself a reviewer finding (17). `_PROJECTIONS` is kept as an alias
+#: immediately below rather than removed: other modules in this tree already
+#: import the private name directly, and this fixer's mandate is one authorised
+#: edit to this file, not a repo-wide rename of every call site.
+RECORD_PROJECTIONS: dict[RecordKind, Projection] = {
     RecordKind.PHARMACY_CLAIM: Projection(
         body=(
             "transaction_code", "response_status", "reject_codes",
@@ -456,6 +463,9 @@ _PROJECTIONS: dict[RecordKind, Projection] = {
         simple=("direction", "amount_cents", "posting_date"),
     ),
 }
+
+#: Backward-compatible alias -- see the note on `RECORD_PROJECTIONS` above.
+_PROJECTIONS = RECORD_PROJECTIONS
 
 
 # Every projection's `simple` must be a subset of what it actually surfaces,
