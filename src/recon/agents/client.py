@@ -276,7 +276,42 @@ class OpenAICompatClient:
                 continue
 
             if response.status_code == 200:
-                return response.json()
+                # A 200 is not proof of an answer. Measured against DeepSeek under
+                # load: it holds the connection open for minutes and then returns
+                # HTTP 200 with an EMPTY body -- it throttles by stalling rather than
+                # by answering 429, so there is no status code and no Retry-After to
+                # key off.
+                #
+                # Left alone this fails twice over. An empty body makes `.json()`
+                # raise `JSONDecodeError`, which nothing here catches, so it escapes
+                # as an unhandled exception rather than an `LLMError`. And a body that
+                # parses but carries no choices becomes a perfectly well-formed
+                # `LLMResponse` with no content and no tool calls -- which the roles
+                # read as "the model declined to call the tool" and answer with a
+                # repair turn, spending another stalled request to re-ask a question
+                # that was never received. Treated as retryable, which is what it is.
+                try:
+                    payload = response.json()
+                except ValueError as exc:
+                    payload = None
+                    parse_error: str | None = str(exc)
+                else:
+                    parse_error = None
+
+                if payload and (payload.get("choices") or payload.get("error")):
+                    return payload
+
+                detail = parse_error or "no choices in the response body"
+                if attempt < _MAX_ATTEMPTS:
+                    self._sleep(_retry_delay(attempt, response.headers.get("Retry-After")))
+                    continue
+                raise LLMError(
+                    f"{self._base_url}/chat/completions returned HTTP 200 with an unusable "
+                    f"body after {attempt} attempts ({detail}). This is how this provider "
+                    f"signals throttling -- it stalls the connection and answers empty "
+                    f"rather than returning 429.",
+                    status=200, body=response.text[:500], attempts=attempt,
+                )
 
             retryable = response.status_code == 429 or response.status_code >= 500
             if retryable and attempt < _MAX_ATTEMPTS:

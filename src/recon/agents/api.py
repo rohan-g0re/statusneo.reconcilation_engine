@@ -445,14 +445,29 @@ def build_router(
                     cursor=resolved_cursor,
                     model=agent_settings.investigator_model,
                 )
-                outcome = _agent.investigator.run_investigator(
-                    client=client,
-                    tool_ctx=ctx,
-                    model=agent_settings.investigator_model,
-                    episode_id=episode_id,
-                    cursor=resolved_cursor,
-                    verdict_glossary=_glossary(),
-                )
+                try:
+                    outcome = _agent.investigator.run_investigator(
+                        client=client,
+                        tool_ctx=ctx,
+                        model=agent_settings.investigator_model,
+                        episode_id=episode_id,
+                        cursor=resolved_cursor,
+                        verdict_glossary=_glossary(),
+                    )
+                except _agent.client.LLMError as exc:
+                    # Say which side failed. A provider that stalls and then answers
+                    # empty is indistinguishable, from the browser, from a hung server
+                    # -- and a reviewer watching a spinner has no way to tell "the
+                    # model is rate-limited" from "your agent layer is broken". It is
+                    # worth one branch to name it.
+                    journal.event("run_finished", role="exception_investigator", error=str(exc))
+                    raise HTTPException(
+                        503,
+                        f"the model provider did not answer after {exc.attempts} attempts "
+                        f"(HTTP {exc.status}). This is upstream of the agent layer: the "
+                        f"deterministic views, the timeline and the to-do list are unaffected. "
+                        f"Retry in a few minutes.",
+                    ) from exc
                 journal.event("run_finished", role="exception_investigator")
             finally:
                 journal.close()

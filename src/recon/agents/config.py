@@ -148,7 +148,13 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         "max_iterations": int(env("MAX_ITERATIONS", "5")),
         "threshold": float(env("THRESHOLD", "80.0")),
         "max_tool_rounds": 8,
-        "request_timeout_s": 120.0,
+        # 60s, not 120s. A healthy call on this provider is 2-10 seconds; the only
+        # thing a longer ceiling buys is a longer wait before discovering the provider
+        # has stalled. With three attempts, 120s meant six minutes of silence before
+        # any error surfaced, which reads as a hung application rather than a throttled
+        # upstream. Cutting it halves the worst case and changes nothing about a call
+        # that was ever going to succeed.
+        "request_timeout_s": 60.0,
         "token_budget": 120_000,
         "journal_dir": repo_root / "data" / "agent_runs",
         "fixture_dir": repo_root / "tests" / "fixtures" / "agent_traces",

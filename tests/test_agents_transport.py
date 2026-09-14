@@ -453,3 +453,64 @@ def test_the_configured_api_key_is_redacted_literally_even_when_its_shape_does_n
     # The in-memory mirror must agree with the file -- same invariant as test 4 above.
     events = read_journal(journal_path)
     assert secret not in json.dumps([e.fields for e in events])
+
+
+# ═══ 11. a stalled provider: HTTP 200 with nothing in it ════════════════════
+#
+# Measured against DeepSeek under load on 2026-09-14: it holds the connection open
+# for minutes and then answers HTTP 200 with an empty body. It throttles by
+# stalling, never by returning 429, so there is no status code and no Retry-After
+# to branch on -- the only signal is that a 200 arrived carrying nothing.
+
+
+def test_an_empty_body_on_a_200_is_retried_and_then_raises_rather_than_parsing(tmp_path):
+    """Left alone this failed twice over: `.json()` raises `JSONDecodeError` on a
+    truly empty body, which nothing caught, and a body that parsed but held no
+    choices became a well-formed `LLMResponse` with no tool calls -- which a role
+    reads as "the model declined" and answers with a repair turn, spending another
+    stalled request re-asking a question that was never received."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, content=b"")
+
+    journal = Journal(tmp_path / "run.jsonl", "run-stall", now=lambda: "2026-09-14T00:00:00Z")
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.example.com", api_key="sk-test1234", journal=journal,
+            client=http_client, sleep=lambda _s: None,
+        )
+        with pytest.raises(LLMError) as excinfo:
+            client.complete(agent="proposer", messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
+
+    assert len(calls) == 3, "an empty 200 is a transient stall and must be retried, not accepted"
+    assert excinfo.value.status == 200
+    assert excinfo.value.attempts == 3
+    assert "throttling" in str(excinfo.value), "the message must name the cause, not just the symptom"
+    journal.close()
+
+
+def test_a_200_carrying_choices_is_returned_normally(tmp_path):
+    """The guard must not reject a real answer -- one attempt, no retry."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "model": "deepseek-flash",
+            "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "fine"}}],
+            "usage": {"total_tokens": 3},
+        })
+
+    journal = Journal(tmp_path / "run.jsonl", "run-ok", now=lambda: "2026-09-14T00:00:00Z")
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.example.com", api_key="sk-test1234", journal=journal,
+            client=http_client, sleep=lambda _s: None,
+        )
+        response = client.complete(agent="proposer", messages=[{"role": "user", "content": "hi"}], model="deepseek-chat")
+
+    assert len(calls) == 1
+    assert response.content == "fine"
+    journal.close()
