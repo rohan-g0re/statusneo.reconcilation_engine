@@ -1001,6 +1001,109 @@ def test_all_digit_identifier_wrapped_in_untrusted_fence_is_exempt():
     assert finding.verdict == "SUPPORTED", finding.reasoning
 
 
+def test_domain_term_followed_by_a_hyphenated_word_is_exempt():
+    """Regression, measured live via the Playwright walkthrough (task 4): a real
+    proposal wrote "a 340B-flagged pharmacy-benefit episode" -- ordinary English
+    compounding, not a continuation of the numeric term. `_DOMAIN_TERM_RE`'s old
+    trailing guard `(?![\\d.,%-])` rejected the match on the hyphen alone, leaving
+    "340" (with "B" stranded) exposed to the digit scanner as a bare, unsourced
+    number. The guard now only rejects a hyphen when a DIGIT follows it (a real
+    continuation, e.g. "340B-2027"), not a hyphen followed by a letter."""
+    ctx = _ctx(
+        proposal=FakeProposedAction(
+            reasoning="E-000021 is a 340B-flagged pharmacy-benefit episode with no open work."
+        )
+    )
+    assert no_unsourced_number(ctx).verdict == "SUPPORTED"
+
+
+def test_domain_term_followed_by_a_hyphenated_digit_is_still_a_violation():
+    """The other half of the same fix: a hyphen genuinely continuing the term into
+    more digits must still be rejected -- narrowing the guard to letters-only must
+    not turn into "any hyphen is fine"."""
+    ctx = _ctx(proposal=FakeProposedAction(reasoning="Filed under form 340B-52700, unrelated to any tool result."))
+    finding = no_unsourced_number(ctx)
+    assert finding.verdict == "CONTRADICTED"
+    assert "52700" in finding.reasoning
+
+
+def test_number_embedded_in_a_returned_string_is_sourced():
+    """Regression, measured live: a real proposal named the drug "LENALIDOMIDE 25
+    MG" -- copied verbatim from `get_episode`'s own `identity.drug` string, which
+    this dataset always renders as "<name> <strength>". `_build_sourced_sets` used
+    to add only whole string leaves to `sourced.strings`, never the numbers
+    embedded inside them, so "25" reached the digit scanner with nothing in
+    `sourced.numbers` to match -- flagging a routine drug strength, present in
+    literally every episode's own name, as an invented figure. G3 is a veto, so
+    this was not a rare false positive."""
+    tool_results = (_tool_result("get_episode", {"identity": {"drug": "LENALIDOMIDE 25 MG"}}),)
+    ctx = _ctx(
+        proposal=FakeProposedAction(reasoning="This concerns LENALIDOMIDE 25 MG, fully resolved on both tracks."),
+        tool_results=tool_results,
+    )
+    assert no_unsourced_number(ctx).verdict == "SUPPORTED"
+
+
+def test_percentage_is_still_a_violation_even_when_its_digits_are_sourced():
+    """Regression guard for the fix above: making a bare sourced number's SPAN
+    protected must not accidentally protect a percentage built from the same
+    digits. `_trim_candidate_span` treats a trailing "%" as cosmetic, so "12%"
+    trims to a bare "12" -- if the percentage check ran after the fragment-span
+    containment check, a sourced quantity of 12 would launder "12%" straight
+    through. The percentage check must run first, unconditionally."""
+    tool_results = (_tool_result("get_episode", {"quantity": 12}),)
+    ctx = _ctx(proposal=FakeProposedAction(reasoning="Roughly 12% of the claim is at risk."), tool_results=tool_results)
+    assert no_unsourced_number(ctx).verdict == "CONTRADICTED"
+
+
+def test_evidence_quote_masking_does_not_fragment_an_unrelated_sourced_number():
+    """Regression, measured live: a real proposal's own evidence quoted the bare
+    reason code "50" (itself a genuine, verified quote), and step 1's
+    `_mask_literal` replaces that literal substring EVERYWHERE it occurs in the
+    text -- including inside the unrelated, fully-sourced number "3375000" (which
+    contains "50" at index 3). That left only "337" unmasked for the candidate
+    scanner, which is not itself sourced, so a real `expected_cents` figure was
+    flagged as invented. Protected spans for sourced numbers are now computed on
+    the text as written, before any masking step -- including evidence-quote
+    masking -- gets a chance to corrupt them."""
+    tool_results = (_tool_result("calculate_reconciliation", {"rebate": {"expected_cents": 3375000}}),)
+    proposal = FakeProposedAction(
+        reasoning='The adjustment reason code is "50" and the rebate expected 3375000 cents, both confirmed.',
+        evidence=(FakeEvidenceSpan(quote="50", source_ref="tool_result#1"),),
+    )
+    ctx = _ctx(proposal=proposal, tool_results=tool_results)
+    finding = no_unsourced_number(ctx)
+    assert finding.verdict == "SUPPORTED", finding.reasoning
+
+
+def test_evidence_quote_masking_does_not_break_clause_id_masking():
+    """Regression, measured live: a real proposal's own evidence quoted the bare
+    group code "CO", and masking that literal substring everywhere broke the
+    `"CO"` inside a grounding clause id it also cited
+    (`KG-X-1-COMPLIANCE-CASE-a35f81a8` -> `KG-X-1-\\x00\\x00MPLIANCE-CASE-a35f81a8`),
+    which stopped `_CLAUSE_ID_RE` from matching the id as a whole and left its
+    trailing hash exposed to the digit scanner (the bare "81" inside "a35f81a8").
+    Clause-id spans are now also protected on the text as written, before any
+    masking step runs -- not only re-matched after evidence-quote masking, which
+    can no longer be relied on to leave the id's shape intact."""
+    compliance_clause = Clause(
+        clause_id="KG-X-1-COMPLIANCE-CASE-a35f81a8",
+        entity="X-1 compliance case",
+        entity_type="Trap",
+        text="Reimbursement denied or rejected while rebate money is held",
+        index=0,
+    )
+    tool_results = (_tool_result("get_remittance_detail", {"group_code": "CO"}),)
+    proposal = FakeProposedAction(
+        reasoning='The adjustment group code is "CO", matching KG-X-1-COMPLIANCE-CASE-a35f81a8.',
+        evidence=(FakeEvidenceSpan(quote="CO", source_ref="tool_result#1"),),
+        grounding_clause_id="KG-X-1-COMPLIANCE-CASE-a35f81a8",
+    )
+    ctx = _ctx(proposal=proposal, tool_results=tool_results, clauses=(CLAUSE_A, CLAUSE_B, compliance_clause))
+    finding = no_unsourced_number(ctx)
+    assert finding.verdict == "SUPPORTED", finding.reasoning
+
+
 def test_a_sourced_date_long_form_rendering_is_recognised():
     """Exemption class: dates, routed through a parallel sourced-date check that
     also recognises long-form renderings of an ISO date actually returned."""

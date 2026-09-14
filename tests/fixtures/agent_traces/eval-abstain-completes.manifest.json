@@ -1,0 +1,9 @@
+{
+  "episode_id": "E-000002",
+  "profile": "demo",
+  "cursor": "2026-07-01T23:59:59Z",
+  "run_id": "eval-abstain-completes",
+  "nonce": "77778888",
+  "now": "2026-07-02T00:00:00Z",
+  "expected_outcome_kind": "complete"
+}

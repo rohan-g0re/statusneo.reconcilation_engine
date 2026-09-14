@@ -1,0 +1,13 @@
+{
+  "episode_id": "E-000006",
+  "profile": "demo",
+  "cursor": "2026-07-01T23:59:59Z",
+  "run_id": "eval-g3-veto-failure",
+  "nonce": "f00dfeed",
+  "now": "2026-07-02T00:00:00Z",
+  "budgets": {
+    "max_iterations": 1,
+    "threshold": 80.0
+  },
+  "expected_outcome_kind": "capped"
+}

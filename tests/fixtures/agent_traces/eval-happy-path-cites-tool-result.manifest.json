@@ -1,0 +1,9 @@
+{
+  "episode_id": "E-000006",
+  "profile": "demo",
+  "cursor": "2026-07-01T23:59:59Z",
+  "run_id": "eval-happy-path-cites-tool-result",
+  "nonce": "11112222",
+  "now": "2026-07-02T00:00:00Z",
+  "expected_outcome_kind": "complete"
+}

@@ -570,6 +570,11 @@ def _walk_leaves(obj: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[s
 
 _ISO_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
+#: A standalone number embedded inside an ordinary returned string -- not adjacent to
+#: another digit or a decimal point on either side, so a maximal run like "00078060795"
+#: (an NDC) or "8214199091" (a trace number) is captured whole rather than fragmented.
+_EMBEDDED_NUMBER_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])")
+
 _MONTH_NAMES = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
 
 
@@ -636,6 +641,18 @@ def _build_sourced_sets(tool_results: tuple[RecordedToolResult, ...]) -> _Source
                 strings.add(leaf)
                 if _ISO_DATE_PREFIX_RE.match(leaf):
                     dates.update(_date_renderings(leaf[:10]))
+                # A number embedded in an ordinary returned string -- most commonly a
+                # drug's own strength inside its name ("LENALIDOMIDE 25 MG",
+                # "OCRELIZUMAB 300 MG/10 ML") -- is exactly as sourced as a top-level
+                # numeric field: the model did not invent "25", a tool's own text
+                # already contains it verbatim. Measured live: G3 (a veto) zeroed an
+                # honest, fully-correct ABSTAIN proposal on an entirely routine
+                # episode for exactly this reason -- every drug name in this dataset
+                # carries its dose as a number, so this was not a rare case.
+                # `unwrap()` first so a digit run from the untrusted-fence's own
+                # nonce is never picked up as if it were feed content.
+                for match in _EMBEDDED_NUMBER_RE.finditer(unwrap(leaf)):
+                    add_number(match.group(0))
 
     return _SourcedSets(numbers=frozenset(numbers), strings=frozenset(strings), dates=frozenset(dates))
 
@@ -679,10 +696,18 @@ _DOMAIN_NUMERIC_TERMS: tuple[str, ...] = (
 )
 # Longest-first so "277CA" wins over "277"; the trailing guard then permits a letter
 # suffix only where the term itself already carries one.
+#
+# The trailing lookahead rejects a hyphen only when a DIGIT follows it (`-\d`, e.g. a
+# term glued to a further numeric suffix), not a hyphen followed by a letter. Measured
+# live: a real, honest proposal wrote "a 340B-flagged pharmacy-benefit episode" --
+# ordinary English compounding, not "the term continues" -- and the un-narrowed
+# `(?![\d.,%-])` rejected the whole match on the hyphen alone, so "340" (with the "B"
+# now stranded) reached the digit scanner as a bare, unsourced number. G3 is a veto,
+# so this zeroed an honest proposal outright, on an episode with nothing wrong with it.
 _DOMAIN_TERM_RE = re.compile(
     r"(?<![\w.,$-])(?:"
     + "|".join(re.escape(t) for t in sorted(_DOMAIN_NUMERIC_TERMS, key=len, reverse=True))
-    + r")(?![\d.,%-])"
+    + r")(?![\d.,%]|-\d)"
 )
 
 #: The 8-hex suffix of a grounding clause id. Measured live: the model cited clauses
@@ -887,6 +912,36 @@ def _mask_sourced_identifiers(text: str, pattern: re.Pattern[str], sourced_strin
     return pattern.sub(repl, text)
 
 
+def _sourced_number_spans(text: str, sourced_numbers: frozenset[str]) -> set[tuple[int, int]]:
+    """Spans of a maximal digit run in ``text`` whose canonical value is already in
+    ``sourced.numbers`` -- computed on pristine text, at the same point
+    ``_identifier_fragments`` is, before any later masking step gets a chance to
+    carve a short, unrelated sourced STRING (e.g. a bare ``"5000"`` patient-
+    responsibility value, or a single-character status code) out of the middle of
+    it.
+
+    Measured live: a real (not scripted) proposal wrote ``3375000`` -- the rebate's
+    ``expected_cents``, genuinely returned by ``calculate_reconciliation`` as an
+    integer -- and step 3's literal-string masking (sorted longest-first over
+    ``sourced.strings``) matched some unrelated short sourced string against the
+    digits in its *middle*, leaving only the leading ``"337"`` unmasked. Checking
+    ``canon()`` against ``sourced.numbers`` after that corruption sees ``"337"``,
+    which is not itself sourced, and flags a real figure as invented -- G3 is a
+    veto, so this zeroed an honest proposal. This is the exact same failure mode
+    ``_identifier_fragments`` exists to prevent for identifier tokens, applied to a
+    plain sourced number instead: recording the span before the corruption can
+    happen, rather than trying to detect the corruption after the fact.
+    """
+    spans: set[tuple[int, int]] = set()
+    for m in _EMBEDDED_NUMBER_RE.finditer(text):
+        try:
+            if canon(m.group(0)) in sourced_numbers:
+                spans.add((m.start(), m.end()))
+        except (InvalidOperation, ValueError):
+            continue
+    return spans
+
+
 def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
     criterion_id = "G3_figures_are_sourced"
     sourced = _build_sourced_sets(ctx.tool_results)
@@ -918,34 +973,58 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
 
     text = _norm(raw_text)
 
+    # 0. Spans that are already provably sourced, computed on TEXT AS WRITTEN -- before
+    # step 1 (below) or anything after it masks a single byte. Kept as offsets, not
+    # masked in place, because the surrounding characters are themselves the evidence
+    # of provenance; destroying them first destroys the proof.
+    #
+    # This has to run before step 1, not merely before step 3 as an earlier version of
+    # this function had it. Measured live: a real (not scripted) proposal's OWN
+    # evidence quoted the bare reason code `"50"` -- itself a perfectly legitimate,
+    # verified quote -- and step 1's `_mask_literal` matches that quote as a literal
+    # substring *anywhere* it occurs, including inside the unrelated, fully-sourced
+    # number `3375000` (which contains "50" at index 3). That left `"337" + NUL + NUL +
+    # "00"` for every later step to work with, and the candidate scanner then saw only
+    # the surviving `"337"` -- not sourced on its own -- and flagged a real figure
+    # (the rebate's own `expected_cents`) as invented. G3 is a veto, so this zeroed an
+    # honest proposal outright. Computing both kinds of protected span here, against
+    # the untouched text, is what makes that corruption harmless regardless of which
+    # later step causes it.
+    #
+    # The same corruption reaches clause ids and hashes too, not only numbers and
+    # identifiers: the evidence quote `"CO"` (a genuine adjustment group code) matches
+    # literally inside `KG-X-1-COMPLIANCE-CASE-a35f81a8`'s own `"CO"` in "COMPLIANCE",
+    # which broke step 2's `_CLAUSE_ID_RE` match (it requires an unbroken run of
+    # `[A-Z0-9-]`) and left the hash `a35f81a8` -- and the bare `"81"` inside it --
+    # exposed to the digit scanner. So clause-id and known-hash spans are recorded
+    # here too, on the same untouched text, rather than trusted to still match once
+    # steps 1+ have run.
+    known_hashes = sorted({c.clause_id.rsplit("-", 1)[-1] for c in ctx.clauses})
+    _hash_re = (
+        re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(h) for h in known_hashes) + r")(?![\w-])")
+        if known_hashes
+        else None
+    )
+    fragment_spans = _identifier_fragments(text, sourced.strings)
+    fragment_spans |= _sourced_number_spans(text, sourced.numbers)
+    fragment_spans |= {(m.start(), m.end()) for m in _CLAUSE_ID_RE.finditer(text)}
+    if _hash_re is not None:
+        fragment_spans |= {(m.start(), m.end()) for m in _hash_re.finditer(text)}
+
     # 1. verified evidence quotes
     for span in ctx.proposal.evidence:
         text = _mask_literal(text, _norm(span.quote))
-    # 2. clause ids
+    # 2. clause ids -- still masked in place too (best-effort; step 0 above is what
+    # actually guarantees protection now), so a clause id that step 1 left intact is
+    # still hidden from the plain candidate scan rather than relying on it being
+    # short enough to dodge every later mask by luck.
     text = _mask(text, _CLAUSE_ID_RE)
     # 2b. bare 8-hex clause hashes -- the model drops the `KG-...` prefix once it has
     # introduced an id, which is ordinary prose economy. Masked ONLY for hashes this
     # run actually supplied, so it stays a provenance check rather than a blanket
-    # exemption. Must run before any digit mask: step 11 (bare 0/1/2) was consuming
-    # the trailing "2" of "52c330a2" and leaving a fragment no later rule could match.
-    known_hashes = sorted({c.clause_id.rsplit("-", 1)[-1] for c in ctx.clauses})
-    if known_hashes:
-        text = _mask(
-            text,
-            re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(h) for h in known_hashes) + r")(?![\w-])"),
-        )
-    # 2c. Spans that are digit runs inside an identifier a tool returned.
-    #
-    # Computed HERE, before any digit-shredding mask, and kept as offsets rather than
-    # masked in place -- the surrounding token is what proves provenance, so destroying
-    # it first destroys the evidence. Every `_mask` replaces a match with NULs of equal
-    # length, so offsets stay valid for the rest of this function.
-    #
-    # Measured: step 11 (bare 0/1/2) was eating the leading "0" of "ENC-358361-00049"
-    # and the trailing "2" of clause hashes, leaving fragments that no later rule could
-    # attribute -- so an identifier a tool had genuinely returned was reported as an
-    # invented figure. G3 is a veto, so that zeroed honest proposals outright.
-    fragment_spans = _identifier_fragments(text, sourced.strings)
+    # exemption.
+    if _hash_re is not None:
+        text = _mask(text, _hash_re)
 
     # 3. any sourced string, exact match, longest first
     for literal in sorted((s for s in sourced.strings if s), key=len, reverse=True):
@@ -984,15 +1063,23 @@ def no_unsourced_number(ctx: ScoringInput) -> CriterionFinding:
         token = m.group(0)
         if not token.strip():
             continue
-        core_start, core_end = _trim_candidate_span(text, m.start(), m.end())
-        if any(start <= core_start and core_end <= end for start, end in fragment_spans):
-            continue  # part of a sourced identifier, not a figure -- see _identifier_fragments
         if token.rstrip().endswith("%"):
             # The deterministic layer emits no percentage anywhere (integer cents end
             # to end) -- a percentage has no possible source and is always model
-            # arithmetic.  Unconditional violation, no canon() lookup at all.
+            # arithmetic.  Unconditional violation, no canon() lookup at all, and
+            # checked BEFORE the fragment-span containment test below on purpose:
+            # `_trim_candidate_span` treats a trailing "%" as cosmetic (the same way
+            # it treats "$"/"-"/","), so "12%" trims to a bare "12" -- and if a tool
+            # happened to return the number 12 for an unrelated reason (a quantity,
+            # a count), that trimmed core would fall inside a genuine
+            # `_sourced_number_spans` protection and the percentage would slip
+            # through as if it were sourced. Percentage-ness must be decided on the
+            # untrimmed token, before sourcing is even considered.
             violations.append(_Violation(token=token, offset=m.start()))
             continue
+        core_start, core_end = _trim_candidate_span(text, m.start(), m.end())
+        if any(start <= core_start and core_end <= end for start, end in fragment_spans):
+            continue  # part of a sourced identifier, not a figure -- see _identifier_fragments
         try:
             canonical = canon(token)
         except (InvalidOperation, ValueError):
