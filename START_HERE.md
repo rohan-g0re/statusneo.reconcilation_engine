@@ -89,19 +89,38 @@ Three bridges, each with a documented failure mode:
 
 ## 3. Current state
 
-**Design: complete. Code: none committed.**
+**Design: complete. Code: complete, including the agent layer.**
+
+*Updated after the agent layer landed — this section originally read "Design:
+complete. Code: none committed," written before Wave 1 started. Left visible below
+rather than deleted, because the reasoning it records (why the untracked draft was
+rejected) is still the right call to remember; what changed is that every wave since
+has actually shipped.*
 
 | | |
 |---|---|
-| Decisions | All closed. Sections A, B and C of `docs/decision_ledger.md` |
-| Design documents | 6, committed |
+| Decisions | All closed. Sections A–D of `docs/decision_ledger.md` (agent-layer decisions are Wave 10 / Section D) |
+| Design documents | Committed, including `docs/agent_layer_design.md` |
 | Implementation plans | 4 group plans + a reconciliation, committed |
-| Decision tree | Built, runs, self-validates |
-| **Application code** | **Zero committed.** ~5,300 untracked, stale lines under `src/` |
+| Decision tree | Built, runs, self-validates; `pairs.json` is a live test oracle |
+| **Application code** | **Committed.** Deterministic core, FastAPI + React dashboard, and the agent layer (Proposer/Evaluator harness, Exception Investigator, `/api/agent/*`, the `/analyse/:episodeId` screen) all built and tested |
+| Test suite | 500+ tests, `python -m pytest tests/ -q`, no API key required (agent evals replay committed fixtures) |
 
-### The untracked code
+See `README.md` for how to actually run it — backend, front end, and the agent layer
+with or without a configured API key.
 
-A planning agent wrote it despite being told plan-only. It was deliberately kept out of the commits because it implements decisions that had not been ratified at the time, and it **predates decisions A23, A24 and A26** — so it has no eight-key-type crosswalk, no partial indexes, and no read/write split. Treat it as a reference, not a baseline. Rewriting is likely cheaper than repairing.
+### The untracked code (historical — no longer present)
+
+Early in this project a planning agent wrote ~5,300 lines of application code
+despite being told plan-only. It was deliberately kept **out of the commits**
+because it implemented decisions that had not been ratified at the time, and it
+**predated decisions A23, A24 and A26** — no eight-key-type crosswalk, no partial
+indexes, no read/write split. The call made then: treat it as a reference, not a
+baseline, and rewrite rather than repair. That is what happened — the code
+actually committed across Waves 1–10 is a from-scratch build against the ratified
+decisions, and the untracked draft this paragraph describes is gone from the
+working tree entirely (`git status` is clean). Left here so the reasoning survives,
+not because the files still exist.
 
 ### The state space, measured not asserted
 
@@ -167,7 +186,11 @@ Wave 2   Four generators          real JSON files you can open
 Wave 3   Ingestion                cursor, crosswalk, parked pool
 Wave 4   Reconciliation engine    50 rules, 372 pairs covered
 Wave 5   FastAPI + React          cursor scrubber, queues, regenerate
-Wave 6   Agent layer              deferred by design — see §7
+Wave 6   Agent layer              BUILT — harness, Proposer/Evaluator, Exception
+                                  Investigator, tools, scoring rubric, /api/agent/*,
+                                  the /analyse/:episodeId screen, the eval set
+                                  (see docs/agent_layer_design.md, §7 below is now
+                                  historical)
 ```
 
 ### Two passes owed before Wave 4
@@ -178,13 +201,19 @@ Wave 6   Agent layer              deferred by design — see §7
 
 ---
 
-## 7. Deliberately deferred
+## 7. Deliberately deferred (historical — now built)
 
-**The agent layer.** The deterministic layer and workflow get built first, so the agent is designed against a working object rather than a guess — you will know exactly what data exists at each step. Leaning toward a plain tool-calling loop over LangGraph or CrewAI, because the logic is simple and a framework would obscure the tool boundary the assignment is grading.
+*This section is left as it was written, before Wave 1 started, because the
+reasoning was sound and is worth keeping: build the deterministic layer first, so
+the agent is designed against a working object rather than a guess. It has since
+happened — see §3 and §6 — so read the two paragraphs below as "what we planned to
+do," not "what is still outstanding."*
 
-The agent's write target — a work-item table, never a ledger entry — is parked with it.
+**The agent layer.** The deterministic layer and workflow get built first, so the agent is designed against a working object rather than a guess — you will know exactly what data exists at each step. Leaning toward a plain tool-calling loop over LangGraph or CrewAI, because the logic is simple and a framework would obscure the tool boundary the assignment is grading. *(Built exactly this way: a ~150-line harness in `src/recon/agents/harness.py` over a plain OpenAI-compatible client, no framework.)*
 
-**The evaluation set** depends on the agent layer. The assignment requires 10+ scenarios with an expected answer *or an expected tool path*. Tool-path assertions are the cheap win: deterministic to check, no LLM judging needed.
+The agent's write target — a work-item table, never a ledger entry — is parked with it. *(Built: `create_mock_work_item`, gated by a human-confirmed write token — `src/recon/agents/tools.py`.)*
+
+**The evaluation set** depends on the agent layer. The assignment requires 10+ scenarios with an expected answer *or an expected tool path*. Tool-path assertions are the cheap win: deterministic to check, no LLM judging needed. *(Built: `tests/test_agents_evals.py`, 10 scenarios, graded on tool path and outcome shape, replayed offline with no API key via `ReplayClient`.)*
 
 ---
 
@@ -212,7 +241,10 @@ The agent's write target — a work-item table, never a ledger entry — is park
 |---|---|
 | Profile sizes | `demo` ~60, `full` ~1,500. Deferred as a parameter |
 | Defect injection rates | Only the ~20% trace-number drop is sourced. Retune after the first full run |
-| Agent layer, evals | Deferred by design |
-| Test suite, README, design note | Work, not decisions |
+| Agent layer, evals | **Built** — see §3, §6, and `docs/agent_layer_design.md` |
+| Test suite, README | **Built** — `python -m pytest tests/ -q`, `README.md` |
 
-Everything else is settled. **Nothing is waiting on a human.**
+See `docs/remaining_work.md` for the current, maintained list of what is actually
+left across the whole project (it is a living document; this table is not). As of
+the agent layer landing, everything the assignment explicitly asks for exists and
+is tested. **Nothing is waiting on a human.**
