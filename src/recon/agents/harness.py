@@ -226,7 +226,19 @@ def run_until(
             findings = _merge_all(scoring_input)
             s = score(findings, CRITERIA)
             journal.event("evaluation", iteration=i, model=evaluator_model, **_verdict_fields(verdict))
-            journal.event("score", iteration=i, value=s)
+            # Every finding, not only the judge's. The four vetoes are deterministic --
+            # Python, no model call -- so they were never part of the `evaluation` event,
+            # and a watcher saw three green SUPPORTED chips sitting directly above
+            # "score: 0.000" with nothing to explain the contradiction. Measured in a
+            # browser: that is exactly what a reviewer sees, and it reads as a bug in the
+            # scorer rather than as a veto doing its job.
+            journal.event(
+                "score", iteration=i, value=s,
+                findings=[
+                    {"criterion_id": cid, "verdict": str(f.verdict), "reasoning": f.reasoning}
+                    for cid, f in sorted(findings.items())
+                ],
+            )
             history.append(Round(index=i, proposal=proposal, findings=findings, score=s))
             journal.event("gate", iteration=i, decision="insufficient_data", proposer_blocked=True, score=s)
             journal.event("iteration_finished", iteration=i)
@@ -239,7 +251,19 @@ def run_until(
         findings = _merge_all(scoring_input)
         s = score(findings, CRITERIA)
         journal.event("evaluation", iteration=i, model=evaluator_model, **_verdict_fields(verdict))
-        journal.event("score", iteration=i, value=s)
+        # Every finding, not only the judge's. The four vetoes are deterministic --
+        # Python, no model call -- so they were never part of the `evaluation` event,
+        # and a watcher saw three green SUPPORTED chips sitting directly above
+        # "score: 0.000" with nothing to explain the contradiction. Measured in a
+        # browser: that is exactly what a reviewer sees, and it reads as a bug in the
+        # scorer rather than as a veto doing its job.
+        journal.event(
+            "score", iteration=i, value=s,
+            findings=[
+                {"criterion_id": cid, "verdict": str(f.verdict), "reasoning": f.reasoning}
+                for cid, f in sorted(findings.items())
+            ],
+        )
         history.append(Round(index=i, proposal=proposal, findings=findings, score=s))
 
         vetoed = any(
@@ -277,6 +301,7 @@ def run_until(
         journal.event("gate", iteration=i, decision="continue", score=s)
         journal.event("iteration_finished", iteration=i)
         critique = build_critique(findings, s, criteria=CRITERIA, threshold=budgets.threshold)
+        journal.event("critique", iteration=i, text=critique)
 
     return finish(Outcome.capped(tuple(history)))
 

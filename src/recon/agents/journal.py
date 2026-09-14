@@ -75,6 +75,11 @@ EVENT_KINDS: frozenset[str] = frozenset(
         # because a harness quietly repairing a provider contract violation is how
         # the violation stops being visible to the next person who hits it.
         "forced_tool_name_coerced",
+        # The critique the harness feeds back to the proposer between rounds. It was
+        # computed, used, and never logged -- so a reviewer watching the loop saw two
+        # independent-looking proposals and could not tell what changed the model's
+        # mind. The feed-forward IS the loop's argument; hiding it hides the argument.
+        "critique",
     }
 )
 

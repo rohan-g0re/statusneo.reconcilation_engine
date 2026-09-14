@@ -123,10 +123,45 @@ function LogRow({ kind, payload }) {
           </div>
         </div>
       )
-    case 'score':
+    case 'score': {
+      // Show the criteria that FAILED, not just the number.
+      //
+      // The four vetoes are deterministic -- Python, no model call -- so they never
+      // appeared in the `evaluation` event, and a reviewer watching the stream saw
+      // three green SUPPORTED chips sitting directly above "score: 0.000" with
+      // nothing to explain the contradiction. It reads as a broken scorer rather than
+      // as a veto doing its job, which is the opposite of what a watchable loop is for.
+      const failed = (payload.findings ?? []).filter((f) => f.verdict !== 'SUPPORTED')
       return (
         <div className="agent-log-row">
-          score: <strong>{Number(payload.value).toFixed(3)}</strong>
+          <div>
+            score: <strong>{Number(payload.value).toFixed(3)}</strong>
+            {failed.length ? <span className="muted"> — {failed.length} criterion/criteria not supported</span> : null}
+          </div>
+          {failed.map((f) => (
+            <div key={f.criterion_id} className="agent-log-criteria" style={{ marginTop: 4 }}>
+              <span
+                className="chip"
+                style={{ borderColor: VERDICT_COLOR[f.verdict], color: 'var(--text-primary)' }}
+                title={f.reasoning}
+              >
+                {f.criterion_id.split('_')[0]} {f.verdict}
+              </span>
+              <span className="muted" style={{ fontSize: 11 }}>{truncate(f.reasoning, 150)}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    case 'critique':
+      // The text actually sent back to the proposer for the next round. Without it the
+      // stream shows two independent-looking proposals and leaves the reviewer to
+      // infer what changed the model's mind -- when the feed-forward IS the loop's
+      // argument for existing.
+      return (
+        <div className="agent-log-card">
+          <div className="agent-log-card-head">Fed back to the proposer</div>
+          <div className="agent-log-card-body">{truncate(payload.text, 600)}</div>
         </div>
       )
     case 'gate':
