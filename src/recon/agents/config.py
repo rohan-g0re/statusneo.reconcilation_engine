@@ -144,7 +144,11 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         # at roughly eight minutes a call.
         "evaluator_model": env("EVALUATOR_MODEL", "deepseek-chat"),
         "evaluator_fallback_model": env("EVALUATOR_FALLBACK_MODEL", "deepseek-v4-pro"),
-        "investigator_model": "deepseek-chat",
+        # Env-driven like the other two. It was hardcoded, which meant
+        # RECON_AGENT_INVESTIGATOR_MODEL was silently ignored -- and the one time that
+        # mattered was the day the provider's flash tier stopped answering and the
+        # Investigator could not be pointed at a model that worked.
+        "investigator_model": env("INVESTIGATOR_MODEL", "deepseek-chat"),
         "max_iterations": int(env("MAX_ITERATIONS", "5")),
         "threshold": float(env("THRESHOLD", "80.0")),
         "max_tool_rounds": 8,

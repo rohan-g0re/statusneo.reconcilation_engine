@@ -1,0 +1,40 @@
+══════════════════════════════════════════════════════════════════════════════
+E-000006  MEDICAL  cursor 2026-07-01T23:59:59Z
+  disposition   EXCEPTION
+  verdicts      B-10 / C-08
+  reasons       DENIED, DENIED_WITH_REBATE_PAID
+  timeline      10 events, 0 unresolved
+══════════════════════════════════════════════════════════════════════════════
+
+══════════════════════════════════════════════════════════════════════════════
+INVESTIGATOR  run 16aedc65  model deepseek-v4-pro
+══════════════════════════════════════════════════════════════════════════════
+
+## What happened
+A medical-benefit episode for ocrelizumab 300 mg/10 ml was billed to Blue Harbor Health on 30 July 2025 — the drug line at $135,000.00 and the administration line at $150.00 [[raw:79]] — and the payer accepted it for processing on 31 July 2025 [[raw:80]]. On the 340B side, the episode qualified on 4 August 2025 [[raw:170]] and a rebate request went to the manufacturer on 8 August 2025 [[raw:172]]. On 30 August 2025 the payer denied the claim as not medically necessary and paid $0.00 in total [[raw:137]]. The manufacturer approved the rebate on 10 September 2025 [[raw:184]], and $33,750.00 landed and matched [[calc:rebate.received_usd]].
+
+## Why it is open
+The reimbursement track is denied and no challenge to the denial is on record [[verdict:B-10]]; received is $0.00 [[calc:reimbursement.received_usd]] against expected $84,240.00 [[calc:reimbursement.expected_usd]], a variance of $84,240.00 [[calc:reimbursement.variance_usd]]. The rebate track is fully settled and cash-matched [[verdict:C-08]]. The episode sits at EXCEPTION because a denied reimbursement and a paid 340B rebate coexist — cross-track flag X-1, reason DENIED_WITH_REBATE_PAID — and that combination is what keeps it open rather than terminal [[event:9]].
+
+## What I could not determine
+The expected reimbursement of $84,240.00 [[calc:reimbursement.expected_usd]] has no visible source in any feed record: the submitted bill carried the drug line at $135,000.00 [[raw:79]] and the remittance denied it at $135,000.00 [[raw:137]]. Also, the remittance's line detail shows the administration line paid $150.00 [[raw:137]] while the same remittance records a total payment of $0.00 [[raw:137]] and the bank credit from the payer on 29 August 2025 is zero [[raw:250]]; that $150.00 never appears as cash.
+
+## What a human should check first
+1. Whether the denial was final and whether any challenge to it was filed, since the reimbursement track has received nothing.
+2. The $150.00 administration-line payment shown in the remittance [[raw:137]] against the $0.00 total payment [[raw:137]] and the zero bank credit [[raw:250]].
+3. The provenance of the $84,240.00 expected figure [[calc:reimbursement.expected_usd]], which no feed record shows.
+
+  citations: 21
+
+  journal   C:\Users\rohan\Desktop\Work\STUFF\Projects\statusneo_assignment\data\agent_runs\16aedc65d50c4985a5d905bb6ab15c84.jsonl
+  models    {'investigator': 'deepseek-v4-pro'}
+  tokens    {'prompt_tokens': 82914, 'completion_tokens': 21992, 'total_tokens': 104906, 'prompt_cache_hit_tokens': 62720, 'prompt_cache_miss_tokens': 20194}
+  tool calls (8):
+    - get_episode({"detail": "essential", "episode_id": "E-000006"})
+    - get_remittance_detail({"episode_id": "E-000006"})
+    - get_cash_match({"episode_id": "E-000006", "include_unallocated_deposits": true})
+    - get_rebate_status({"episode_id": "E-000006"})
+    - calculate_reconciliation({"claim_id": "E-000006"})
+    - get_episode({"detail": "full", "episode_id": "E-000006"})
+    - get_raw_record({"raw_id": 79})
+    - get_raw_record({"raw_id": 137})

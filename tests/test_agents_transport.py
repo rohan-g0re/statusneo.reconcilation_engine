@@ -245,12 +245,20 @@ def test_openai_compat_client_stamps_the_agent_tag_onto_every_llm_event(tmp_path
 
 
 # ═══ 4. the journal never writes the api key ════════════════════════════════
+#
+# Every secret below is SYNTHETIC and must stay that way. A test that proves a real
+# key gets redacted has, by construction, committed that key -- the assertion passes
+# and the secret is in the repository forever. These match the provider's key SHAPE,
+# which is all the redaction logic keys off, and nothing more.
+
+#: Synthetic. Shaped like a DeepSeek key, valid for nothing.
+FAKE_KEY = "sk-" + "0" * 8 + "EXAMPLEKEYNOTREAL" + "0" * 7
 
 
 def test_the_journal_never_writes_the_api_key(tmp_path):
     path = tmp_path / "redact.jsonl"
     journal = Journal(path, "run-redact", now=_clock())
-    secret = "sk-5330c8e36354436d9895f828d571aff3"
+    secret = FAKE_KEY
     journal.event(
         "llm_request",
         model="deepseek-chat",
@@ -271,9 +279,9 @@ def test_the_journal_never_writes_the_api_key(tmp_path):
 
 
 def test_repr_of_agentsettings_with_a_key_set_contains_no_key_material():
-    settings = load_agent_settings(api_key="sk-5330c8e36354436d9895f828d571aff3")
+    settings = load_agent_settings(api_key=FAKE_KEY)
     assert "sk-" not in repr(settings)
-    assert "5330c8e36354436d9895f828d571aff3" not in repr(settings)
+    assert FAKE_KEY.removeprefix("sk-") not in repr(settings)
 
 
 # ═══ 6. an unknown journal kind raises ValueError ═══════════════════════════

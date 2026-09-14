@@ -34,3 +34,8 @@ ui-review/
 .env
 data/agent_runs/
 .agents/specs/
+
+# Local Claude Code permission grants. Auto-generated, machine-specific, and it
+# records approved shell commands verbatim -- which is how an API key ended up
+# committed inside a curl invocation.
+.claude/settings.local.json

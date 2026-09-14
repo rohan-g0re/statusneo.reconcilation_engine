@@ -15,6 +15,7 @@ than the thing it stands in for does not test the integration; it tests the doub
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 
 import pytest
@@ -194,3 +195,52 @@ def test_the_write_tool_is_never_offered_to_a_model_by_either_role() -> None:
             f"{module.__name__} calls wire_schemas() with no filter, which would hand the model "
             "every tool including the write"
         )
+
+
+# ═══ no real secret may enter the repository ═════════════════════════════════════
+
+
+def test_no_tracked_file_contains_anything_shaped_like_a_live_api_key() -> None:
+    """A committed key is not undone by deleting it later -- it stays in history.
+
+    This exists because it happened: a test asserting "the journal redacts the API
+    key" was written using the REAL key as its fixture, so the assertion passed while
+    the secret was pushed to the remote. The lesson is that proving redaction works
+    does not require a working secret; it requires a string of the right SHAPE, which
+    is all the redaction logic inspects.
+
+    Scanned with git, not a filesystem walk, so an ignored `.env` is correctly out of
+    scope while anything actually tracked is in it.
+    """
+    import subprocess
+
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.split("\0")
+
+    # Deliberately not the provider's literal prefix + length as one regex: the point
+    # is to catch key SHAPES, and the synthetic fixtures in the test suite must not
+    # trip it. A real DeepSeek key is 32 hex-ish chars after `sk-`; the fakes spell
+    # something unmistakably non-random.
+    live_key = re.compile(r"sk-(?![A-Za-z0-9]*EXAMPLE)(?![A-Za-z0-9]*REDACTED)[a-f0-9]{32}\b")
+
+    offenders: list[str] = []
+    for name in tracked:
+        if not name:
+            continue
+        path = REPO_ROOT / name
+        if not path.is_file() or path.suffix in {".png", ".pdf", ".sqlite"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for match in live_key.finditer(text):
+            offenders.append(f"{name}: {match.group(0)[:12]}...")
+
+    assert not offenders, (
+        "a live-looking API key is tracked by git:\n  "
+        + "\n  ".join(offenders)
+        + "\nRotate the key at the provider, then remove it from the working tree. "
+        "Use a synthetic, correctly-shaped fixture in tests instead."
+    )
