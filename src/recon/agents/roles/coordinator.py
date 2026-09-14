@@ -433,6 +433,10 @@ class EvaluatorInput:
     proposal_view: dict[str, Any]
     named_clause: Clause | None
     mapped_clauses: tuple[Clause, ...]
+    #: Every clause selected for this episode. Only the cited and mapped ones are
+    #: rendered in full; the rest appear as a name-and-id index, so the evaluator can
+    #: still see that a better clause existed without paying for all of their bodies.
+    all_clauses: tuple[Clause, ...]
     checklist: tuple[tuple[str, str], ...]  # (criterion_id, question)
 
 
@@ -466,26 +470,101 @@ def _span_verified(span: Any, tool_results: tuple[RecordedToolResult, ...], clau
     return _norm(source).find(_norm(span.quote)) != -1
 
 
+def _result_shape(envelope: dict[str, Any]) -> str:
+    """A one-line description of a tool result whose body is being omitted.
+
+    Names the top-level keys and the length of any list, so the evaluator can tell
+    "eight timeline events and four allocations" from "nothing came back" without
+    being handed either in full.
+    """
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return "empty" if data in (None, [], {}) else "scalar"
+    bits: list[str] = []
+    for key, value in data.items():
+        if key.startswith("_") or key == "cursor":
+            continue
+        if isinstance(value, list):
+            bits.append(f"{key}[{len(value)}]")
+        elif isinstance(value, dict):
+            bits.append(f"{key}{{{len(value)}}}")
+        else:
+            bits.append(key)
+    return ", ".join(bits[:12]) or "empty"
+
+
 def render_evaluator_user_turn(inp: EvaluatorInput) -> str:
     """`spec_prompts_roles.md` S:C.2's six included sections, in order."""
     parts: list[str] = ["## Episode", json.dumps(inp.episode, sort_keys=True, default=str), ""]
 
+    # Full text for anything the proposal CITED; a one-line receipt for the rest.
+    #
+    # Measured: this section was 19KB of a 37KB turn, re-sent on every evaluator call
+    # (three of them in one iteration, once a schema repair and an escalation fired),
+    # and it was the single largest cost in a Decide run. Sending every byte of every
+    # envelope treats the evaluator as if it were re-deriving the episode, which is
+    # not its job -- it grades the claims the proposal actually made.
+    #
+    # What it genuinely needs is here: the exact bytes behind every cited span, so a
+    # quote can be judged in context, plus proof of what else was looked at, so
+    # "there was evidence you ignored" stays visible. What it does not need is the
+    # full body of a call nothing cited.
+    #
+    # Note this cannot weaken citation verification, because that is not done here at
+    # all -- `_span_verified` runs in Python before this string is built, and its
+    # boolean is already on `proposal_view`. The evaluator is judging whether the
+    # evidence SUPPORTS the claim, never whether the quote exists.
+    cited_refs = {
+        str(e.get("source_ref") or "") for e in (inp.proposal_view.get("evidence") or []) if isinstance(e, dict)
+    }
+
+    def _was_cited(index: int, name: str) -> bool:
+        return any(ref.startswith(f"tool_result#{index}") or ref.startswith(f"{name}#") for ref in cited_refs)
+
     parts.append("## Tool results")
     for i, tr in enumerate(inp.tool_results, start=1):
-        parts.append(f"### tool_result#{i} — {tr.name}({json.dumps(tr.arguments, sort_keys=True, default=str)})")
-        parts.append(render_tool_result(tr.envelope))
+        header = f"### tool_result#{i} — {tr.name}({json.dumps(tr.arguments, sort_keys=True, default=str)})"
+        if _was_cited(i, tr.name):
+            parts.append(header)
+            parts.append(render_tool_result(tr.envelope))
+        else:
+            envelope = tr.envelope or {}
+            status = envelope.get("status", "?")
+            detail = envelope.get("error_type") or _result_shape(envelope)
+            parts.append(f"{header} → {status}, {detail}. Not cited by this proposal; body omitted.")
     parts.append("")
 
     parts += ["## The proposal", json.dumps(inp.proposal_view, sort_keys=True, default=str), ""]
 
+    # Same principle as the tool results above: full text for the clause the proposal
+    # cited, and for the handful mapped to this episode's own reason codes; a name-only
+    # index for the rest.
+    #
+    # G11 asks whether the cited clause supports the action, which needs that clause in
+    # full. The others are there so the evaluator can notice a BETTER clause was
+    # available -- and an entity name plus its id is enough to notice that, because if
+    # it wants one it can say so and the next round will carry it. This section was
+    # 11.8KB of a 37KB turn, nearly all of it clauses nobody referenced.
     parts.append("## Grounding clauses")
     seen_ids: set[str] = set()
-    ordered_clauses = ([inp.named_clause] if inp.named_clause is not None else []) + list(inp.mapped_clauses)
-    for c in ordered_clauses:
+    detailed = ([inp.named_clause] if inp.named_clause is not None else []) + list(inp.mapped_clauses)
+    for c in detailed:
         if c.clause_id in seen_ids:
             continue
         seen_ids.add(c.clause_id)
         parts.append(f"[{c.clause_id}] {c.entity} ({c.entity_type})\n{c.text}")
+
+    remaining = [c for c in inp.all_clauses if c.clause_id not in seen_ids]
+    if remaining:
+        by_entity: dict[str, list[str]] = {}
+        for c in remaining:
+            by_entity.setdefault(c.entity, []).append(c.clause_id)
+        parts.append(
+            "\nAlso available, bodies omitted — ask for one by id if the proposal should "
+            "have cited it instead:"
+        )
+        for entity, ids in by_entity.items():
+            parts.append(f"- {entity}: {', '.join(ids)}")
     parts.append("")
 
     parts.append("## Checklist")
@@ -555,9 +634,16 @@ def _make_evaluate(
             "blocked": proposal.blocked,
             "blocked_reason": proposal.blocked_reason,
         }
+        # `mapped_clauses` used to be handed every clause selected for the episode,
+        # which meant the "render these in full" set and the "index these" set were the
+        # same set and the split below did nothing. Full text now goes to the clause the
+        # proposal cited and its entity-mates -- the ones that could plausibly have been
+        # cited instead, which is what G11 needs to judge the choice -- and everything
+        # else is indexed by name and id.
+        mapped = tuple(c for c in ctx.clauses if named is not None and c.entity == named.entity)
         inp = EvaluatorInput(
             episode=episode_view, tool_results=tuple(ctx.tool_results), proposal_view=proposal_view,
-            named_clause=named, mapped_clauses=ctx.clauses, checklist=checklist,
+            named_clause=named, mapped_clauses=mapped, all_clauses=ctx.clauses, checklist=checklist,
         )
 
         system = evaluator_prompt.render(
