@@ -31,8 +31,10 @@ from recon.agents import envelope, tools
 from recon.agents.journal import Journal
 from recon.api import app as api_app
 from recon.api import dossier as dossier_module
+from recon.api import service as service_module
 from recon.config import load_settings
 from recon.db import connection as db_connection
+from recon.db import repository
 from recon.domain.enums import AllocationBasis
 
 TOOLS_SOURCE = Path(tools.__file__).read_text(encoding="utf-8")
@@ -389,14 +391,27 @@ def test_every_feed_derived_field_is_fenced_across_all_four_read_tools(demo_conn
 # ═══ the registry: declared once, used twice (spec_tools.md S6) ═════════════
 
 
-def test_exactly_seven_tools():
-    assert len(tools.TOOLS) == 7
+def test_exactly_nine_tools():
+    """Was `test_exactly_seven_tools`, pinning D-T4 (spec_tools.md): "only the two
+    episode-scoped agents are being built" -- true only because, at the time D-T4
+    was written, only the Investigator and the Decider existed. spec_analyst.md adds
+    a third role, the Portfolio Analyst, specifically because "what is the state of
+    the book" is a question neither episode-scoped tool can answer -- the exact
+    condition D-T4's own reasoning excluded. That makes D-T4 void, not wrong when it
+    was made, and this repins the count at nine: the original seven plus
+    get_portfolio_overview and get_exception_queue."""
+    assert len(tools.TOOLS) == 9
 
 
-def test_no_portfolio_or_queue_tool_is_registered():
-    """D-T4: only the two episode-scoped agents are being built."""
-    assert "service.overview" not in tools.tool_names()
-    assert not any("overview" in name or "queue" in name for name in tools.tool_names())
+def test_the_two_portfolio_tools_are_registered_under_the_names_spec_analyst_md_freezes():
+    """Replaces `test_no_portfolio_or_queue_tool_is_registered`, which asserted the
+    absence D-T4 required. Now that a portfolio tool is the point rather than the
+    thing being excluded (see `test_exactly_nine_tools`), the positive assertion is
+    the one worth pinning: the two names spec_analyst.md's frozen contract names,
+    present and dispatchable."""
+    assert {"get_portfolio_overview", "get_exception_queue"} <= tools.tool_names()
+    assert tools.DISPATCH["get_portfolio_overview"].fn is tools.get_portfolio_overview
+    assert tools.DISPATCH["get_exception_queue"].fn is tools.get_exception_queue
 
 
 def test_tool_names_are_unique_and_dispatch_matches_the_wire_schema():
@@ -482,6 +497,8 @@ _HAPPY_ARGS: dict[str, dict] = {
     "get_cash_match": {"episode_id": "E-000001"},
     "calculate_reconciliation": {"claim_id": "E-000006"},
     "get_raw_record": {"raw_id": 28},
+    "get_portfolio_overview": {},
+    "get_exception_queue": {},
     "create_mock_work_item": {
         "episode_id": "E-000006",
         "recommended_action": "APPEAL",
@@ -497,6 +514,11 @@ _ERROR_ARGS: dict[str, dict] = {
     "get_cash_match": {"episode_id": "not-an-id"},
     "calculate_reconciliation": {"claim_id": "not-an-id"},
     "get_raw_record": {},
+    # get_portfolio_overview takes no arguments, so its own body has no
+    # invalid_input branch to exercise -- dispatch()'s generic unknown-argument
+    # check (shared by every tool) is what this exercises here.
+    "get_portfolio_overview": {"cursor": "2026-01-01"},
+    "get_exception_queue": {"order_by": "most_urgent_first"},
     "create_mock_work_item": {
         "episode_id": "E-000006",
         "recommended_action": "APPEAL",
@@ -1221,3 +1243,165 @@ def test_no_bare_assert_guards_the_match_strength_table():
     that the source no longer spells the check as a bare `assert`."""
     assert "assert set(_MATCH_STRENGTH)" not in TOOLS_SOURCE
     assert set(tools._MATCH_STRENGTH) == set(AllocationBasis)
+
+
+# ═══ get_portfolio_overview / get_exception_queue (spec_analyst.md) ═════════
+#
+# "Prioritisation is a sort, not a judgement: the agent explains a ranking, it never
+# produces one" (docs/knowledge_graph.jsonl, entity "Deterministic boundary"). These
+# two tools are the whole reason this file's tool count changed (see
+# test_exactly_nine_tools) -- the tests below check both the shared envelope/PHI/
+# cursor invariants every other tool already meets, and the one property unique to
+# this pair: that the ranking a human sees came out of SQL, not out of the model.
+
+
+def test_cursor_is_not_a_parameter_on_either_new_portfolio_tool():
+    """spec_analyst.md, verbatim: "same rule that cursor is never a model
+    parameter." `test_cursor_is_never_a_schema_property_on_any_tool` already covers
+    this generically (it iterates every entry in `tools.TOOLS`, which now includes
+    both), but the task calls the two names out explicitly, so they are pinned by
+    name here too."""
+    for name in ("get_portfolio_overview", "get_exception_queue"):
+        assert "cursor" not in tools.DISPATCH[name].parameters["properties"], name
+
+
+def test_get_portfolio_overview_partitions_every_episode_into_three_dispositions(demo_conn, tmp_path):
+    """Mirrors tests/test_api.py's own overview assertion: the tool wraps
+    `service.overview` rather than reimplementing it, so the same invariant --
+    every episode in exactly one of the three dispositions -- must hold here too."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_portfolio_overview", {})
+    assert result["status"] == "ok"
+    by_disposition = result["data"]["by_disposition"]
+    assert set(by_disposition) == {"CLOSED", "PENDING", "EXCEPTION"}
+    assert sum(v["episodes"] for v in by_disposition.values()) == 60
+    assert all(v["episodes"] > 0 for v in by_disposition.values())
+
+
+def test_get_portfolio_overview_before_any_evaluation_is_ok_with_every_count_zero(demo_conn, tmp_path):
+    """Zero rows is ok, never an error (same rule every other tool's zero-row case
+    follows), and the message says what the emptiness means: no verdict has been
+    computed yet at this cursor, so there is nothing to count."""
+    settings = load_settings("demo")
+    ctx = make_ctx(demo_conn, tmp_path, cursor=settings.min_cursor)
+    result = tools.dispatch(ctx, "get_portfolio_overview", {})
+    assert result["status"] == "ok"
+    assert all(v["episodes"] == 0 for v in result["data"]["by_disposition"].values())
+    assert result["data"]["verdict_pairs"] == []
+    assert "no episode had been evaluated" in result["message"]
+
+
+def test_get_exception_queue_rejects_an_order_by_outside_queue_orderings_and_lists_the_legal_set(
+    demo_conn, tmp_path
+):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_exception_queue", {"order_by": "most_urgent_first"})
+    assert result["status"] == "error"
+    assert result["error_type"] == "invalid_input"
+    assert result["retryable"] is False
+    for name in repository.QUEUE_ORDERINGS:
+        assert name in result["message"]
+
+
+def test_get_exception_queue_rejects_an_unknown_disposition_and_lists_the_legal_set(demo_conn, tmp_path):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_exception_queue", {"disposition": "URGENT"})
+    assert result["status"] == "error"
+    assert result["error_type"] == "invalid_input"
+    for name in ("CLOSED", "EXCEPTION", "PENDING"):
+        assert name in result["message"]
+
+
+def test_get_exception_queue_rejects_a_limit_outside_its_bounds(demo_conn, tmp_path):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    for bad_limit in (0, -1, 500, "10"):
+        result = tools.dispatch(ctx, "get_exception_queue", {"limit": bad_limit})
+        assert result["status"] == "error", bad_limit
+        assert result["error_type"] == "invalid_input", bad_limit
+
+
+@pytest.mark.parametrize("order_by", sorted(repository.QUEUE_ORDERINGS))
+def test_get_exception_queue_row_order_matches_a_direct_service_queue_call(order_by, demo_conn, tmp_path):
+    """Proves the DATABASE did the ordering, not the tool. Calling the tool through
+    `dispatch` and calling `service.queue` directly with the identical arguments
+    must produce the identical episode_id sequence for every legal ordering -- the
+    one property that would break if this tool ever computed its own order instead
+    of asking SQL for one, which is exactly the failure spec_analyst.md's "the agent
+    explains a ranking, it never produces one" rule exists to make impossible."""
+    settings = load_settings("demo")
+    cursor = settings.max_cursor
+    ctx = make_ctx(demo_conn, tmp_path, cursor=cursor)
+
+    result = tools.dispatch(
+        ctx, "get_exception_queue", {"disposition": "EXCEPTION", "order_by": order_by, "limit": 50}
+    )
+    assert result["status"] == "ok"
+    tool_order = [row["episode_id"] for row in result["data"]["episodes"]]
+
+    expected_rows = service_module.queue(demo_conn, cursor, disposition="EXCEPTION", order_by=order_by, limit=50)
+    expected_order = [row["episode_id"] for row in expected_rows]
+
+    assert tool_order, "the demo EXCEPTION queue must be non-empty for this comparison to be meaningful"
+    assert tool_order == expected_order
+    assert result["data"]["order_by"] == order_by, "the tool must echo back the sort that actually produced the order"
+
+
+def test_get_exception_queue_with_no_matching_rows_is_ok_with_an_empty_list_and_a_message(demo_conn, tmp_path):
+    """Zero rows is ok, never an error, and the message says what the emptiness
+    means -- the same rule get_cash_match's own zero-allocations test pins."""
+    settings = load_settings("demo")
+    ctx = make_ctx(demo_conn, tmp_path, cursor=settings.min_cursor)
+    result = tools.dispatch(ctx, "get_exception_queue", {"disposition": "EXCEPTION"})
+    assert result["status"] == "ok"
+    assert result["data"]["episodes"] == []
+    assert result["message"]
+
+
+def test_every_cents_field_in_the_exception_queue_response_has_a_usd_sibling(demo_conn, tmp_path):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_exception_queue", {"limit": 50})
+    assert result["status"] == "ok"
+    assert result["data"]["episodes"], "the demo EXCEPTION queue must be non-empty for this to be meaningful"
+    for row in result["data"]["episodes"]:
+        for key in list(row):
+            if key.endswith("_cents"):
+                usd_key = key[: -len("_cents")] + "_usd"
+                assert usd_key in row, f"{key} has no {usd_key} sibling"
+                assert row[usd_key] == tools._usd(row[key])
+
+
+def test_every_cents_field_in_the_portfolio_overview_response_has_a_usd_sibling(demo_conn, tmp_path):
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_portfolio_overview", {})
+    assert result["status"] == "ok"
+    for disposition, counts in result["data"]["by_disposition"].items():
+        for key in list(counts):
+            if key.endswith("_cents"):
+                usd_key = key[: -len("_cents")] + "_usd"
+                assert usd_key in counts, f"{disposition}.{key} has no {usd_key} sibling"
+                assert counts[usd_key] == tools._usd(counts[key])
+
+
+def test_get_exception_queue_wraps_ndc11_as_feed_derived_untrusted_text(demo_conn, tmp_path):
+    """ndc11 is in `_IDENTITY_WRAPPED_KEYS` -- the same fence get_episode's identity
+    dict applies -- so a queue row naming it is not exempt merely because it is a
+    summary row among many."""
+    ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    result = tools.dispatch(ctx, "get_exception_queue", {"limit": 50})
+    assert result["status"] == "ok"
+    rows_with_ndc11 = [row for row in result["data"]["episodes"] if row["ndc11"] is not None]
+    assert rows_with_ndc11, "at least one EXCEPTION episode must carry an ndc11 for this to be meaningful"
+    for row in rows_with_ndc11:
+        assert envelope.fence_regex().fullmatch(row["ndc11"]), row["ndc11"]
+
+
+def test_get_exception_queue_and_get_portfolio_overview_take_all_five_envelope_keys_only_from_ok_and_err(
+    demo_conn, tmp_path
+):
+    """Belt-and-suspenders on top of `test_tools_module_never_builds_the_envelope_dict_as_a_literal`
+    (an AST-free string grep over the whole module): both new functions' own source
+    must call `ok(`/`err(` and never spell the envelope out themselves."""
+    for fn in (tools.get_portfolio_overview, tools.get_exception_queue):
+        source = inspect.getsource(fn)
+        assert "return ok(" in source or "return err(" in source
+        assert '"status":' not in source and "'status':" not in source

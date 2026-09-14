@@ -84,6 +84,13 @@ class AgentSettings:
     #: all eight. Deterministic criteria, including every veto, always run either way.
     rubric_profile: str
     investigator_model: str
+    #: The Portfolio Analyst's model (spec_analyst.md).  A single-pass, tool-calling
+    #: role with no propose/evaluate loop -- the same shape as the Investigator, not
+    #: the Proposer/Evaluator pair -- so it gets its own env-driven setting rather
+    #: than reusing either of theirs, for the reason `investigator_model`'s own
+    #: comment already gives: a hardcoded model can't be pointed at a working one the
+    #: day the provider's chosen tier stops answering.
+    analyst_model: str
     max_iterations: int
     threshold: float
     max_tool_rounds: int
@@ -98,7 +105,8 @@ class AgentSettings:
         return (
             f"{type(self).__name__}(base_url={self.base_url!r}, api_key=<{key_state}>, "
             f"proposer_model={self.proposer_model!r}, evaluator_model={self.evaluator_model!r}, "
-            f"investigator_model={self.investigator_model!r}, max_iterations={self.max_iterations!r}, "
+            f"investigator_model={self.investigator_model!r}, analyst_model={self.analyst_model!r}, "
+            f"max_iterations={self.max_iterations!r}, "
             f"threshold={self.threshold!r}, max_tool_rounds={self.max_tool_rounds!r}, "
             f"request_timeout_s={self.request_timeout_s!r}, token_budget={self.token_budget!r}, "
             f"journal_dir={self.journal_dir!r}, fixture_dir={self.fixture_dir!r}, mode={self.mode!r})"
@@ -152,6 +160,11 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         # mattered was the day the provider's flash tier stopped answering and the
         # Investigator could not be pointed at a model that worked.
         "investigator_model": env("INVESTIGATOR_MODEL", "deepseek-chat"),
+        # Same defaulting shape as investigator_model, for the same reason: the
+        # Analyst is a third, independent single-pass role (spec_analyst.md) and
+        # deserves to be pointable at a working model on its own, not silently tied
+        # to whichever of the other two happens to share its default today.
+        "analyst_model": env("ANALYST_MODEL", "deepseek-chat"),
         # Two, not five. Five is a backstop for a system being calibrated; a
         # prototype demonstrating the loop needs exactly enough rounds to show that
         # a critique feeds forward and the proposal changes, which is two. Measured:

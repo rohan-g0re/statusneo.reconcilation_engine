@@ -1,7 +1,9 @@
 """The tool layer: the only file in the agent layer that touches the database.
 
 Every other module in ``recon.agents`` reaches the reconciliation data exclusively
-through the seven functions registered in :data:`TOOLS`.  That is not a convention to
+through the nine functions registered in :data:`TOOLS` (spec_analyst.md added
+``get_portfolio_overview`` and ``get_exception_queue`` to the original seven once a
+third, portfolio-scoped role existed to need them).  That is not a convention to
 remember; it is what makes the rest of the design checkable.  PHI redaction (SS7),
 the untrusted-text fence (SS5), the "the deterministic layer owns every number" rule
 (``docs/agent_layer_design.md``'s closing rule) and "model-visible means logged" all
@@ -46,10 +48,11 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Literal, Mapping
 from recon.agents import envelope
 from recon.agents.envelope import ToolEnvelope, err, ok
 from recon.api import dossier as dossier_module
+from recon.api import service as service_module
 from recon.db import connection as db_connection
 from recon.db import repository
 from recon.domain import verdicts
-from recon.domain.enums import AllocationBasis, RecordKind
+from recon.domain.enums import AllocationBasis, Disposition, RecordKind
 from recon.reference import codes
 from recon.reference import errors as ref_errors
 
@@ -75,6 +78,8 @@ __all__ = [
     "get_cash_match",
     "calculate_reconciliation",
     "get_raw_record",
+    "get_portfolio_overview",
+    "get_exception_queue",
     "create_mock_work_item",
     "mint_write_token",
 ]
@@ -178,6 +183,11 @@ RECOMMENDED_ACTIONS: frozenset[str] = frozenset(
         "ABSTAIN",
     }
 )
+
+#: The three legal values of ``get_exception_queue``'s ``disposition`` argument,
+#: derived from :class:`Disposition` rather than re-typed, so a fourth disposition
+#: added there someday cannot silently leave this tool's schema stale.
+_QUEUE_DISPOSITIONS: frozenset[str] = frozenset(str(d) for d in Disposition)
 
 ARTIFACT_MARKER = "\nARTIFACTS: "
 
@@ -1830,6 +1840,203 @@ def create_mock_work_item(
     return ok(data, message)
 
 
+# ═══ 2.8 get_portfolio_overview — the state of the whole book ═══════════════
+
+_DESC_PORTFOLIO_OVERVIEW = (
+    "Return the state of the whole portfolio at the current replay cursor -- not one "
+    "claim: episode counts and money (expected, received, absolute variance, and how "
+    "many are reopened) grouped by disposition (CLOSED, PENDING, EXCEPTION); the full "
+    "distribution of reimbursement/rebate verdict-code pairs across every episode; "
+    "how often each reason code appears; and how often each cross-track flag "
+    "appears. Every figure here is a SQL aggregate the deterministic layer computed, "
+    "read back verbatim -- this tool sums and counts but never ranks anything. Call "
+    "it FIRST for any question about the shape of the book as a whole: 'what "
+    "disposition dominates', 'how much money is at stake', 'what reason codes show "
+    "up most'. Call get_exception_queue next for the ranked list of episodes behind "
+    "any one of these numbers. It takes no arguments: there is exactly one "
+    "portfolio, at exactly one cursor."
+)
+
+_SCHEMA_PORTFOLIO_OVERVIEW: dict[str, Any] = {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def get_portfolio_overview(ctx: ToolContext) -> ToolEnvelope:
+    payload = service_module.overview(ctx.conn, ctx.cursor)
+
+    # A _usd sibling for every _cents figure, for the same reason `_usd` itself gives
+    # (see its docstring above): the model may not divide by a hundred, so without
+    # this a dollars-and-cents sentence about the portfolio cannot be written without
+    # either breaking that rule or reporting a raw cents integer at a human.
+    by_disposition = {
+        disposition: {
+            **counts,
+            "expected_usd": _usd(counts["expected_cents"]),
+            "received_usd": _usd(counts["received_cents"]),
+            "variance_usd": _usd(counts["variance_cents"]),
+        }
+        for disposition, counts in payload["by_disposition"].items()
+    }
+
+    data: dict[str, Any] = {
+        "_untrusted_nonce": ctx.nonce,
+        "cursor": payload["cursor"],
+        "by_disposition": by_disposition,
+        "verdict_pairs": payload["verdict_pairs"],
+        "reason_codes": payload["reason_codes"],
+        "cross_track_flags": payload["cross_track_flags"],
+        "engine_version": payload["engine_version"],
+    }
+
+    total_episodes = sum(counts["episodes"] for counts in by_disposition.values())
+    message = (
+        f"no episode had been evaluated at cursor {ctx.cursor}; every disposition, "
+        "verdict-pair, reason-code and flag count below is zero because there is "
+        "nothing yet to count."
+        if total_episodes == 0
+        else ""
+    )
+    return ok(data, message)
+
+
+# ═══ 2.9 get_exception_queue — the ranking is a SQL sort, not a judgement ═══
+#
+# "Prioritisation is a sort, not a judgement: the agent explains a ranking, it never
+# produces one." (docs/knowledge_graph.jsonl, entity "Deterministic boundary", quoted
+# verbatim in spec_analyst.md). This tool is where that rule is enforced
+# structurally rather than only by instruction: `order_by` is checked against the
+# closed vocabulary in `repository.QUEUE_ORDERINGS`, the actual `ORDER BY` clause
+# runs inside SQLite (`repository._queue`, called through `service.queue`), and the
+# response echoes the exact `order_by` that produced it back to the caller -- so the
+# tool-call trace itself records which deterministic sort produced the order the
+# model is about to describe. There is no line in this function that reorders a row.
+
+_DESC_EXCEPTION_QUEUE = (
+    "Return a ranked page of episodes for ONE disposition at the current replay "
+    "cursor -- EXCEPTION by default, the queue a human actually has to work. Each "
+    "row carries episode_id, track, date of service, age in days, both verdict "
+    "codes, both variance amounts in integer cents (plus a _usd sibling for each), "
+    "the reopened-from flag, and the reason codes standing on that episode. The "
+    "ORDER the rows come back in is a deterministic SQL sort chosen by order_by, "
+    "never a judgement: variance_desc (the default) ranks by absolute dollars at "
+    "stake, largest first; age_desc/age_asc rank by how long the episode has stood; "
+    "reopened_first puts episodes that were closed and came undone ahead of "
+    "everything else, then falls back to age; episode_id is the stable identifier "
+    "order. You may explain why the top rows are there and what they have in "
+    "common; you may never re-sort them yourself or claim a different episode is "
+    "more important than its position here says -- prioritisation is a sort the "
+    "database performed, not a judgement you make. The response always echoes back "
+    "the order_by that actually produced the order, so the sort behind your answer "
+    "is never ambiguous. Use get_portfolio_overview first for the totals this queue "
+    "is a page of, and get_episode or calculate_reconciliation to go deeper on any "
+    "one row."
+)
+
+_SCHEMA_EXCEPTION_QUEUE: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "disposition": {
+            "type": "string",
+            "enum": sorted(_QUEUE_DISPOSITIONS),
+            "default": "EXCEPTION",
+            "description": (
+                "Which of the three queues to read: EXCEPTION (a defect exists; work "
+                "it), PENDING (waiting on an external party; no defect), or CLOSED "
+                "(nothing to do). There is no fourth -- reopened is a flag on a row, "
+                "never a disposition of its own."
+            ),
+        },
+        "order_by": {
+            "type": "string",
+            "enum": sorted(repository.QUEUE_ORDERINGS),
+            "default": "variance_desc",
+            "description": (
+                "The deterministic SQL sort to apply before any row is returned. "
+                "variance_desc ranks by absolute dollars at stake; see the tool "
+                "description for what each of the other values means. This IS the "
+                "prioritisation -- there is no other way to rank this queue, and no "
+                "value here means 'let the model decide'."
+            ),
+        },
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "default": 10,
+            "description": "How many episodes to return, in order_by's order, most-important-first.",
+        },
+    },
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def get_exception_queue(
+    ctx: ToolContext,
+    *,
+    disposition: str = "EXCEPTION",
+    order_by: str = "variance_desc",
+    limit: int = 10,
+) -> ToolEnvelope:
+    if disposition not in _QUEUE_DISPOSITIONS:
+        return err(
+            "invalid_input",
+            f"disposition must be one of {sorted(_QUEUE_DISPOSITIONS)}. Got {_fmt_got(disposition)}.",
+        )
+    if order_by not in repository.QUEUE_ORDERINGS:
+        return err(
+            "invalid_input",
+            f"order_by must be one of {sorted(repository.QUEUE_ORDERINGS)}. Got {_fmt_got(order_by)}.",
+        )
+    if isinstance(limit, bool) or not isinstance(limit, int) or not (1 <= limit <= 200):
+        return err(
+            "invalid_input",
+            f"limit must be an integer between 1 and 200. Got {_fmt_got(limit)}.",
+        )
+
+    rows = service_module.queue(ctx.conn, ctx.cursor, disposition=disposition, order_by=order_by, limit=limit)
+
+    episodes: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        path = f"episodes[{i}]"
+        episodes.append(
+            {
+                **row,
+                # ndc11 is feed-derived -- the same field get_episode's identity dict
+                # wraps via _IDENTITY_WRAPPED_KEYS -- and a summary row is not exempt
+                # from the fence merely because it is one row among many.
+                "ndc11": (
+                    _wrap_value(f"{path}.ndc11", row["ndc11"], ctx.nonce) if row["ndc11"] else row["ndc11"]
+                ),
+                "reimbursement_variance_usd": _usd(row["reimbursement_variance_cents"]),
+                "rebate_variance_usd": _usd(row["rebate_variance_cents"]),
+                "total_variance_usd": _usd(row["total_variance_cents"]),
+                "absolute_variance_usd": _usd(row["absolute_variance_cents"]),
+            }
+        )
+
+    data: dict[str, Any] = {
+        "_untrusted_nonce": ctx.nonce,
+        "cursor": ctx.cursor,
+        "disposition": disposition,
+        # Echoed verbatim (spec_analyst.md: "Echo the chosen order_by back in the
+        # response data, so the tool-call trace records which deterministic sort
+        # produced the order") -- the ranking this call performed is nameable in the
+        # same trace a human or an eval later reads back, not just implied by row order.
+        "order_by": order_by,
+        "limit": limit,
+        "count": len(episodes),
+        "episodes": episodes,
+    }
+
+    message = f"no {disposition} episodes exist at cursor {ctx.cursor}." if not episodes else ""
+    return ok(data, message)
+
+
 # ═══ 3. the registry — declared once, used twice ════════════════════════════
 
 
@@ -1863,6 +2070,22 @@ TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec("get_cash_match", _DESC_CASH, _SCHEMA_CASH, get_cash_match, _READ, "focused"),
     ToolSpec("calculate_reconciliation", _DESC_CALC, _SCHEMA_CALC, calculate_reconciliation, _READ, "focused"),
     ToolSpec("get_raw_record", _DESC_RAW, _SCHEMA_RAW, get_raw_record, _READ, "drilldown"),
+    ToolSpec(
+        "get_portfolio_overview",
+        _DESC_PORTFOLIO_OVERVIEW,
+        _SCHEMA_PORTFOLIO_OVERVIEW,
+        get_portfolio_overview,
+        _READ,
+        "concise",
+    ),
+    ToolSpec(
+        "get_exception_queue",
+        _DESC_EXCEPTION_QUEUE,
+        _SCHEMA_EXCEPTION_QUEUE,
+        get_exception_queue,
+        _READ,
+        "focused",
+    ),
     ToolSpec(
         "create_mock_work_item",
         _DESC_WRITE,

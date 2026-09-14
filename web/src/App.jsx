@@ -5,6 +5,179 @@ import QueueTiles from './components/QueueTiles.jsx'
 import QueueTable from './components/QueueTable.jsx'
 import EpisodeDossier from './components/EpisodeDossier.jsx'
 import FeedExceptions from './components/FeedExceptions.jsx'
+import Cited from './components/Cited.jsx'
+
+// ═══ the Portfolio Analyst panel ═════════════════════════════════════════════════════════════
+// docs/agent_layer_design.md S:opening line: "the Exception Investigator explains, the Portfolio
+// Analyst aggregates" -- and .agents/specs/spec_analyst.md puts this role on the dashboard
+// specifically because "what is the state of the book" is the dashboard's own question, not a
+// per-episode one. It hits POST /api/agent/portfolio directly (not through api.js's `api.agent.*`
+// namespace, which this wave does not own) -- same request/response shape as `api.agent.explain`,
+// same 503-means-unavailable convention.
+//
+// One tool-calling pass, not a stream: `/api/agent/portfolio` mirrors `/api/agent/explain`
+// (single request, single response), not `/api/agent/decide` (SSE). So this panel cannot show a
+// real step-by-step log the way DecidePanel does in pages/Analyse.jsx -- there is no server-sent
+// event to render. What it borrows from DecidePanel instead is the *principle* the task calls
+// for: a run that takes 1-3 minutes must never sit behind a bare, silent spinner. An elapsed-time
+// readout plus a short, honest list of what a portfolio analysis pass actually does (read the
+// overview, read the ranked queue, cross-reference, draft) gives a reviewer watching the wait
+// something true to look at, without pretending to know a stage has completed when the single
+// HTTP call has not yet returned.
+const PORTFOLIO_PROGRESS_STEPS = [
+  'Reading the portfolio overview -- counts and money by disposition, verdict-pair and reason-code frequencies…',
+  'Reading the exception queue, ranked by the deterministic SQL sort already applied…',
+  'Cross-referencing reason codes and cross-track flags across both queues…',
+  'Drafting the report and verifying every figure against a tool result before answering…',
+]
+//: How often the next honest-progress line appears. Not a real progress signal (there is no
+//: server event to key off) -- just a slower cadence than a spinner, tuned to the 1-3 minute
+//: wall clock this call actually takes on the thinking model.
+const PORTFOLIO_STEP_INTERVAL_MS = 18_000
+
+function PortfolioAnalystPanel({ cursor }) {
+  const [question, setQuestion] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const [unavailable, setUnavailable] = useState(null)
+  const [elapsedS, setElapsedS] = useState(0)
+  const [stepIndex, setStepIndex] = useState(0)
+  const elapsedTimer = useRef(null)
+  const stepTimer = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (elapsedTimer.current) clearInterval(elapsedTimer.current)
+      if (stepTimer.current) clearInterval(stepTimer.current)
+    }
+  }, [])
+
+  async function run() {
+    setBusy(true)
+    setError(null)
+    setUnavailable(null)
+    setResult(null)
+    setElapsedS(0)
+    setStepIndex(0)
+    elapsedTimer.current = setInterval(() => setElapsedS((s) => s + 1), 1000)
+    stepTimer.current = setInterval(
+      () => setStepIndex((i) => Math.min(i + 1, PORTFOLIO_PROGRESS_STEPS.length - 1)),
+      PORTFOLIO_STEP_INTERVAL_MS,
+    )
+    try {
+      const response = await fetch('/api/agent/portfolio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cursor: cursor ?? null, question: question.trim() || null }),
+      })
+      if (!response.ok) {
+        let detail = response.statusText
+        try {
+          detail = (await response.json()).detail ?? detail
+        } catch {
+          /* a non-JSON error body is still worth surfacing as the status text */
+        }
+        const err = new Error(`${response.status}: ${detail}`)
+        err.status = response.status
+        throw err
+      }
+      setResult(await response.json())
+    } catch (exc) {
+      if (exc.status === 503) setUnavailable(String(exc.message ?? exc))
+      else setError(String(exc.message ?? exc))
+    } finally {
+      setBusy(false)
+      clearInterval(elapsedTimer.current)
+      clearInterval(stepTimer.current)
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-head-row">
+        <h2>Portfolio Analyst</h2>
+        <button type="button" data-testid="portfolio-run" onClick={run} disabled={busy}>
+          {busy ? 'Analysing…' : result ? 'Run again' : 'Analyse the book'}
+        </button>
+      </div>
+      <p className="hint">
+        Aggregates the same counts and money the tiles below show, plus the exception queue's own
+        deterministic ranking, into a narrative answer to "what is the state of the book right
+        now, and what carries the most money" — every figure is quoted from a tool result and
+        every ordering is a SQL sort the agent only explains; it never re-ranks a queue itself.
+        Ask a specific question below, or leave it blank for a general summary.
+      </p>
+      <label className="wi-field">
+        <span>Question (optional)</span>
+        <textarea
+          data-testid="portfolio-question"
+          rows={2}
+          placeholder='e.g. "which reason code carries the most money in the exception queue right now?"'
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          disabled={busy}
+        />
+      </label>
+
+      {busy ? (
+        <div className="agent-log" data-testid="portfolio-progress">
+          <div className="agent-log-row muted">
+            running for {elapsedS}s — the provider's fast tier is down, so this call runs on a
+            thinking model and can take 1–3 minutes even when it succeeds.
+          </div>
+          {PORTFOLIO_PROGRESS_STEPS.slice(0, stepIndex + 1).map((step, i) => (
+            <div key={i} className="agent-log-row">
+              {step}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {unavailable ? (
+        <div className="agent-unavailable" data-testid="portfolio-unavailable">
+          {unavailable}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="error" data-testid="portfolio-error">
+          {error}
+        </div>
+      ) : null}
+
+      {result && result.status === 'ok' ? (
+        <div data-testid="portfolio-report">
+          {['state_of_the_book', 'what_is_concentrated', 'what_i_could_not_determine', 'where_to_look_first'].map(
+            (key) =>
+              result.report[key] ? (
+                <div key={key} style={{ marginBottom: 10 }}>
+                  <div className="k" style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    {key.replaceAll('_', ' ')}
+                  </div>
+                  <Cited text={result.report[key]} />
+                </div>
+              ) : null,
+          )}
+          {result.citations?.length ? (
+            <p className="dossier-note">
+              {result.citations.length} citation{result.citations.length === 1 ? '' : 's'}, numbered
+              above in order of first use. Hover a marker to see what it points at.
+            </p>
+          ) : null}
+          {result.unsourced_figures?.length ? (
+            <div className="agent-unsourced" data-testid="portfolio-unsourced-figures">
+              ⚠ figure(s) that survived the repair turn without appearing in any tool result:{' '}
+              {result.unsourced_figures.join(', ')}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {result && result.status !== 'ok' ? (
+        <p className="empty">portfolio analyst outcome: {result.status}</p>
+      ) : null}
+    </section>
+  )
+}
 
 // The whole app is a function of one piece of state: the cursor.
 //
@@ -224,6 +397,8 @@ export default function App() {
             </p>
             <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
           </section>
+
+          <PortfolioAnalystPanel cursor={cursor} />
 
           <section className="panel">
             <h2>Queues at this cursor</h2>

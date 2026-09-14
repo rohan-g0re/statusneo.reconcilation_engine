@@ -1,5 +1,5 @@
-"""The agent layer's HTTP surface (design doc S8.6): explain, decide, the human gate, the to-do
-list, and the run journal made inspectable over HTTP.
+"""The agent layer's HTTP surface (design doc S8.6): explain, decide, portfolio, the human gate,
+the to-do list, and the run journal made inspectable over HTTP.
 
 **Optional on top of optional.** ``recon.api.app`` is already an optional extra over the
 dependency-free deterministic core; this module is optional *again* on top of that -- the
@@ -45,6 +45,17 @@ HTTP client goes away mid-stream, Starlette stops iterating the generator (or ra
 running to completion and closes the journal itself. The run finishes and its journal file is
 complete and readable via ``GET /api/agent/runs/{run_id}`` even for a request nobody was left to
 receive the response to.
+
+**Portfolio mirrors Explain, not Decide.** ``/api/agent/portfolio`` (``.agents/specs/spec_analyst.md``)
+is the Portfolio Analyst's only endpoint -- one request, one response, the same shape as
+``/api/agent/explain``, right down to the ``LLMError`` -> 503 handling and the journal
+bracketing. It is deliberately **not** SSE: the role is "single pass with tool calls" exactly
+like the Investigator, not a propose/evaluate/score/gate loop, so there is no step-by-step
+loop state for a client to watch. The one thing Portfolio does not have that Explain does is an
+``episode_id`` -- it answers "what is the state of the book", a question about the whole
+portfolio, not one episode -- so there is no ``episode_not_found`` branch and no dossier is
+built before the run starts; the tools the role calls (``get_portfolio_overview``,
+``get_exception_queue``) read straight off ``ctx.cursor``.
 
 **The proposed/accepted diff is not shoehorned into the run journal.** ``journal.Journal.event``
 enforces a closed ``kind`` vocabulary this module does not own and must not extend (design's own
@@ -95,6 +106,7 @@ class _AgentModules:
     journal: Any = None
     coordinator: Any = None
     investigator: Any = None
+    analyst: Any = None
     verdict_vocab: Any = None
 
 
@@ -109,6 +121,7 @@ try:
     from recon.agents import grounding as _grounding_mod
     from recon.agents import journal as _journal_mod
     from recon.agents import tools as _tools_mod
+    from recon.agents.roles import analyst as _analyst_mod
     from recon.agents.roles import coordinator as _coordinator_mod
     from recon.agents.roles import investigator as _investigator_mod
     from recon.domain import verdicts as _verdict_vocab_mod
@@ -120,6 +133,7 @@ try:
     _agent.journal = _journal_mod
     _agent.coordinator = _coordinator_mod
     _agent.investigator = _investigator_mod
+    _agent.analyst = _analyst_mod
     _agent.verdict_vocab = _verdict_vocab_mod
 except Exception as exc:  # noqa: BLE001 -- deliberately broad: any import-time failure means "unavailable"
     _AGENT_LAYER_ERROR = f"{type(exc).__name__}: {exc}"
@@ -497,6 +511,103 @@ def build_router(
                     "why_it_is_open": report.why_it_is_open,
                     "what_i_could_not_determine": report.what_i_could_not_determine,
                     "what_a_human_should_check_first": report.what_a_human_should_check_first,
+                },
+                "citations": [{"kind": c.kind.value, "ref": c.ref} for c in report.citations],
+                "unsourced_figures": list(outcome.unsourced_figures),
+                "tool_calls": trace,
+                "token_usage": state.token_usage,
+            }
+
+    # ─── Portfolio ───────────────────────────────────────────────────────────────
+
+    @router.post("/api/agent/portfolio")
+    def portfolio(request: Request, body: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+        reason = _llm_unavailable_reason()
+        if reason is not None:
+            raise HTTPException(503, reason)
+
+        body = body or {}
+        question = body.get("question")
+        if question is not None and not isinstance(question, str):
+            raise HTTPException(422, "question must be a string or null")
+
+        settings: Settings = request.app.state.settings
+        resolved_cursor = _resolve_cursor(settings, body.get("cursor"))
+
+        with _open_conn(settings) as conn:
+            agent_settings = _settings_factory()
+            run_id = uuid.uuid4().hex
+            journal = _agent.journal.Journal(agent_settings.journal_dir / f"{run_id}.jsonl", run_id, now=_now)
+            try:
+                client = _make_client(agent_settings, journal)
+                ctx = _tool_context(
+                    conn,
+                    cursor=resolved_cursor,
+                    role="portfolio_analyst",
+                    model_id=agent_settings.analyst_model,
+                    run_id=run_id,
+                    journal=journal,
+                )
+                # `run_analyst` is single-pass with tool calls, the same shape as
+                # `run_investigator` (spec_analyst.md: "not the propose/evaluate loop --
+                # there is no action being proposed, so there is nothing to gate") -- it
+                # journals no run_started/run_finished pair of its own, exactly like the
+                # Investigator, so the caller brackets the run here.
+                journal.event(
+                    "run_started",
+                    role="portfolio_analyst",
+                    cursor=resolved_cursor,
+                    model=agent_settings.analyst_model,
+                )
+                try:
+                    outcome = _agent.analyst.run_analyst(
+                        client=client,
+                        tool_ctx=ctx,
+                        model=agent_settings.analyst_model,
+                        cursor=resolved_cursor,
+                        question=question,
+                        verdict_glossary=_glossary(),
+                    )
+                except _agent.client.LLMError as exc:
+                    # Identical reasoning to `explain`: this call runs on the thinking
+                    # model and can take 1-3 minutes even on success, so a reviewer
+                    # watching that wait needs to be told "the provider stalled", not
+                    # left guessing whether the agent layer itself hung.
+                    journal.event("run_finished", role="portfolio_analyst", error=str(exc))
+                    raise HTTPException(
+                        503,
+                        f"the model provider did not answer after {exc.attempts} attempts "
+                        f"(HTTP {exc.status}). This is upstream of the agent layer: the "
+                        f"deterministic views, the timeline and the to-do list are unaffected. "
+                        f"Retry in a few minutes.",
+                    ) from exc
+                journal.event("run_finished", role="portfolio_analyst")
+            finally:
+                journal.close()
+
+            events = journal.events
+            state = _agent.journal.derive_state(events)
+            trace = _tool_call_trace(events)
+
+            if outcome.report is None:
+                return {
+                    "status": outcome.typed_reason,
+                    "cursor": resolved_cursor,
+                    "run_id": run_id,
+                    "tool_calls": trace,
+                    "token_usage": state.token_usage,
+                }
+
+            report = outcome.report
+            return {
+                "status": "ok",
+                "cursor": resolved_cursor,
+                "run_id": run_id,
+                "report": {
+                    "state_of_the_book": report.state_of_the_book,
+                    "what_is_concentrated": report.what_is_concentrated,
+                    "what_i_could_not_determine": report.what_i_could_not_determine,
+                    "where_to_look_first": report.where_to_look_first,
                 },
                 "citations": [{"kind": c.kind.value, "ref": c.ref} for c in report.citations],
                 "unsourced_figures": list(outcome.unsourced_figures),

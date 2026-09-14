@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
 import EpisodeDossier from '../components/EpisodeDossier.jsx'
+import Cited from '../components/Cited.jsx'
 
 // The agent layer's analysis screen (docs/agent_layer_design.md S7/S8.6): one episode, the
 // evidence beside the recommendation, never a rubber stamp.
@@ -621,43 +622,8 @@ function DecidePanel({ episodeId, canRun }) {
 }
 
 // ═══ the page ═══════════════════════════════════════════════════════════════════════════════
-
-// The model is required to put a `[[raw:79]]`-style token after every factual clause,
-// because that token is what makes a claim checkable -- the harness verifies each one
-// against a real source row. But a token is machinery, not prose, and a reader who
-// wanted a sentence should not be handed a parser. So the tokens stay in the model's
-// output and come out here: each becomes a small numbered marker, numbered in order of
-// first use, titled with what it points at. Same evidence, none of the noise.
-const CITATION_RE = /\[\[(raw|event|calc|verdict):([A-Za-z0-9_.\-]+)\]\]/g
-
-function Cited({ text }) {
-  if (!text) return null
-  const seen = new Map()
-  const out = []
-  let last = 0
-  let m
-  CITATION_RE.lastIndex = 0
-  while ((m = CITATION_RE.exec(text)) !== null) {
-    const [token, kind, ref] = m
-    if (m.index > last) out.push(text.slice(last, m.index))
-    const key = `${kind}:${ref}`
-    if (!seen.has(key)) seen.set(key, seen.size + 1)
-    const n = seen.get(key)
-    const label =
-      kind === 'raw' ? `source record ${ref}`
-      : kind === 'event' ? `timeline event ${ref}`
-      : kind === 'calc' ? `computed field ${ref}`
-      : `verdict ${ref}`
-    out.push(
-      <sup key={`${m.index}-${key}`} className="agent-cite" title={label}>
-        {n}
-      </sup>,
-    )
-    last = m.index + token.length
-  }
-  out.push(text.slice(last))
-  return <div style={{ fontSize: 13, lineHeight: 1.55 }}>{out}</div>
-}
+// `Cited` -- the `[[raw:79]]`-token renderer shared with the dashboard's Portfolio Analyst
+// panel -- now lives in ../components/Cited.jsx; see that file's own comment for why.
 
 export default function Analyse({ episodeId }) {
   const [dossier, setDossier] = useState(null)

@@ -20,3 +20,7 @@ INFO:     127.0.0.1:57745 - "GET /api/agent/work-items/E-000006 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:57746 - "GET /api/episode/E-000006/dossier HTTP/1.1" 200 OK
 INFO:     127.0.0.1:61200 - "GET /api/episode/E-000032/dossier HTTP/1.1" 200 OK
 INFO:     127.0.0.1:61199 - "GET /api/agent/work-items/E-000032 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53091 - "GET /api/agent/work-items/E-000032 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51697 - "GET /api/agent/work-items/E-000006 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51696 - "GET /api/episode/E-000032/dossier HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51698 - "GET /api/episode/E-000006/dossier HTTP/1.1" 200 OK

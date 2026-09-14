@@ -78,6 +78,7 @@ __all__ = [
     "Citation",
     "WorkItemDraft",
     "InvestigatorReport",
+    "AnalystReport",
 ]
 
 
@@ -142,18 +143,36 @@ class SourceKind(StrEnum):
 
 
 class CitationKind(StrEnum):
-    """The Investigator's citation-token kinds (`spec_prompts_roles.md` §0 grammar).
+    """The Investigator's citation-token kinds (`spec_prompts_roles.md` §0 grammar),
+    plus two the Portfolio Analyst adds for its own tool shapes.
 
     ``\\[\\[(raw|event|calc|verdict):...\\]\\]`` -- the regex itself is the closed
     vocabulary. A bracket pair using any other word is not a citation at all and never
     reaches this enum; the harness renders it as plain, unresolved text instead of
     constructing a `Citation`. That is why there is no escape member here either.
+
+    `OVERVIEW` and `QUEUE` are additions from `roles/analyst.py` (`.agents/specs/
+    spec_analyst.md`, this coder's slice). The Analyst never sees a single episode's
+    raw records or timeline (`raw`/`event` do not fit its tool shapes), but it does
+    read two aggregate tool results with no equivalent in the Investigator's grammar:
+    a field of `get_portfolio_overview` (the aggregate analogue of `calc:F` naming a
+    field of `calculate_reconciliation`) and a row of `get_exception_queue`, referenced
+    by the episode_id that row carries (the aggregate analogue of `raw:R` naming an
+    immutable source row). Extending the enum rather than repurposing `calc`/`raw` for
+    a different meaning keeps each kind's semantics singular -- a reader of a `[[calc:]]`
+    token should never have to ask which of two tools it might refer to. Still
+    exhaustive by construction, the same reason the original four carry no escape
+    member: each of the six is mechanically one tool shape or another, by the fixed
+    regex `roles/analyst.py` matches against, so there is no seventh case to decline
+    into.
     """
 
     RAW = "raw"
     EVENT = "event"
     CALC = "calc"
     VERDICT = "verdict"
+    OVERVIEW = "overview"
+    QUEUE = "queue"
 
 
 # ═══ shared validation helpers ═══════════════════════════════════════════════
@@ -821,6 +840,101 @@ class InvestigatorReport:
             why_it_is_open=why_it_is_open,
             what_i_could_not_determine=what_i_could_not_determine,
             what_a_human_should_check_first=what_a_human_should_check_first,
+            citations=citations,
+        )
+
+
+# ═══ AnalystReport ════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True, slots=True)
+class AnalystReport:
+    """The Portfolio Analyst's answer, structured after the fact.
+
+    `.agents/specs/spec_analyst.md` "Role (Agent 2 owns)": four sections, "reasoning-first
+    ordering preserved," plus `citations` -- the same shape `InvestigatorReport` takes for
+    the same reason (see that class's docstring): the model "replies in prose ... and the
+    harness extracts [citations] from it afterward," never filled by the model via a
+    forced tool call, so there is no model `reasoning` field to put first here either.
+
+    Deliberately has no `episode_id` (there is none -- this report is portfolio-wide) and,
+    per the frozen field list in `spec_analyst.md`, no `cursor` either, unlike
+    `InvestigatorReport`. That is a real asymmetry with the Investigator's shape, not an
+    oversight: the frozen contract names exactly `state_of_the_book`, `what_is_concentrated`,
+    `what_i_could_not_determine`, `where_to_look_first` and `citations`, and this class
+    follows that list literally rather than adding a field the spec did not ask for. A
+    caller that wants the "as of" date for display already has it -- `run_analyst`'s own
+    `cursor` parameter -- without needing it duplicated onto the report.
+
+    `what_is_concentrated` is the section the deterministic-boundary constraint this role
+    is graded on lands on: `get_exception_queue`'s rows, presented in the order the tool
+    returned them, with the sort that produced that order named in prose. Nothing here
+    re-derives or checks that ordering structurally -- the four fields are plain strings,
+    the same as `InvestigatorReport`'s -- because the enforcement is upstream, in the
+    prompt (`prompts/analyst.py`) and in what the harness does and does not do to the
+    model's prose (`roles/analyst.py`: no step anywhere resorts a section's text).
+    """
+
+    state_of_the_book: str
+    what_is_concentrated: str
+    what_i_could_not_determine: str
+    where_to_look_first: str
+    citations: tuple[Citation, ...]
+
+    _FIELD_SCHEMAS: ClassVar[dict[str, dict[str, Any]]] = {
+        "state_of_the_book": _string(
+            "## State of the book -- counts and money by disposition, the verdict-pair "
+            "distribution and reason-code frequencies, drawn from get_portfolio_overview."
+        ),
+        "what_is_concentrated": _string(
+            "## What is concentrated -- where the money and the risk sit, presented in "
+            "the order get_exception_queue returned its rows, with the order_by that "
+            "produced that order named explicitly. A sort, never a judgement: no ranking "
+            "here may come from anywhere but that one named tool call."
+        ),
+        "what_i_could_not_determine": _string(
+            "## What I could not determine -- always present. The exact sentence "
+            "'Nothing -- every question this portfolio raises is answered by the "
+            "records above.' when nothing is missing."
+        ),
+        "where_to_look_first": _string(
+            "## Where to look first -- one to three concrete checks, each naming the "
+            "sort or tool call that surfaced it."
+        ),
+        "citations": _array_of(
+            Citation.json_schema(),
+            "Every [[kind:ref]] token found in the four sections above, resolved "
+            "against the tool results this pass received.",
+        ),
+    }
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": dict(cls._FIELD_SCHEMAS),
+            "required": list(cls._FIELD_SCHEMAS),
+            "additionalProperties": False,
+        }
+
+    @classmethod
+    def parse(cls, payload: dict[str, Any]) -> Self:
+        name = "AnalystReport"
+        _require_object(payload, schema_name=name)
+        _require_keys(payload, cls._FIELD_SCHEMAS, schema_name=name)
+
+        state_of_the_book = _require_str(payload, "state_of_the_book", schema_name=name)
+        what_is_concentrated = _require_str(payload, "what_is_concentrated", schema_name=name)
+        what_i_could_not_determine = _require_str(payload, "what_i_could_not_determine", schema_name=name)
+        where_to_look_first = _require_str(payload, "where_to_look_first", schema_name=name)
+        citations = tuple(
+            Citation.parse(item) for item in _require_list(payload, "citations", schema_name=name)
+        )
+        return cls(
+            state_of_the_book=state_of_the_book,
+            what_is_concentrated=what_is_concentrated,
+            what_i_could_not_determine=what_i_could_not_determine,
+            where_to_look_first=where_to_look_first,
             citations=citations,
         )
 

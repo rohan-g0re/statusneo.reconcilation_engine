@@ -32,7 +32,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from recon.agents import api as agents_api  # noqa: E402
-from recon.agents.client import LLMResponse, ToolCall  # noqa: E402
+from recon.agents.client import LLMError, LLMResponse, ToolCall  # noqa: E402
 from recon.agents.config import load_agent_settings  # noqa: E402
 from recon.agents.grounding import select_clauses  # noqa: E402
 from recon.agents.rubric import applicable_judge_criteria, Outcome, Round  # noqa: E402
@@ -232,6 +232,151 @@ def test_router_is_actually_mounted_by_create_app(demo_settings):
     resp = app_client.get("/api/agent/work-items")
     assert resp.status_code == 200
     assert resp.json() == {"work_items": []}
+
+
+# ═══ /api/agent/portfolio ═════════════════════════════════════════════════════════════
+#
+# `run_analyst` (Coder 2's `recon.agents.roles.analyst`) is single-pass with tool calls,
+# the same shape as `run_investigator` -- so these tests script it exactly the way
+# `test_explain_happy_path_returns_report_citations_trace_and_tokens` above scripts the
+# Investigator: one tool-call response naming a real, Coder-1-registered tool
+# (`get_portfolio_overview`), then a prose response. Unlike the Explain tests, the happy
+# path below does not assert the *content* the model wrote into each report section --
+# that prose-to-`AnalystReport` parsing is Coder 2's own module and is pinned by
+# `tests/test_agents_analyst.py`, not this file. What this file owns is the HTTP wiring:
+# the four frozen `AnalystReport` section keys arrive intact, the tool-call trace names
+# the real tool that ran, and the run is inspectable afterward -- exactly the same
+# contract `explain` already proves, now for a portfolio-wide, episode-less run.
+
+
+class ErrorClient:
+    """Matches the `LLMClient` Protocol exactly (house rule: a stub looser than the
+    Protocol is how a real bug shipped here before) and raises on the first call --
+    scripting `_agent.client.LLMError` -> 503 without needing a live provider."""
+
+    def complete(self, *, agent, messages, model, tools=None, tool_choice=None,
+                 max_tokens=None, temperature=None, iteration=None) -> LLMResponse:
+        raise LLMError("simulated provider stall", status=500, body="upstream exploded", attempts=3)
+
+
+def test_portfolio_happy_path_returns_report_and_tool_call_trace(demo_settings, tmp_path):
+    agent_settings = _agent_settings(tmp_path)
+    prose = (
+        "## State of the book\n"
+        "As of the current cursor, the portfolio overview names the totals by disposition "
+        "[[calc:total_variance_cents]].\n\n"
+        "## What is concentrated\n"
+        "The exception queue, already sorted by the tool's own order_by, surfaces which "
+        "episodes carry the most money [[verdict:A-05]].\n\n"
+        "## What I could not determine\n"
+        "Nothing -- every question this summary raises is answered by the records above.\n\n"
+        "## Where to look first\n"
+        "Start with the first row of the variance-sorted exception queue."
+    )
+    scripted = ScriptedClient(
+        [
+            _tool_call_response("get_portfolio_overview", {}, model="deepseek-v4-pro"),
+            _prose_response(prose, model="deepseek-v4-pro"),
+        ]
+    )
+    client = _build_test_app(
+        demo_settings,
+        agent_settings_factory=lambda: agent_settings,
+        client_factory=lambda settings, journal: scripted,
+    )
+
+    resp = client.post(
+        "/api/agent/portfolio",
+        json={"cursor": None, "question": "which reason code carries the most money?"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["run_id"]
+    assert body["cursor"] == demo_settings.max_cursor
+    report = body["report"]
+    assert set(report) == {
+        "state_of_the_book",
+        "what_is_concentrated",
+        "what_i_could_not_determine",
+        "where_to_look_first",
+    }
+    assert isinstance(body["citations"], list)
+    assert isinstance(body["unsourced_figures"], list)
+    assert len(body["tool_calls"]) == 1
+    assert body["tool_calls"][0]["name"] == "get_portfolio_overview"
+    assert body["tool_calls"][0]["status"] == "ok"
+
+    # Inspectable over HTTP afterward, same as an Explain run, and correctly labelled
+    # with the role this endpoint runs under.
+    run_resp = client.get(f"/api/agent/runs/{body['run_id']}")
+    assert run_resp.status_code == 200
+    run_body = run_resp.json()
+    assert run_body["role"] == "portfolio_analyst"
+    assert len(run_body["tool_calls"]) == 1
+
+
+def test_portfolio_agent_layer_unavailable_returns_503(monkeypatch):
+    monkeypatch.setattr(agents_api, "_AGENT_LAYER_ERROR", "ModuleNotFoundError: No module named 'httpx'")
+    client = _build_test_app()
+    resp = client.post("/api/agent/portfolio", json={"cursor": None, "question": None})
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert "pip install" in detail
+    assert "httpx" in detail
+
+
+def test_portfolio_upstream_llm_error_is_a_503_naming_the_provider(demo_settings, tmp_path):
+    agent_settings = _agent_settings(tmp_path)
+    client = _build_test_app(
+        demo_settings,
+        agent_settings_factory=lambda: agent_settings,
+        client_factory=lambda settings, journal: ErrorClient(),
+    )
+
+    resp = client.post("/api/agent/portfolio", json={"cursor": None, "question": None})
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    # Says which side failed -- the same "upstream of the agent layer, deterministic
+    # views unaffected" message `explain` gives, not a generic 500.
+    assert "upstream of the agent layer" in detail
+    assert "deterministic views" in detail
+    assert "3 attempts" in detail
+
+
+def test_portfolio_bad_cursor_is_a_422(demo_settings, tmp_path):
+    agent_settings = _agent_settings(tmp_path)
+    client = _build_test_app(
+        demo_settings,
+        agent_settings_factory=lambda: agent_settings,
+        client_factory=lambda settings, journal: ScriptedClient([]),
+    )
+
+    resp = client.post("/api/agent/portfolio", json={"cursor": "not-a-real-cursor", "question": None})
+    assert resp.status_code == 422
+
+
+def test_portfolio_empty_body_defaults_cursor_and_question_to_null(demo_settings, tmp_path):
+    """The frozen body shape is `{"cursor": str | null, "question": str | null}`, but a
+    caller sending an empty object still gets a well-formed run at the max cursor with
+    no question -- the same "missing means null" leniency the rest of this HTTP surface
+    extends to an absent `cursor` query parameter."""
+    agent_settings = _agent_settings(tmp_path)
+    scripted = ScriptedClient(
+        [
+            _tool_call_response("get_portfolio_overview", {}, model="deepseek-v4-pro"),
+            _prose_response("## State of the book\nNothing outstanding to report.", model="deepseek-v4-pro"),
+        ]
+    )
+    client = _build_test_app(
+        demo_settings,
+        agent_settings_factory=lambda: agent_settings,
+        client_factory=lambda settings, journal: scripted,
+    )
+
+    resp = client.post("/api/agent/portfolio", json={})
+    assert resp.status_code == 200
+    assert resp.json()["cursor"] == demo_settings.max_cursor
 
 
 # ═══ /api/agent/decide (SSE) ═════════════════════════════════════════════════════════
