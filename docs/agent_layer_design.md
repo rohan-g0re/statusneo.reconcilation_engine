@@ -26,6 +26,8 @@ The proposer's reasoning never reaches the evaluator. It receives the proposed a
 
 This is Cognition's measured finding, and it contradicts their own earlier "share full traces" principle: the reviewer "gets to skip this extraneous context, only look at the diff, and re-discover any context it needs," and **"With a shorter context, the improved intelligence naturally leads to increased detection of nuanced issues."** Where the two conflict, the follow-up wins — it is a production result with measured bug yield against a heuristic asserted in a blog post.
 
+**What the shipped default actually does, stated rather than implied.** `proposer_model` and `evaluator_model` both default to `deepseek-chat` — the *same model* — so the self-preference-bias mitigation this section argues for is off unless `RECON_AGENT_EVALUATOR_MODEL` is pointed elsewhere. The reason is measured, not casual: the thinking-model evaluator averaged 466s per call against the proposer's 4.1s and was 96% of every run's wall clock. What survives the change is the part doing the heavier lifting — the evaluator still gets a fresh trace, still never sees the proposer's reasoning, and Python still computes the score from a checklist. What is lost is model diversity, and this document should not keep claiming it by default.
+
 ---
 
 ## 2. The loop
@@ -39,9 +41,11 @@ Bounded three ways, not one:
 - **confidence ≥ 80** → accept, surface the recommendation
 - **any criterion NOT_ADDRESSED** → declare insufficient data immediately
 - **no score improvement across two rounds** → stop and escalate
-- **max 5 iterations** → backstop
+- **max iterations** → backstop. Five here; the shipped default is 3 (`RECON_AGENT_MAX_ITERATIONS`)
 
 Five is well-chosen. Reflexion capped at 4–12, Self-Refine at 4, Huang et al. tested only 2; gains front-load hard and the tail is where self-bias does its damage.
+
+The shipped default is **3**, and the floor is not arbitrary. `_stalled` needs three scored rounds to fire — two that failed to improve, plus an earlier one to have failed to improve on — so a ceiling of 2 makes `stalled` unreachable and leaves the loop with three of its four terminal states. That was briefly the shipped configuration, as a prototype simplification, and nothing failed: the outcome simply stopped being producible. A test now pins the relationship rather than leaving it to memory.
 
 The no-improvement stop is not an optimisation. [Xu et al. (ACL 2024)](https://aclanthology.org/2024.acl-long.826/) found self-refinement "improves the fluency and understandability of model outputs" while it "further amplifies self-bias" — the loop can converge on something that reads better and scores higher while being no more correct, with confidence climbing the whole way. **Log the score trajectory.** Monotonic rise with no substantive change to the proposal is the signature, and it costs nothing to detect.
 
@@ -158,7 +162,7 @@ Three rules that fall out of the evidence:
 
 ## 5. Tools
 
-Seven, which is comfortably inside the safe zone — measured degradation starts around 15–20 and gets severe past 30–40. Our only real risk at this count is *semantic overlap* between tools, so the description effort goes into sharpening boundaries, not managing count.
+Nine, which is comfortably inside the safe zone — measured degradation starts around 15–20 and gets severe past 30–40. (Seven when this was written, for the Investigator and the Coordinator. The Portfolio Analyst added `get_portfolio_overview` and `get_exception_queue`; `spec_tools.md`'s decision D-T4 had excluded a portfolio tool explicitly *because only two roles were being built*, and that reason went away when the third one was.) Our only real risk at this count is *semantic overlap* between tools, so the description effort goes into sharpening boundaries, not managing count.
 
 The concise/detailed pattern Anthropic recommends is **already built**: `essential` is the cheap default, `facts` the drill-down, `get_raw_record(raw_id)` the third level. Concise responses measured at roughly ⅓ the tokens of detailed ones.
 

@@ -216,9 +216,14 @@ def test_allowed_actions_cover_every_disposition():
 def test_clause_ids_are_unique():
     import recon.agents.grounding as grounding
 
+    # Uniqueness is the invariant. The COUNT is not -- it was pinned at 366 here, and
+    # that turned every legitimate wave of the graph into a failing test, which is the
+    # opposite of what a guard should do: it punishes the intended operation and says
+    # nothing about the property in the test's own name.
     ids = [c.clause_id for c in grounding.ALL_CLAUSES]
-    assert len(grounding.ALL_CLAUSES) == 366
-    assert len(set(ids)) == len(ids)
+    assert grounding.ALL_CLAUSES, "the graph produced no clauses at all"
+    duplicates = {i for i in ids if ids.count(i) > 1}
+    assert not duplicates, f"clause id collision: {sorted(duplicates)}"
 
 
 # ═══ T7 ══════════════════════════════════════════════════════════════════════════
@@ -363,9 +368,12 @@ def test_relations_parse_but_are_not_clauses(graph_rows: list[dict], tmp_path):
     for row in relation_rows:
         assert {"from", "to", "relationType"} <= set(row)
 
+    # Again: the relationship between the loader and the file is the invariant; the
+    # magnitudes are not. Pinning 90 and 78 made the graph unextendable.
     entities, relation_count = grounding.load_graph(grounding.GRAPH_PATH)
-    assert relation_count == len(relation_rows) == 90
-    assert len(entities) == len(grounding._ENTITIES) == 78
+    assert relation_count == len(relation_rows)
+    assert len(entities) == len(grounding._ENTITIES)
+    assert entities, "the graph produced no entities at all"
     for clause in grounding.ALL_CLAUSES:
         assert clause.entity in entities  # every clause traces to an entity row
 

@@ -40,7 +40,26 @@ And `INSUFFICIENT_DATA` is genuinely emitted by the engine — `dispositions.py`
 
 ---
 
-## 3. What still needs crafting
+## 3. What still needed crafting — all of it now built
+
+*Kept as written, because the predictions are worth grading. Every row below was true
+when this was written and is false now.*
+
+| # | Predicted | What actually happened |
+|---|---|---|
+| 1 | Tool layer: none | Nine tools. Five for the episode, two for the portfolio, one drill-down, one write |
+| 2 | `create_mock_work_item`: no writer | Built, and gated harder than proposed — see row 7 |
+| 3 | Eval set: none | Ten scenarios, replayed offline with no API key |
+| 4 | Tool-call trace: none | The journal. One JSONL per run; trace, audit trail and replay fixture at once |
+| 5 | Failure case: none | Two — a veto-triggered zero score, and a real D-6 crosswalk miss |
+| 6 | `recommended_action` free text | Closed set of seven. The six proposed, plus `ABSTAIN`, because every enum needs an escape member |
+| 7 | Confirmation tool | **Built, but not as predicted.** Not a tool the agent calls: the UI mints a digest over the exact human-approved draft and the write tool recomputes and `hmac.compare_digest`s it. The model cannot forge it, which is stronger than asking it to call something |
+
+The one prediction that generalised further than its author expected: this document
+scoped the tool surface to two roles. A third arrived, and needed no new *kind* of
+access — just the same envelope over two read models that already existed.
+
+## 3b. Original text of section 3
 
 Ranked. The first three are the whole job.
 

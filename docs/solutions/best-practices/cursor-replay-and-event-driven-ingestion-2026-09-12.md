@@ -187,7 +187,7 @@ Three things make this safe rather than sloppy:
 
 Expect a residual false-positive rate and do not treat it as a defect. Two genuinely identical payments inside the window are indistinguishable on the evidence available — matching them confidently is what amount-and-date matching *is*, and the honest response is the recorded basis, not a wider window.
 
-**Implementation reference:** `src/recon/ingest/pipeline.py` — `AMOUNT_DATE_WINDOW_DAYS` (line 93), `_recheck_parked_by_amount_and_date` and `_resolve_bank_by_amount_and_date` (lines 612-683); `AllocationBasis.AMOUNT_DATE` records the provenance; the partial index `ix_norm_keyless_amount` (`src/recon/db/schema.sql:171-174`) keeps the fallback lookup off a table scan by indexing only the keyless rows.
+**Implementation reference:** `src/recon/ingest/pipeline.py` — `AMOUNT_DATE_WINDOW_DAYS` (line 93), `_recheck_parked_by_amount_and_date` (lines 612-683) and `_resolve_bank_by_amount_and_date` (lines 497-533); `AllocationBasis.AMOUNT_DATE` records the provenance; the partial index `ix_norm_keyless_amount` (`src/recon/db/schema.sql:171-174`) keeps the fallback lookup off a table scan by indexing only the keyless rows.
 
 ### 5. Drop time-based thresholds from the verdict logic — the decision that makes the rest sound
 

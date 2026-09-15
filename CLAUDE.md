@@ -198,7 +198,7 @@ Global Instructions
   anything else in this repository.
 
   docs/knowledge_graph.jsonl is a traversable knowledge graph of the project --
-  78 entities, 366 observations, 90 relations across 10 waves, covering the
+  88 entities, 432 observations, 107 relations across 11 waves, covering the
   domain, the object model, every load-bearing decision, the four feeds and
   their identifiers, the state space, the process learnings, and what building
   the deterministic layer settled. Reading the .jsonl directly always works;
@@ -227,7 +227,8 @@ Global Instructions
 
   Agent layer
 
-  The only assignment component not yet built. Read these three, in order,
+  BUILT -- all three roles, nine tools, the harness, the API and the UI. Wave 11
+  of the knowledge graph records what running it taught. Read these three, in order,
   before touching it:
 
   - docs/agent_layer_design.md -- the architecture. Two agents (Proposer and

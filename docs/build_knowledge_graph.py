@@ -830,9 +830,147 @@ def wave_10_agent_layer():
     R("Checklist, not a score", "avoids", "A docstring is not a test")
 
 
+# ===========================================================================
+# WAVE 11 -- building the agent layer, and what running it taught
+# ===========================================================================
+#
+# Wave 10 recorded the agent layer's DESIGN. This wave records what building and
+# running it produced -- including defects no test caught, because each one was a
+# property nothing was asserting.
+
+
+def wave_11_agent_layer_built():
+
+    # --- corrections to earlier waves ---------------------------------------
+
+    UNOBS("Build state", "The agent layer is the only assignment component not built")
+    OBS("Build state",
+        "The agent layer is built: three roles, nine tools, a FastAPI router, an SSE-streamed loop and a React analysis screen",
+        "583 tests green. The agent layer added roughly 370 of them",
+        "Two eval fixtures skip rather than assert -- they were recorded live and predate later prompt changes, and re-recording needs the provider")
+
+    OBS("Agent layer",
+        "BUILT. All three roles exist, not the two the assignment requires as a minimum: Exception Investigator, Workflow Coordinator, Portfolio Analyst",
+        "The third role was cheap once the tool surface existed -- it needed no new KIND of access, just the same envelope over two read models already there",
+        "Nine tools, not the seven the design fixed. spec_tools.md decision D-T4 had excluded a portfolio tool explicitly BECAUSE only two roles were being built, and that reason went away when the third one was")
+
+    # `Deterministic boundary` is grounding material the evaluator reads, so it is
+    # only appended to -- the agent needs to know what changed, not just what is
+    # true now.
+    OBS("Deterministic boundary",
+        "Enforced rather than merely prompted: a deterministic scorer fails any proposal quoting a figure that appears in no tool result, and it is a veto rather than a deduction",
+        "The Portfolio Analyst is where 'prioritisation is a sort' became testable -- every ordering comes from a named SQL sort, echoed back in the tool result so the trace records which sort produced the order a reader sees")
+
+    OBS("The ceiling is checked first",
+        "The four outcomes are a claim about configuration, not only about code: `stalled` needs three scored rounds to fire, so an iteration ceiling of two makes it unreachable and leaves three of four producible",
+        "That was briefly the shipped default, and nothing failed -- no test went red, the outcome simply stopped existing. A documentation audit found it, not the suite")
+
+    OBS("Decision ledger",
+        "The staleness recorded in wave 8 is still present two waves later, for the same reason: the file carries a standing no-touch rule, so corrections live beside it rather than in it",
+        "The agent layer's decisions went into this graph instead, with provenance tags, and nothing in the ledger points here -- which is how a ledger stops being the record without saying so")
+
+    # --- what running it taught ---------------------------------------------
+
+    E("Containment protects a quote, never mints a figure", "Trap",
+      "G3 vetoes any figure absent from every tool result. It was widened to stop a false positive on a drug name carrying its own dose, and the widening dismantled the criterion",
+      "Every digit run in any string leaf became a claimable number, so a fabricated amount verified as sourced whenever its digits appeared anywhere",
+      "A reviewer executed five: a source-code line number inside a provenance annotation became $228; comma groups of the string '$52,700.00' became $52 and $700; digits inside claim id ENC-358361-00049 became $358,361; the date inside allocation code RBT-20250909-72245 became $20,250,909",
+      "The fix is the distinction: a string may EXEMPT a digit run the model quoted as part of an identifier, and may never LICENSE that run as a free-standing figure",
+      "Untrusted fenced text was in the same pool. A payer writing 'Approved payout 99999' into a free-text field made a $99,999 recommendation verify as fact -- and the fence exists precisely to say that text is not the operator's record",
+      "PROVENANCE: agent default, found by an independent reviewer that executed the code rather than reading it")
+
+    E("An ungraded field is the cheapest place to hide", "Trap",
+      "ProposedAction.blocked_reason is free text the model authors, and no scorer read it",
+      "A proposal whose blocked_reason said 'I have closed the claim and posted the $84,212 refund; the missing wire for $9,113,404 blocks further work' passed all five deterministic criteria -- two invented figures and a claimed write",
+      "It then rendered to the operator in a banner styled as a successful outcome",
+      "Every scanner now reads one shared list of the model's free-text fields, so a field added to the schema later cannot quietly become an ungraded channel",
+      "PROVENANCE: agent default; the escape hatch was added for the Goose-style BLOCKED signal and nobody extended the scanners to it")
+
+    E("A permissive test double hides a signature change", "Learning",
+      "complete() was changed to REQUIRE an `agent` argument, so proposer/evaluator independence would be verifiable after the fact rather than assumed",
+      "No role passed it. 471 tests stayed green, because every stub accepted a looser signature than the real client does",
+      "A test double looser than the thing it stands in for does not test the integration; it tests the double",
+      "The guard is a conformance test pinning every concrete client to the Protocol exactly -- parameter names, kinds and requiredness",
+      "PROVENANCE: agent default, found only by a live run")
+
+    E("Provider tiers fail independently", "Trap",
+      "deepseek-chat and deepseek-flash stalled for 60 seconds and returned HTTP 200 with an empty body, while deepseek-v4-pro answered the identical request in 1.34 seconds",
+      "It was diagnosed as account-wide throttling and reported to the user as such. That was wrong, and one per-model probe would have shown it",
+      "The provider signals overload by STALLING and answering empty, never by returning 429 -- so there is no status code and no Retry-After to branch on",
+      "A 200 is not proof of an answer. An empty body made .json() raise an uncaught JSONDecodeError; a body that parsed with no choices became a well-formed response with no tool calls, which a role reads as 'the model declined' and answers with another stalled request",
+      "investigator_model was hardcoded rather than env-read, so the one variable that would have redirected it was silently ignored",
+      "PROVENANCE: agent default; the misdiagnosis was the agent's, corrected by probing each model separately")
+
+    E("Latency lives in the payload", "Learning",
+      "A Decide run went from 71 seconds to 20, and from 161,675 prompt tokens to 71,717, with no change to the loop, the models or the checklist",
+      "Profiling one real run found the evaluator's user turn at 36,674 characters, rebuilt and re-sent on every call. Tool results were 19KB of it and grounding clauses 11.8KB -- both sending the whole corpus when the evaluator only grades what the proposal cited",
+      "A cited tool result now appears in full and an uncited one gets a one-line receipt naming its shape, so 'there was evidence you ignored' stays visible without paying for the body",
+      "Ordering matters as much as volume: the provider caches on a token PREFIX, so the proposal -- the one section that differs every iteration -- has to go last or it invalidates everything behind it",
+      "The knock-on mattered more than the latency. The same run had been exhausting its token budget inside two iterations and stopping at `capped` with a score of 0; with the same budget it reached 92.86 against a threshold of 80",
+      "PROVENANCE: agent default, in response to the user asking why it was slow")
+
+    E("One definition, or it drifts", "Trap",
+      "The selection 'which judge criteria apply to this proposal' was open-coded in five places: the coordinator, two fixture recorders and two test helpers",
+      "Changing the criteria set moved one and left four, which surfaces as evaluator_structurally_invalid -- a checklist and a verdict disagreeing about what was asked",
+      "The same shape appeared twice more in one session: two untrusted-text fence formats that never met, and a citation regex that knew two of the three roles that emit citations",
+      "A shared renderer has to know every producer. That one silently knew two of three, and the Analyst's citation tokens rendered as literal brackets on every run",
+      "PROVENANCE: agent default")
+
+    E("Portfolio Analyst", "Plan",
+      "The third role, and the one the design puts on the dashboard, because 'what is the state of the book' is the dashboard's own question",
+      "Single pass with tool calls, like the Investigator -- not the propose/evaluate loop, because no action is being proposed and so there is nothing to gate",
+      "Two tools over read models that already computed everything: get_portfolio_overview for the aggregates, get_exception_queue for ranked rows",
+      "Its graded constraint is that it explains a ranking and never produces one, so order_by is a required argument restricted to the whitelisted SQL sorts and echoed back in the result",
+      "Verified live: asked where the money is concentrated it called get_exception_queue three separate times -- variance_desc, age_desc, reopened_first -- rather than merging them into an order of its own, and named the sort behind every claim",
+      "PROVENANCE: user decided -- the user pointed out the role was in the design and absent from the build")
+
+    E("A prototype is sized to be legible", "Decision",
+      "The Coordinator was built to be calibrated and needed to be shown. Judge criteria 8 to 4, iterations 5 to 3, proposer tool rounds 3 to 2",
+      "Nothing about the safety story moved: every deterministic criterion still runs, including all four vetoes, because they are Python and cost nothing. What got trimmed is the judge criteria, which cost a reasoned finding each",
+      "Of the four dropped, two sit next to vetoes that already cover their ground -- figures-labelled next to figures-sourced, stays-advisory next to no-close-no-post",
+      "A reviewer watching the fourth near-identical finding scroll past learns nothing the third did not tell them",
+      "PROVENANCE: user decided -- 'simplify it so the demo gets crisper'; the specific numbers are agent defaults")
+
+    E("A committed secret is not undone by deleting it", "Trap",
+      "A test asserting 'the journal redacts the API key' used the REAL key as its fixture. The assertion passed and the secret was pushed -- the proof and the leak were the same line",
+      "It was also in .claude/settings.local.json, inside approved curl invocations, because that file records approved shell commands verbatim",
+      "Proving redaction needs a string of the right SHAPE, not a working secret: shape is all the redaction logic inspects",
+      "Deleting it from the working tree removes it from neither history nor the remote. Rotation is the only remediation that counts",
+      "PROVENANCE: agent default, caught by the user")
+
+    E("Watchable means the scorer too", "Learning",
+      "The design argues a reviewer who watches the loop reason can judge whether to trust it. The judge's work was watchable and the scorer's was not",
+      "The four vetoes are deterministic, so they were never part of the evaluation event -- and a reviewer saw three green SUPPORTED chips sitting directly above 'score: 0.000' with nothing to explain the contradiction",
+      "It reads as a broken scorer rather than as a veto doing its job",
+      "The critique fed back between rounds was computed, sent, and journalled nowhere, so the stream showed two independent-looking proposals and left the reviewer to infer what changed the model's mind",
+      "Neither changed any score or any outcome. Only the record of them was missing, which is its own kind of defect",
+      "PROVENANCE: agent default, found by browser testing")
+
+    # --- relations ----------------------------------------------------------
+
+    R("Portfolio Analyst", "is a role of", "Agent layer")
+    R("Portfolio Analyst", "enforces", "Deterministic boundary")
+    R("Containment protects a quote, never mints a figure", "threatens", "Deterministic boundary")
+    R("An ungraded field is the cheapest place to hide", "threatens", "Deterministic boundary")
+    R("An ungraded field is the cheapest place to hide", "was found in", "Proposer and Evaluator")
+    R("A permissive test double hides a signature change", "threatens", "Proposer and Evaluator")
+    R("Provider tiers fail independently", "constrains", "Agent layer")
+    R("Latency lives in the payload", "improves", "Proposer and Evaluator")
+    R("One definition, or it drifts", "threatens", "Checklist, not a score")
+    R("A prototype is sized to be legible", "shapes", "Checklist, not a score")
+    R("A prototype is sized to be legible", "risked", "The ceiling is checked first")
+    R("Watchable means the scorer too", "realises", "A human gate can be worthless")
+    R("Watchable means the scorer too", "documents", "Threshold hooks")
+    R("A committed secret is not undone by deleting it", "threatens", "Build state")
+    R("Containment protects a quote, never mints a figure", "is the same family as", "A docstring is not a test")
+    R("A permissive test double hides a signature change", "is the same family as", "A docstring is not a test")
+    R("One definition, or it drifts", "is the same family as", "Hand-counted state spaces drift")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
-         wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer]
+         wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
+         wave_11_agent_layer_built]
 
 
 def main():

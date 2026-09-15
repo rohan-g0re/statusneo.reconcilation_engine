@@ -135,7 +135,7 @@ Get this wrong and the count explodes for no gain. Enumerating the branch space 
 
 **It also does the agent's job, one layer too early and worse.** The payload exists to be handed to a model when an episode needs explaining. Pre-narrating fixes the wording to whatever a person happened to type, in one register, with no access to the question being asked. The model can already say what `qualification_status = QUALIFIED` means, and it can say it differently for an auditor than for a pharmacy technician. Narrating first throws that away and adds nothing.
 
-**The maintenance shape is upside-down.** Prose grows with the *cross-product* of structural variation; facts grow with the *number of record types*. Here that was 51 hand-written branches versus 16 projections for the same coverage — and the 51 were still incomplete, while the 16 are complete by a check that fails on import.
+**The maintenance shape is upside-down.** Prose grows with the *cross-product* of structural variation; facts grow with the *number of record types*. Here that was 51 hand-written branches versus 14 projections for the same coverage — and the 51 were still incomplete, while the 14 are complete by a check that fails on import. (The figure was 16 when this was written; `RecordKind` has since shed a phantom `MEDICAL_SUBMISSION_LINE` that no adapter ever produced, which is the same drift this document argues against, caught in this document.)
 
 **Editorial commentary is the worst of it, because it is invariant.** Of 28 constant clauses, 9 were emitted unconditionally — the same sentences on every single episode regardless of its data. One explained the architecture's two-hop bank resolution on *every cash row*. That is a lecture stapled to a data row: it costs payload, it teaches the reader nothing after the first time, and being invariant it cannot possibly be describing the record it is attached to.
 
@@ -163,6 +163,36 @@ The same trap recurs wherever a deterministic component renders for a model:
 - **Tool results in an agent loop.** A tool that returns narrated results is deciding what mattered before the model has seen it. Return the observations; let the loop summarise.
 
 The test in every case: *if a record type arrived that nobody anticipated, would this produce something honest, or would it produce nothing at all?*
+
+## Status, checked against the built agent layer
+
+This was written before the agent layer existed, predicting how one would consume the
+payload. Three roles now do, so the predictions are checkable.
+
+**The `simple`/`essential` split held exactly.** `get_episode(episode_id, detail=...)`
+takes `"essential"` or `"full"` and trims each event to its `essential` subset
+server-side (`src/recon/agents/tools.py`), which is the "one object, two readings" this
+document argued for, implemented without reinterpretation. The agent does want the
+short view for the same reason a person does.
+
+**The money prediction needed more machinery than expected.** "Formatted only at the
+display edge" turned out to require an enforcement apparatus, not a convention: a
+shared no-arithmetic rule in every prompt, a `_usd` string computed in Python so the
+model quotes rather than divides, and a deterministic scorer that fails any figure not
+present in a tool result. The claim was right and the cost was underestimated.
+
+**The Derivation tier is still not built, and that matters.** This document named three
+lineage levels and called Derivation — *which records actually produced this number* —
+the one an agent most needs and most systems skip. It is still skipped here.
+`verdict_evidence` and `EvidenceRole` exist in the schema (`src/recon/engine/run.py`),
+but nothing in `src/recon/agents/tools.py` or the API reads them, so the agent layer's
+lineage is Pointer and Payload only.
+
+What the roles do instead is weaker but real: they may cite only what a tool actually
+returned to them this run, verified by substring. That is *"cite what you were shown"*,
+not *"cite what caused this"* — and the difference is exactly the risk this document
+named, still open rather than resolved. Worth stating plainly, because a reader would
+otherwise reasonably assume the tier was built along with everything else.
 
 ## Related
 

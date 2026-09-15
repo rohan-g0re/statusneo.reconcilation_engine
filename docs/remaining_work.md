@@ -2,11 +2,35 @@
 
 *Functionality first, then hardening, then the write-up. Every "have" below was verified in running code on 2026-09-13, not assumed. Section 1 is what I need from you before I can start; everything after it is blocked or shaped by those answers.*
 
-**Where we are.** The deterministic layer is complete and measured: four generators, connector, crosswalk, engine, API, front end. 214 tests. 372/372 reachable verdict pairs, 4,224/4,224 configurations matching the oracle, 99.6% verdict fidelity on the full profile. The agent layer is the only unbuilt component of the assignment.
+**Where we are** *(as of writing; the agent layer has since been built — see §0)*. The deterministic layer is complete and measured: four generators, connector, crosswalk, engine, API, front end. 214 tests. 372/372 reachable verdict pairs, 4,224/4,224 configurations matching the oracle, 99.6% verdict fidelity on the full profile. The agent layer is the only unbuilt component of the assignment.
 
 ---
 
-## 1. Decisions I need from you
+## 0. Status: the queue below is closed
+
+*This document was a decision queue. Every decision in it has been made and the work it
+gated is built. Kept intact rather than deleted, because how a question was framed is
+worth as much as the answer.*
+
+| # | Asked | Resolved |
+|---|---|---|
+| D1 | Which **two** roles? | **Three.** Investigator, Coordinator and Portfolio Analyst. The binary framing was overtaken — the Analyst turned out cheap once the tool surface existed |
+| D2 | Framework? | No framework. Custom harness. *User decided, after asking for the options ranked* |
+| D3 | Model and provider | DeepSeek over an OpenAI-compatible client; 120k token budget per run as the cost ceiling |
+| D4 | Live in the demo? | Live with a key, and a plain 503 explaining itself without one. The eval set replays offline |
+| D5 | Eval grading split | Tool-path primary, outcome-shape secondary, no LLM judge in the eval set |
+| D6 | How far do secure and scalable go? | Option 2, minimal hardening plus document. Prompt-injection fencing and PHI redaction built; auth and tenancy deliberately not |
+| D7 | Where does the agent surface? | A panel. `/analyse/:episodeId`, plus the Analyst on the dashboard |
+| D8 | `recommended_action` vocabulary | Approved, plus `ABSTAIN` |
+| D9 | May I update the three stale docs? | Partially. `START_HERE.md` was updated; the ledger and the architecture decisions keep their no-touch rule, and their staleness is recorded in the knowledge graph instead |
+
+**Still genuinely open**, and not made to look done: tenant isolation, rate limiting and
+connector onboarding (§5), and recording which records *drove* each verdict rather than
+which were merely visible (§6.1) — the Derivation lineage tier, still unbuilt.
+
+---
+
+## 1. Decisions I need from you *(historical — see §0)*
 
 Ordered by what blocks the most. The first four block all agent work.
 

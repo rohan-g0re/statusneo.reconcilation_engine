@@ -173,6 +173,33 @@ Five bullets, uniform formatting. No signal that the first is accepted, the seco
 
 Same five facts, each now carrying a disposition, a provenance note, and where it moved, a pointer to where it landed.
 
+## The failure this pattern has against itself
+
+A ledger records who decided what. It does not record that it has stopped being the
+place decisions are recorded — and that is how this one went stale.
+
+Every load-bearing choice in the agent layer got exactly the provenance treatment this
+document argues for: the Proposer/Evaluator split, checklist-not-score grading, the
+ceiling checked before the gate, zero shared context between the two agents, each
+tagged `PROVENANCE: user decided` or marked an agent default. None of it went into
+`docs/decision_ledger.md`. It went into `docs/knowledge_graph.jsonl`, and the ledger
+still reads "C20 Agent layer — Deferred by agreement" and "Implementation: Not started"
+against a built, tested agent layer.
+
+The discipline held. The *authority* moved, and nothing pointed from the old home to
+the new one — which produces precisely the artefact section 1 warns about: a document
+that looks authoritative, is read as current, and is wrong.
+
+So the pattern needs one more rule. **When a second artefact starts carrying
+provenance-tagged decisions for a new subsystem, the original ledger needs an entry
+naming it.** Not a migration, not a merge — a pointer. Two records that each believe
+they are the record will drift, and neither can notice.
+
+Worth noting this exact staleness was recorded once already, in the knowledge graph's
+wave 8, and is still true two waves later: the file carries a standing no-touch rule,
+so the correction lives beside it rather than in it. That is a deliberate trade, and it
+only works if the pointer exists.
+
 ## Related
 
 - `docs/decision_ledger.md` — the full ledger. Section A 31 settled; Section B 9 resolved and 1 deferred; Section C 20 decided, 2 deferred, nothing outstanding

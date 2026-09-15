@@ -244,3 +244,31 @@ def test_no_tracked_file_contains_anything_shaped_like_a_live_api_key() -> None:
         + "\nRotate the key at the provider, then remove it from the working tree. "
         "Use a synthetic, correctly-shaped fixture in tests instead."
     )
+
+
+def test_the_shipped_default_can_reach_every_one_of_the_four_outcomes() -> None:
+    """`stalled` needs three scored rounds; a ceiling of two makes it unreachable.
+
+    This is not hypothetical -- the iteration default was lowered to two as a
+    prototype simplification, and it silently removed one of the loop's four terminal
+    states. Nothing failed. No test went red. The outcome simply stopped being
+    producible, and a documentation audit found it rather than the suite.
+
+    "Four distinct outcomes, never one boolean" is the design's own argument (S2):
+    `stalled` says the loop had a candidate and could not improve it, `capped` says it
+    ran out of budget, and collapsing them loses a distinction an operator acts on.
+    So the relationship between the stall window and the iteration ceiling is a real
+    invariant, and it belongs in a test rather than in someone's memory.
+    """
+    from recon.agents.config import load_agent_settings
+
+    settings = load_agent_settings()
+    assert settings.max_iterations >= _STALL_WINDOW, (
+        f"max_iterations={settings.max_iterations} cannot reach the `stalled` outcome, "
+        f"which needs {_STALL_WINDOW} scored rounds -- three of the four terminal "
+        "states would be producible and the fourth silently dead"
+    )
+
+
+#: The number of scored rounds `rubric._stalled` requires before it can fire.
+_STALL_WINDOW = 3

@@ -165,12 +165,23 @@ def load_agent_settings(**overrides: Any) -> AgentSettings:
         # deserves to be pointable at a working model on its own, not silently tied
         # to whichever of the other two happens to share its default today.
         "analyst_model": env("ANALYST_MODEL", "deepseek-chat"),
-        # Two, not five. Five is a backstop for a system being calibrated; a
-        # prototype demonstrating the loop needs exactly enough rounds to show that
-        # a critique feeds forward and the proposal changes, which is two. Measured:
-        # every run so far terminated on a gate condition inside two rounds anyway,
-        # so the ceiling was costing wall clock without ever changing an outcome.
-        "max_iterations": int(env("MAX_ITERATIONS", "2")),
+        # Three, not five, and not two.
+        #
+        # Five is a backstop for a system being calibrated; a prototype demonstrating
+        # the loop needs only enough rounds to show a critique feeding forward. That
+        # reasoning pointed at two, and two was wrong for a reason a doc audit caught
+        # rather than a test: `rubric._stalled` needs THREE scored rounds to fire --
+        # two that failed to improve, plus an earlier one to have failed to improve on
+        # -- so at a ceiling of two the `stalled` outcome is unreachable and the loop
+        # only ever has three of its four terminal states.
+        #
+        # "Four distinct outcomes, never one boolean" is the design's own load-bearing
+        # claim (S2): `stalled` and `capped` are different facts about the world and
+        # collapsing them loses the difference between "it stopped improving" and "it
+        # ran out of budget". Trading one of them away to save a round is a bad trade,
+        # and it was an invisible one -- nothing failed, the outcome simply stopped
+        # being producible.
+        "max_iterations": int(env("MAX_ITERATIONS", "3")),
         "rubric_profile": env("RUBRIC", "core"),
         "threshold": float(env("THRESHOLD", "80.0")),
         "max_tool_rounds": 8,
