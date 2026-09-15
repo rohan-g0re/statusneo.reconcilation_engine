@@ -39,3 +39,10 @@ data/agent_runs/
 # records approved shell commands verbatim -- which is how an API key ended up
 # committed inside a curl invocation.
 .claude/settings.local.json
+
+# Scratch output from agent runs: API response dumps, server logs, timing captures.
+# `.agents/skills/` is real project content and stays tracked -- only the loose files
+# at the top level are debris. These got committed once; ignoring the shape rather
+# than the names so the next session's scratch does not repeat it.
+/.agents/*.log
+/.agents/*.json
