@@ -11,7 +11,12 @@ import React from 'react'
 // dashboard's Portfolio Analyst panel (App.jsx, the whole book) -- both render prose a
 // model wrote, citing the same four token kinds, and a second copy of this parser would
 // silently drift from this one the first time either screen's citation handling changed.
-const CITATION_RE = /\[\[(raw|event|calc|verdict):([A-Za-z0-9_.\-]+)\]\]/g
+// Every citation kind ANY role emits. The Analyst's `overview:` and `queue:` were
+// missing, so its tokens matched nothing and the whole `[[queue:E-000006]]` string
+// passed through into the prose as literal brackets -- on every run, in a component
+// whose entire job is to make that not happen. A shared renderer has to know about
+// every producer, and this one silently knew about two of three.
+const CITATION_RE = /\[\[(raw|event|calc|verdict|overview|queue):([A-Za-z0-9_.\-]+)\]\]/g
 
 export default function Cited({ text }) {
   if (!text) return null
@@ -30,6 +35,8 @@ export default function Cited({ text }) {
       kind === 'raw' ? `source record ${ref}`
       : kind === 'event' ? `timeline event ${ref}`
       : kind === 'calc' ? `computed field ${ref}`
+      : kind === 'overview' ? `portfolio overview field ${ref}`
+      : kind === 'queue' ? `queue row ${ref}`
       : `verdict ${ref}`
     out.push(
       <sup key={`${m.index}-${key}`} className="agent-cite" title={label}>
