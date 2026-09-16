@@ -33,7 +33,8 @@ from recon.generators.contracts import FORBIDDEN_SLICE_FIELDS, assert_slices_are
 from recon.generators.orchestrator import generate, write_outputs
 from recon.generators.plan import EpisodePlan
 from recon.generators.sampling import (
-    CURATED_PAIRS,
+    CURATED_FAMILIES,
+    RECORDED_SPINE,
     bind_entities,
     load_leaves,
     select_configurations,
@@ -134,15 +135,15 @@ def test_full_profile_produces_every_reimbursement_and_every_rebate_code(full_re
     )
 
 
-def test_demo_profile_covers_at_least_fifty_five_pairs_and_its_curated_spine(
-    demo_result, demo_settings
-):
-    """``demo`` is curated rather than exhaustive, but the curated spine is a promise.
+def test_demo_profile_covers_at_least_fifty_five_pairs_and_every_curated_family(demo_result):
+    """``demo`` is curated rather than exhaustive, and the promise is the *family*.
 
-    :data:`CURATED_PAIRS` is ordered by the story a walkthrough tells, and
-    ``select_curated`` truncates it at ``episode_count``.  Every pair that fits inside
-    the demo's 60 episodes must actually appear, or the walkthrough silently loses a
-    state it claims to demonstrate.
+    The spine used to be a fixed list of sixty pairs for sixty slots, and this test
+    asserted every one of them appeared — which it had to, since there was nothing to
+    choose.  That is exactly what made two rebuilds report identical queue counts.  The
+    promise that survives is the one worth making: whatever the seed, every family in
+    :data:`CURATED_FAMILIES` contributes at least one episode, so no edge case can fall
+    out of the walkthrough even though the mix around it moves.
     """
     episodes = demo_result.ground_truth["episodes"]
     seen_pairs = {
@@ -151,12 +152,35 @@ def test_demo_profile_covers_at_least_fifty_five_pairs_and_its_curated_spine(
     }
     assert len(seen_pairs) >= 55
 
-    expected_spine = set(CURATED_PAIRS[: demo_settings.episode_count])
-    missing = expected_spine - seen_pairs
-    assert not missing, (
-        f"demo profile dropped curated pairs that fit inside "
-        f"{demo_settings.episode_count} episodes: {sorted(missing)}"
+    unrepresented = [
+        family
+        for family, pairs in CURATED_FAMILIES
+        if not seen_pairs.intersection(pairs)
+    ]
+    assert not unrepresented, (
+        f"demo profile produced no episode for these curated families: {unrepresented}. "
+        "Every family is one of the assignment's named edge cases or the cross-track "
+        "material the walkthrough is built on."
     )
+
+
+def test_the_recorded_spine_reproduces_the_dataset_the_agent_fixtures_replay(tmp_path):
+    """``CuratedSpine.RECORDED`` must keep producing exactly what it produced.
+
+    Not a style preference: ``ReplayClient`` matches the digest of every request a recorded
+    trace made, and those requests carry dossier contents.  If this composition drifts, the
+    ten committed eval scenarios stop replaying and re-recording them needs a live model and
+    an API key — so the drift has to fail here, cheaply, rather than there.
+    """
+    settings = load_settings(
+        "demo", data_dir=tmp_path, curated_spine=config.CuratedSpine.RECORDED
+    )
+    result = generate(settings)
+    produced = [
+        (ep["intended_reimbursement_verdict"], ep["intended_rebate_verdict"])
+        for ep in result.ground_truth["episodes"]
+    ]
+    assert produced == list(RECORDED_SPINE[: settings.episode_count])
 
 
 #: The assignment's eight named edge cases, each mapped to a predicate over one
@@ -1096,7 +1120,13 @@ def _build_plans_and_timelines(settings: config.Settings):
     curated = settings.selection is ProfileSelection.CURATED
 
     if curated:
-        leaves = select_curated(catalogue, episode_count=settings.episode_count)
+        leaves = select_curated(
+            catalogue,
+            episode_count=settings.episode_count,
+            master_seed=settings.master_seed,
+            profile_name=profile_name,
+            spine=settings.curated_spine,
+        )
     else:
         leaves = select_configurations(
             catalogue,

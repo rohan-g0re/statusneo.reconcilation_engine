@@ -36,7 +36,7 @@ from recon.agents.schemas import ProposedAction  # noqa: E402
 from recon.agents.scorers import RecordedToolResult, ScoringInput  # noqa: E402
 from recon.agents.tools import CallLog, ToolContext, dispatch  # noqa: E402
 from recon.api import dossier as dossier_module  # noqa: E402
-from recon.config import load_settings  # noqa: E402
+from recon.config import CuratedSpine, Settings, load_settings  # noqa: E402
 from recon.db.connection import open_db  # noqa: E402
 from recon.domain import verdicts as verdict_vocab  # noqa: E402
 
@@ -50,6 +50,18 @@ _FIXTURE_MODELS = {"proposer_model": "deepseek-chat", "evaluator_model": "deepse
 
 
 NOW = "2026-07-02T00:00:00Z"
+
+
+def _pinned_settings(profile: str) -> Settings:
+    """Settings for a recording, with the dataset's composition pinned as well.
+
+    Same argument as ``_FIXTURE_MODELS`` above, one layer down: the recorded requests carry
+    the dossier they were built from, so the dataset is part of a trace's identity too. The
+    ``demo`` profile draws its composition from the seed by default (see
+    :class:`~recon.config.CuratedSpine`), which would make a recording unreplayable the
+    next time anyone regenerated. ``tests/test_agents_evals.py`` builds with the same pin.
+    """
+    return load_settings(profile, curated_spine=CuratedSpine.RECORDED)
 
 
 def _glossary() -> str:
@@ -135,7 +147,7 @@ def _record_run(
     # rather than as a clear "budget" decision. A `complete` outcome (the happy-path
     # and ABSTAIN scenarios) returns on iteration 0 regardless of this ceiling, since
     # `run_until` checks the threshold before it ever checks the ceiling.
-    settings = load_settings(profile)
+    settings = _pinned_settings(profile)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
@@ -181,7 +193,7 @@ def _record_run(
 
 def scenario_happy_path_cites_a_tool_result() -> None:
     episode_id, profile, run_id, nonce = "E-000006", "demo", "eval-happy-path-cites-tool-result", "11112222"
-    settings = load_settings(profile)
+    settings = _pinned_settings(profile)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
@@ -242,7 +254,7 @@ def scenario_happy_path_cites_a_tool_result() -> None:
 
 def scenario_g8_write_verb_veto() -> None:
     episode_id, profile, run_id, nonce = "E-000032", "demo", "eval-g8-write-verb-veto", "33334444"
-    settings = load_settings(profile)
+    settings = _pinned_settings(profile)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
@@ -279,7 +291,7 @@ def scenario_g8_write_verb_veto() -> None:
 
 def scenario_g1_disposition_mismatch() -> None:
     episode_id, profile, run_id, nonce = "E-000002", "demo", "eval-g1-disposition-mismatch", "55556666"
-    settings = load_settings(profile)
+    settings = _pinned_settings(profile)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor
@@ -322,7 +334,7 @@ def scenario_abstain_completes() -> None:
     proposal that does its one bit of homework clears every criterion and the run
     completes, in contrast to the deliberate-failure fixture that skips it."""
     episode_id, profile, run_id, nonce = "E-000002", "demo", "eval-abstain-completes", "77778888"
-    settings = load_settings(profile)
+    settings = _pinned_settings(profile)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)
     conn = open_db(settings)
     cursor = settings.max_cursor

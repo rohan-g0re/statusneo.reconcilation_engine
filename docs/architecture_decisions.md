@@ -145,6 +145,12 @@ Neither CLP01 nor CLP07 exists in NCPDP. The medical feed and the pharmacy feed 
 
 **Why.** The debrief requires tracing *one* claim end to end, and nobody does that against a 1,500-episode file. `demo` exists purely to make the walkthrough legible; `full` exists purely to make coverage an assertion rather than a hope.
 
+**Amended (2026-09-14): `demo`'s guarantee is the edge case, not the pair.** "Hand-stratified" meant a fixed list of sixty verdict pairs for sixty slots, and that had a consequence nobody intended: since the list was exactly as long as the profile it filled, there was nothing for the seed to choose, so two rebuilds reported identical queue counts — same exceptions pending, same closed, same per-episode variance. Reseeding changed every identifier and amount and left the mix untouched, which reads as a generator that is not really generating.
+
+The fixed list is now a set of *families* (`CURATED_FAMILIES` in `src/recon/generators/sampling.py`), one per named edge case, every member of which demonstrates that edge case. One pair is drawn per family by seed, and the remaining slots are sampled — half from the other hand-placed pairs, half from the wider reachable state space. Coverage survives as arithmetic (every family contributes, whatever the seed) while the queue mix, and therefore the demo's headline numbers, genuinely move: measured across eight seeds, CLOSED ranged 7–12, PENDING 8–15, EXCEPTION 33–42.
+
+Two costs, both accepted and both visible in the test suite. `demo` can no longer promise an *exact* verdict-fidelity score for every seed, because a sampled sixty reaches the same cash-matching margins `full` does — seven of eight seeds scored 54/54 and the published seed scored 53/54, so the seeded spine is asserted at 98% while the frozen one stays at 100%. And the demo dataset had become load-bearing for something else: the committed agent traces replay against its exact composition. That is now an explicit second spine (`CuratedSpine.RECORDED`) rather than a property the eval set was silently relying on.
+
 ### 15. Sampling is stratified over verdicts, never over configurations
 
 **Decided.** The `full` profile's episode generation is stratified so that every reachable verdict (and ideally every verdict pair) is represented, rather than sampling uniformly over the underlying 4,224 configurations.

@@ -175,12 +175,19 @@ def generate(settings: Settings, *, decision_tree_dir: Path | None = None) -> Ge
     profile_name = str(settings.profile)
     curated = settings.selection is ProfileSelection.CURATED
 
-    # The two profiles select differently on purpose (Decision 14).  ``demo`` is
-    # hand-stratified so a walkthrough reliably reaches every interesting state in sixty
-    # readable episodes; ``full`` stratifies over verdict *pairs* so coverage of all 372 is
+    # The two profiles select differently on purpose (Decision 14).  ``demo`` guarantees one
+    # episode per named edge case and samples the rest, so a walkthrough reliably reaches
+    # every interesting state in sixty readable episodes while two seeds still differ in
+    # their queue mix; ``full`` stratifies over verdict *pairs* so coverage of all 372 is
     # arithmetic rather than luck.
     if curated:
-        leaves = select_curated(catalogue, episode_count=settings.episode_count)
+        leaves = select_curated(
+            catalogue,
+            episode_count=settings.episode_count,
+            master_seed=settings.master_seed,
+            profile_name=profile_name,
+            spine=settings.curated_spine,
+        )
     else:
         leaves = select_configurations(
             catalogue,
@@ -1553,6 +1560,11 @@ def write_outputs(settings: Settings, result: GenerationResult) -> dict[str, str
         "schema": "recon.manifest/1",
         "profile": str(settings.profile),
         "master_seed": settings.master_seed,
+        # The seed alone stopped identifying a demo dataset the moment the curated spine
+        # became a choice: two runs can agree on seed, window and reference data and still
+        # differ in composition. Recorded so the manifest still answers "what reproduces
+        # these bytes" with everything, rather than with everything except one field.
+        "curated_spine": str(settings.curated_spine),
         "window": {
             "start": settings.window_start.isoformat(),
             "end": settings.window_end.isoformat(),

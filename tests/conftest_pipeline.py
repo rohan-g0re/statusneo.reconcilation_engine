@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from recon.config import Settings, load_settings
+from recon.config import CuratedSpine, Settings, load_settings
 from recon.crosswalk import keys
 from recon.db import connection, migrate
 from recon.engine import run as engine
@@ -57,13 +57,20 @@ class PipelineRun:
         return self.generation.ground_truth
 
 
-def build_pipeline(profile: str, data_dir: Path) -> PipelineRun:
+def build_pipeline(
+    profile: str,
+    data_dir: Path,
+    *,
+    curated_spine: CuratedSpine = CuratedSpine.MIXED,
+) -> PipelineRun:
     """Generate, write, load, ingest and reconcile, at the maximum cursor.
 
     The maximum cursor means "every record has arrived", which is the state the intended verdicts
     in ground truth describe.  Earlier cursors are exercised separately by the replay tests.
+
+    ``curated_spine`` only means anything to ``demo``; see :class:`~recon.config.CuratedSpine`.
     """
-    settings = load_settings(profile, data_dir=data_dir)
+    settings = load_settings(profile, data_dir=data_dir, curated_spine=curated_spine)
     generation = orchestrator.generate(settings)
     orchestrator.write_outputs(settings, generation)
 

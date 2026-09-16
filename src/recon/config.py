@@ -117,6 +117,31 @@ class ProfileSelection(StrEnum):
     VERDICT_STRATIFIED = "VERDICT_STRATIFIED"
 
 
+class CuratedSpine(StrEnum):
+    """Which spine a ``CURATED`` profile draws, when one seed is not enough.
+
+    The ``demo`` profile serves two readers with incompatible needs, and pretending
+    otherwise is what makes one of them break silently.
+
+    ``MIXED`` is the default and what a human rebuilding the demo wants: one guaranteed
+    episode per named edge case, drawn by seed from a family of pairs that all demonstrate
+    it, and the remaining slots sampled from a pool deliberately wider than the slots.  Two
+    seeds then disagree about the queue mix, which a fixed sixty-pair list could not do —
+    it was exactly as long as the profile it filled, so there was nothing to choose.
+
+    ``RECORDED`` pins the hand-placed spine the agent-trace fixtures under
+    ``tests/fixtures/agent_traces/`` were recorded against.  ``ReplayClient`` matches the
+    digest of every request the recorded run made, and those requests carry dossier
+    contents — so *any* change to the demo's composition invalidates every recording, and
+    re-recording needs a live model and an API key.  The eval set asks for this explicitly
+    rather than inheriting it, so that "the evals replay a frozen dataset" is a property
+    someone can read in the code instead of a coincidence that held until it did not.
+    """
+
+    MIXED = "MIXED"
+    RECORDED = "RECORDED"
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileSpec:
     name: Profile
@@ -163,6 +188,7 @@ class Settings:
     cash_match_tolerance_cents: int
     underpayment_tolerance_cents: int
     rebate_tolerance_cents: int
+    curated_spine: CuratedSpine = CuratedSpine.MIXED
     schema_version: int = SCHEMA_VERSION
     adapter_version: str = ADAPTER_VERSION
     engine_version: str = ENGINE_VERSION
@@ -273,6 +299,7 @@ def load_settings(
     data_dir: Path | str | None = None,
     db_path: Path | str | None = None,
     repo_root: Path | str | None = None,
+    curated_spine: CuratedSpine | str = CuratedSpine.MIXED,
 ) -> Settings:
     """Build a frozen :class:`Settings`.
 
@@ -280,6 +307,9 @@ def load_settings(
         profile: ``demo`` or ``full``.
         master_seed: overridable for tests.  The default is the published seed and
             changing it changes every generated identifier.
+        curated_spine: which spine the ``demo`` profile draws; see :class:`CuratedSpine`.
+            Pass ``RECORDED`` to reproduce the dataset the agent-trace fixtures were
+            recorded against.  Ignored by ``full``, which stratifies instead.
         data_dir: overrides ``RECON_DATA_DIR`` and the default ``<repo>/data``.
         db_path: overrides ``RECON_DB_PATH`` and the per-profile default.
         repo_root: only useful in tests that relocate the tree.
@@ -312,6 +342,7 @@ def load_settings(
 
     return Settings(
         profile=resolved_profile,
+        curated_spine=CuratedSpine(curated_spine),
         master_seed=MASTER_SEED if master_seed is None else master_seed,
         window_start=WINDOW_START,
         window_end=WINDOW_END,

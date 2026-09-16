@@ -39,7 +39,7 @@ from recon.agents.rubric import applicable_judge_criteria, Outcome, Round  # noq
 from recon.agents.schemas import ActionEnum, CriterionFinding, CriterionVerdict, ProposedAction  # noqa: E402
 from recon.agents.scorers import ScoringInput  # noqa: E402
 from recon.api import dossier as dossier_module  # noqa: E402
-from recon.config import load_settings  # noqa: E402
+from recon.config import CuratedSpine, load_settings  # noqa: E402
 from recon.db import connection as db_connection  # noqa: E402
 from recon.db import repository  # noqa: E402
 
@@ -51,10 +51,15 @@ EPISODE_ID = "E-000001"
 
 @pytest.fixture(scope="module")
 def demo_settings(tmp_path_factory):
+    """``RECORDED`` because the replayed traces here were recorded against that spine.
+
+    See :class:`~recon.config.CuratedSpine`: the demo profile's default composition is drawn
+    from the seed, and a recorded request's digest covers the dossier it carried.
+    """
     from recon.api.app import build_dataset
 
     data_dir = tmp_path_factory.mktemp("agents_api_demo")
-    settings = load_settings("demo", data_dir=data_dir)
+    settings = load_settings("demo", data_dir=data_dir, curated_spine=CuratedSpine.RECORDED)
     build_dataset(settings)
     return settings
 

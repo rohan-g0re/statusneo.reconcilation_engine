@@ -385,7 +385,7 @@ One generator, one seed, two profiles:
 
 | Profile | Episodes | Purpose |
 | ------- | -------- | ------- |
-| `demo` | ~60, hand-stratified | The walkthrough. The debrief asks you to trace **one** claim end to end — nobody does that against a 1,500-episode file. Curated to include both happy paths, the required edge cases, and the strongest cross-track compliance cases (X-1, X-2). |
+| `demo` | ~60, hand-stratified | The walkthrough. The debrief asks you to trace **one** claim end to end — nobody does that against a 1,500-episode file. Curated to include both happy paths, the required edge cases, and the strongest cross-track compliance cases (X-1, X-2). One episode per edge case is guaranteed whatever the seed; the mix around them is sampled, so the queue counts move between rebuilds (Decision 14, amended). |
 | `full` | ~1,500 | What the test suite asserts against. Large enough to hit all 372 verdict pairs at least once. |
 
 Coverage is not a hope here, it is an assertion. A coverage test enumerates the 372 reachable verdict pairs and **fails** if the `full` profile does not produce every one of them. That turns this document from a design reference into a test oracle — the state space stops being a claim about the system and becomes a check on it.

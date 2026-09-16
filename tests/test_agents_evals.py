@@ -46,7 +46,7 @@ from recon.agents.tools import CallLog, ToolContext
 from recon.api import app as api_app
 from recon.api import dossier as dossier_module
 from recon.api import service
-from recon.config import load_settings
+from recon.config import CuratedSpine, load_settings
 from recon.db import connection as db_connection
 from recon.domain import verdicts as verdict_vocab
 
@@ -86,12 +86,19 @@ def _journal(tmp_path: Path, run_id: str) -> Journal:
 # "full" profile), so a D-6-from-the-episode's-own-point-of-view case genuinely
 # does not exist in "demo" at all. pytest fixtures are lazy: nothing here costs
 # anything unless a test actually asks for `full_conn`.
+#
+# `demo_settings` pins CuratedSpine.RECORDED. The demo profile's default spine samples its
+# composition from the seed, and every fixture below was recorded against the frozen one --
+# ReplayClient matches the digest of each recorded request, and those requests carry dossier
+# contents, so a differently-composed dataset raises ReplayMiss on the first model call
+# rather than failing an assertion about the answer. The pin is what keeps this suite
+# offline: re-recording needs a live model and an API key.
 
 
 @pytest.fixture(scope="module")
 def demo_settings(tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("evals_demo")
-    settings = load_settings("demo", data_dir=data_dir)
+    settings = load_settings("demo", data_dir=data_dir, curated_spine=CuratedSpine.RECORDED)
     api_app.build_dataset(settings)
     return settings
 

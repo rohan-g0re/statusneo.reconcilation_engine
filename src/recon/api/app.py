@@ -362,6 +362,13 @@ def create_app(settings: Settings | None = None):
         reproducible from that seed. So "fresh data" and "reproducible data" are the same
         mechanism with a different argument, not a trade-off.
 
+        "Same shape" means the guarantees, not the numbers. Both profiles keep their episode
+        count; ``full`` still covers all 372 verdict pairs and ``demo`` still contains every
+        named edge case. What moves on ``demo`` is the mix around those guarantees, queue
+        counts included, because only part of its sixty is hand-placed (see
+        :class:`~recon.config.CuratedSpine`). The dashboard's rebuild buttons therefore mint
+        a fresh seed each press and offer replaying the current one as a separate action.
+
         The seed arrives as an *input*, deliberately. Nothing inside the generator reads a clock
         (Decision 18): a generator that invented its own seed could never be replayed, and the
         cursor's whole meaning depends on the timeline being fixed before anything reads it.

@@ -32,7 +32,7 @@ from recon.agents.journal import Journal
 from recon.api import app as api_app
 from recon.api import dossier as dossier_module
 from recon.api import service as service_module
-from recon.config import load_settings
+from recon.config import CuratedSpine, load_settings
 from recon.db import connection as db_connection
 from recon.db import repository
 from recon.domain.enums import AllocationBasis
@@ -68,9 +68,14 @@ def demo_settings(tmp_path_factory):
     module-scoped fixture is cheap and gives every test the real shape of the data --
     genuine near-miss episode ids, a genuine duplicated ``source_record_id`` (D-1), a
     genuine denied claim line, genuine PHI in a raw payload.
+
+    ``RECORDED`` because several tests below name an episode for what it *is* -- E-000006
+    as a denied claim, the D-1 redelivery of ``MED-835-000017`` -- and the default spine
+    samples its composition from the seed, so those identities are only stable against the
+    frozen one (see :class:`~recon.config.CuratedSpine`).
     """
     data_dir = tmp_path_factory.mktemp("agent_tools_demo")
-    settings = load_settings("demo", data_dir=data_dir)
+    settings = load_settings("demo", data_dir=data_dir, curated_spine=CuratedSpine.RECORDED)
     api_app.build_dataset(settings)
     return settings
 

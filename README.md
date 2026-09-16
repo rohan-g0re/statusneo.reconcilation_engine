@@ -47,8 +47,22 @@ engine's own test suite.
 
    `profile=demo` is the curated ~60-episode walkthrough set; `profile=full` builds
    the ~1,500-episode set the test suite asserts full state-space coverage against.
-   The dashboard's own "Rebuild demo" / "Rebuild full" / "New data" buttons call this
-   same endpoint, so doing it here once is equivalent to clicking one of them.
+   The dashboard's own "Rebuild demo" / "Rebuild full" / "Repeat seed" buttons call
+   this same endpoint, so doing it here once is equivalent to clicking one of them.
+
+   Omitting `seed`, as above, rebuilds on the published seed and is byte-identical to
+   the last such run — which is how you *check* reproducibility rather than take it on
+   trust: run it twice and diff the `feed_sha256` maps in `manifest.json`. Pass
+   `&seed=<n>` for a genuinely different dataset that is still reproducible from its
+   own seed. The dashboard's two "Rebuild" buttons mint a fresh seed on every press and
+   "Repeat seed" replays the one in the masthead, because *rebuild* reading as *produce
+   the identical file again* surprised everyone who pressed it.
+
+   On `demo` a new seed changes the queue mix as well as the amounts: one episode per
+   named edge case is guaranteed whatever the seed, and the rest of the sixty is sampled
+   (see `CuratedSpine` in `src/recon/config.py`). `demo` therefore has two spines — the
+   default sampled one, and `RECORDED`, which pins the composition the committed agent
+   traces replay against and must not drift.
 
 3. **Start the front end** (proxies `/api` to `127.0.0.1:8000` — see
    `web/vite.config.js`):

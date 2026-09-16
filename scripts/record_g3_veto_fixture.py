@@ -43,7 +43,7 @@ from recon.agents.schemas import ProposedAction  # noqa: E402
 from recon.agents.scorers import ScoringInput  # noqa: E402
 from recon.agents.tools import CallLog, ToolContext  # noqa: E402
 from recon.api import dossier as dossier_module  # noqa: E402
-from recon.config import load_settings  # noqa: E402
+from recon.config import CuratedSpine, load_settings  # noqa: E402
 from recon.db.connection import open_db  # noqa: E402
 from recon.domain import verdicts as verdict_vocab  # noqa: E402
 
@@ -110,7 +110,11 @@ class _ScriptedClient:
 
 
 def main() -> int:
-    settings = load_settings("demo")
+    # Pinned for the same reason the model ids above are: the demo profile's composition is
+    # drawn from the seed by default, and a fixture recorded against one composition cannot
+    # be replayed against another. tests/test_agents_evals.py builds its dataset with the
+    # same spine.
+    settings = load_settings("demo", curated_spine=CuratedSpine.RECORDED)
     agent_settings = load_agent_settings(**_FIXTURE_MODELS)  # api_key irrelevant: nothing here calls the network
     conn = open_db(settings)
     cursor = settings.max_cursor

@@ -352,30 +352,39 @@ export default function App() {
           <span className="sub" data-testid="totals">
             {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
           </span>
+          {/*
+            Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
+            the identical file again" surprised everyone who pressed it. A new seed means
+            new claims, new amounts, and defects landing on different episodes, and on the
+            demo profile a different mix of exceptions — while every named edge case is
+            still guaranteed to appear. Reproducibility did not go anywhere: the seed that
+            produced whatever you are looking at is in the masthead and in manifest.json,
+            and `Repeat seed` below replays it byte for byte.
+          */}
           <button
             data-testid="regen-demo"
-            onClick={() => regenerate('demo')}
+            onClick={() => regenerate('demo', api.freshSeed())}
             disabled={busy}
-            title="Rebuild the published dataset. Same seed, so byte-for-byte identical — which is how you check reproducibility rather than take it on trust."
+            title="Rebuild the 60-episode walkthrough on a new seed: different claims, amounts and queue mix, with every named edge case still present."
           >
             Rebuild demo
           </button>
           <button
             data-testid="regen-full"
-            onClick={() => regenerate('full')}
+            onClick={() => regenerate('full', api.freshSeed())}
             disabled={busy}
-            title="Rebuild the 1,500-episode profile from the published seed."
+            title="Rebuild the 1,500-episode profile on a new seed. All 372 verdict pairs are still covered — that is arithmetic, not luck."
           >
             Rebuild full
           </button>
           <button
-            data-testid="regen-new-seed"
+            data-testid="regen-same-seed"
             className="primary"
-            onClick={() => regenerate(meta?.profile ?? 'demo', api.freshSeed())}
-            disabled={busy}
-            title="A different dataset of the same shape — new claims, new amounts, defects landing on different episodes. Reproducible from its own seed."
+            onClick={() => regenerate(meta?.profile ?? 'demo', meta?.stored?.master_seed)}
+            disabled={busy || !meta?.stored?.master_seed}
+            title="Rebuild on the seed shown in the masthead. Byte-for-byte identical, which is how you check reproducibility rather than take it on trust — compare the feed hashes in manifest.json."
           >
-            New data
+            Repeat seed
           </button>
         </div>
       </header>

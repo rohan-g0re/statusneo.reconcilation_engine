@@ -52,7 +52,7 @@ from recon.agents.roles.coordinator import run_coordinator  # noqa: E402
 from recon.agents.roles.investigator import run_investigator  # noqa: E402
 from recon.agents.tools import CallLog, ToolContext  # noqa: E402
 from recon.api import dossier as dossier_module  # noqa: E402
-from recon.config import load_settings  # noqa: E402
+from recon.config import CuratedSpine, load_settings  # noqa: E402
 from recon.db.connection import open_db  # noqa: E402
 from recon.domain import verdicts as verdict_vocab  # noqa: E402
 
@@ -117,7 +117,12 @@ def main() -> int:
         print("--nonce/--run-id fix a single file name; pass --role investigator|coordinator with them", file=sys.stderr)
         return 2
 
-    settings = load_settings(args.profile)
+    # Pinned for the same reason the model ids are pinned wherever these fixtures are
+    # recorded: the demo profile's composition is drawn from the seed by default, and a
+    # recording made against one composition cannot be replayed against another. The
+    # dataset on disk must have been built with this spine too -- `curated_spine` in its
+    # manifest.json says which -- or the replay misses on the first model call.
+    settings = load_settings(args.profile, curated_spine=CuratedSpine.RECORDED)
     agent_settings = load_agent_settings()
     if not agent_settings.api_key:
         print("no RECON_AGENT_API_KEY -- put one in .env", file=sys.stderr)

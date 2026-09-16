@@ -1,16 +1,27 @@
-- What is US Specialty pharmacy 340B
-- grounded in deterministic financial logic
+## Decision Tree
+- leaf nodes show all combinations possible
+- only 372 are Valid combinations
 
-- who is making the "claim"
-- who is operator??
-
-- "the operator needs to understand what money should have been received, what was actually 
-received, what remains outstanding, and what requires action" --> who is giving this money to whom?
-
-
-- "A single claim may create pharmacy benefit reimbursement, a 340B rebate, or a medical-benefit payment / denial pathway" --> just one of them or all of them --> can there me more at a time?
+## Generator Layer
+- generator_orchestrator (GO) picks valid leaf nodes from decision tree
+- GO generates primary-like keys
+- Distribute them amongst generators
+- Generators take relevant primary keys and generate final data
 
 
-ONE CLAIM (the dispense)
-  ├── reimbursement track → PBM (decides + pays $80; insurer funds it) --> Insurer does fuck all
-  └── rebate track        → TPA (decides qualification) → manufacturer (pays $45)
+## Connector Layer
+- connectors run on the generated data
+- store it in raw_record
+
+- parse it:
+  - if parse successful --> store in normalized_record
+  - if parse unsuccessful --> store in quarantined_record
+
+
+
+## Pulling complete value:
+
+
+![1789504915711](image/roughwork/1789504915711.png)
+
+

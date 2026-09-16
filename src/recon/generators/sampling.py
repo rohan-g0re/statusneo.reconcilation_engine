@@ -38,15 +38,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
+from recon.config import CuratedSpine
 from recon.domain.enums import BenefitType
 from recon.reference import drugs, entities, patients
-from recon.rng import derive_seed, rng_for, stable_choice
+from recon.rng import derive_seed, rng_for, stable_choice, stable_sample
 
 __all__ = [
     "LeafCatalogue",
     "load_leaves",
     "select_configurations",
+    "select_curated",
     "bind_entities",
+    "CURATED_FAMILIES",
+    "CURATED_PAIRS",
+    "CURATED_EXTRAS",
+    "RECORDED_SPINE",
     "DISQUALIFICATION_BINDINGS",
 ]
 
@@ -111,80 +117,204 @@ def load_leaves(decision_tree_dir: Path) -> LeafCatalogue:
 #:
 #: Every pair here is deliberate.  The assignment's data requirement names eight edge cases
 #: — *fully reconciled, partial payment, underpayment, reversal/recoupment, unmatched cash
-#: or rebate, denial, duplicate event, late-arriving status* — and each one appears below at
-#: least once on each reimbursement track where it is representable.  The cross-track
-#: compliance cases are included because X-1 and X-2 are the strongest demo material in the
-#: whole dataset: both are **invisible to any single-track system**, which is the clearest
-#: possible argument for reconciling at the episode level rather than the claim level.
-CURATED_PAIRS: tuple[tuple[str, str], ...] = (
+#: or rebate, denial, duplicate event, late-arriving status* — and each has a family below
+#: whose every member satisfies it, which is what lets :func:`select_curated` draw *within*
+#: a family by seed without ever dropping the edge case.  Reversal is split from recoupment,
+#: and unmatched cash from unmatched rebate, for exactly that reason: the coverage
+#: assertions treat them separately, so the families have to be at least as fine-grained.
+#:
+#: ``cross_track`` is a family rather than an optional extra because X-1 and X-2 are the
+#: strongest demo material in the whole dataset: both are **invisible to any single-track
+#: system**, which is the clearest possible argument for reconciling at the episode level
+#: rather than the claim level.  ``awaiting`` is a family so the pending queue is never
+#: empty.
+CURATED_FAMILIES: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     # --- the happy paths, one per reimbursement track ----------------------
-    ("A-04", "C-00"),   # fully reconciled, no 340B
-    ("A-04", "C-08"),   # fully reconciled on both tracks — the best case in the system
-    ("B-04", "C-00"),
-    ("B-04", "C-08"),
+    ("fully_reconciled", (
+        ("A-04", "C-00"),   # fully reconciled, no 340B
+        ("A-04", "C-08"),   # fully reconciled on both tracks — the best case in the system
+        ("B-04", "C-00"),
+        ("B-04", "C-08"),
+    )),
     # --- settlement, the verdict that hides in CLP02 -----------------------
-    ("A-06", "C-00"),
-    ("A-06", "C-08"),
-    # --- underpayment and partial payment ---------------------------------
-    ("A-07", "C-00"),   # underpaid, cash matched the short amount
-    ("A-08", "C-00"),   # underpaid AND no cash: two independent defects, one track
-    ("B-06", "C-00"),   # partial, no appeal filed — the window may still be open
-    ("B-07", "C-08"),   # partial, appeal pending
-    ("B-08", "C-00"),   # partial, appeal won, balance paid through a second payment
-    ("B-09", "C-00"),   # partial, appeal lost — a write-off decision, not a receivable
+    ("settlement", (
+        ("A-06", "C-00"),
+        ("A-06", "C-08"),
+    )),
+    # --- underpayment ------------------------------------------------------
+    ("underpayment", (
+        ("A-07", "C-00"),   # underpaid, cash matched the short amount
+        ("A-08", "C-00"),   # underpaid AND no cash: two independent defects, one track
+    )),
+    # --- partial payment ---------------------------------------------------
+    ("partial_payment", (
+        ("B-06", "C-00"),   # partial, no appeal filed — the window may still be open
+        ("B-07", "C-08"),   # partial, appeal pending
+        ("B-08", "C-00"),   # partial, appeal won, balance paid through a second payment
+        ("B-09", "C-00"),   # partial, appeal lost — a write-off decision, not a receivable
+    )),
     # --- unmatched cash: paperwork and money disagree ---------------------
-    ("A-05", "C-00"),
-    ("B-05", "C-00"),
-    ("A-05", "C-09"),   # X-5: no cash on BOTH tracks -> one correlated root cause
+    ("unmatched_cash", (
+        ("A-05", "C-00"),
+        ("B-05", "C-00"),
+        ("A-05", "C-09"),   # X-5: no cash on BOTH tracks -> one correlated root cause
+    )),
     # --- unmatched rebate --------------------------------------------------
-    ("A-04", "C-09"),   # the TPA's ledger and the bank disagree
-    ("A-04", "C-10"),   # partial rebate — usually a unit or price dispute
+    ("unmatched_rebate", (
+        ("A-04", "C-09"),   # the TPA's ledger and the bank disagree
+        ("A-05", "C-09"),   # ...and no reimbursement cash either
+    )),
     # --- denial ------------------------------------------------------------
-    ("A-01", "C-00"),   # rejected at the point of sale; terminal
-    ("B-10", "C-00"),   # denied, nobody has decided appeal-or-write-off yet
+    #
+    # Only the pairs the coverage assertion recognises as a denial belong here. The
+    # appeal-outcome verdicts that *follow* a denial — B-11, B-12, B-14, B-01 — are
+    # narrative extras rather than guarantees, so they sit in :data:`CURATED_EXTRAS`.
+    ("denial", (
+        ("A-01", "C-00"),   # rejected at the point of sale; terminal
+        ("B-10", "C-00"),   # denied, nobody has decided appeal-or-write-off yet
+        ("B-13", "C-00"),   # denied, appeal lost — terminal loss, cost of goods unrecovered
+        ("A-01", "C-08"),   # X-1: payer refused the claim, we are holding rebate money
+        ("B-10", "C-08"),   # X-1 on the medical track
+    )),
+    # --- reversal ----------------------------------------------------------
+    ("reversal", (
+        ("A-10", "C-00"),   # reversed, money returned, net zero
+        ("A-11", "C-00"),   # reversal recorded, money NOT returned — we hold cash we shouldn't
+        ("A-16", "C-00"),   # reversed before payment; expected falls to zero
+    )),
+    # --- recoupment --------------------------------------------------------
+    ("recoupment", (
+        ("A-12", "C-00"),   # recouped, netted into a later batch, offset traced
+        ("A-13", "C-00"),   # recoupment untraceable to any deposit -> INSUFFICIENT_DATA
+        ("B-15", "C-00"),   # medical takeback
+    )),
+    # --- duplicate events --------------------------------------------------
+    ("duplicate_event", (
+        ("A-17", "C-00"),   # two payment events for one claim
+        ("B-16", "C-00"),   # two remittances for one claim
+        ("A-04", "C-14"),   # two rebate payments for one dispense
+    )),
+    # --- the 340B chain, gate by gate -------------------------------------
+    ("rebate_chain", (
+        ("A-04", "C-01"),   # qualification pending at the TPA
+        ("A-04", "C-02"),   # not qualified — a correct outcome, not a failure
+        ("A-04", "C-03"),   # qualified, request not yet submitted
+        ("A-04", "C-05"),   # submitted, manufacturer silent
+        ("A-04", "C-11"),   # approved, awaiting payment
+        ("A-04", "C-13"),   # rebate clawed back
+    )),
+    # --- cross-track compliance: the cases a single-track system cannot see -
+    ("cross_track", (
+        ("A-10", "C-08"),   # X-2: drug never reached the patient, rebate still standing
+        ("A-11", "C-08"),   # X-2 again: reversal recorded, money not returned, rebate live
+        ("A-16", "C-08"),   # X-2 pre-payment
+        ("A-12", "C-08"),   # X-3: recoupment undermines the facts qualification relied on
+        ("A-01", "C-07"),   # X-6: total loss — no remaining collection path anywhere
+        ("B-13", "C-07"),   # X-6 on the medical track
+        ("B-12", "C-13"),   # X-7: appeal won AFTER the rebate was clawed back -> re-request
+    )),
+    # --- awaiting states, so the pending queue is not empty ---------------
+    ("awaiting", (
+        ("A-02", "C-00"),
+        ("A-02", "C-01"),
+        ("B-02", "C-00"),
+        ("B-02", "C-05"),
+    )),
+)
+
+#: Every pair named in :data:`CURATED_FAMILIES`, de-duplicated, in narrative order.
+CURATED_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    dict.fromkeys(pair for _, pairs in CURATED_FAMILIES for pair in pairs)
+)
+
+#: Pairs that earn a place in the demo on narrative grounds but that no edge case depends
+#: on: the appeal-outcome chain after a denial, the two adjustment cases, overpayment, the
+#: partial rebate, and the medical 340B gates.  Drawn ahead of the wider state space when
+#: filling the remaining slots, because a hand-placed pair carries a comment saying why it
+#: is worth looking at.
+CURATED_EXTRAS: tuple[tuple[str, str], ...] = (
     ("B-11", "C-00"),   # denied, appeal pending
     ("B-12", "C-00"),   # denied, appeal won, fully recovered
-    ("B-13", "C-00"),   # denied, appeal lost — terminal loss, cost of goods unrecovered
     ("B-14", "C-00"),   # appeal won and STILL no money: the highest-value chase
     ("B-01", "C-00"),   # clearinghouse rejection: the payer never saw it
     ("B-01", "C-08"),   # ...and the drug was still administered, so 340B is legitimate
-    # --- reversal and recoupment ------------------------------------------
-    ("A-10", "C-00"),   # reversed, money returned, net zero
-    ("A-11", "C-00"),   # reversal recorded, money NOT returned — we hold cash we shouldn't
-    ("A-16", "C-00"),   # reversed before payment; expected falls to zero
-    ("A-12", "C-00"),   # recouped, netted into a later batch, offset traced
-    ("A-13", "C-00"),   # recoupment untraceable to any deposit -> INSUFFICIENT_DATA
-    ("B-15", "C-00"),   # medical takeback
-    # --- duplicate events --------------------------------------------------
-    ("A-17", "C-00"),   # two payment events for one claim
-    ("B-16", "C-00"),   # two remittances for one claim
-    ("A-04", "C-14"),   # two rebate payments for one dispense
-    # --- contractual adjustment, explained and unexplained ----------------
     ("A-14", "C-00"),   # adjustment explains the shortfall; remainder settled
     ("A-15", "C-00"),   # adjustment applied, variance still unexplained
     ("A-09", "C-00"),   # overpayment: a refund liability, not a windfall
-    # --- the 340B chain, gate by gate -------------------------------------
-    ("A-04", "C-01"),   # qualification pending at the TPA
-    ("A-04", "C-02"),   # not qualified — a correct outcome, not a failure
-    ("A-04", "C-03"),   # qualified, request not yet submitted
-    ("A-04", "C-05"),   # submitted, manufacturer silent
+    ("A-04", "C-10"),   # partial rebate — usually a unit or price dispute
     ("A-04", "C-07"),   # X-4: manufacturer rejected. Reimbursement is clean -> NOT a flag
-    ("A-04", "C-11"),   # approved, awaiting payment
-    ("A-04", "C-13"),   # rebate clawed back
     ("B-04", "C-01"),
     ("B-04", "C-07"),
     ("B-04", "C-13"),
-    # --- cross-track compliance: the cases a single-track system cannot see -
-    ("A-01", "C-08"),   # X-1: payer refused the claim, we are holding rebate money
-    ("B-10", "C-08"),   # X-1 on the medical track
-    ("A-10", "C-08"),   # X-2: drug never reached the patient, rebate still standing
-    ("A-11", "C-08"),   # X-2 again: reversal recorded, money not returned, rebate live
-    ("A-16", "C-08"),   # X-2 pre-payment
-    ("A-12", "C-08"),   # X-3: recoupment undermines the facts qualification relied on
-    ("A-01", "C-07"),   # X-6: total loss — no remaining collection path anywhere
-    ("B-13", "C-07"),   # X-6 on the medical track
-    ("B-12", "C-13"),   # X-7: appeal won AFTER the rebate was clawed back -> re-request
-    # --- awaiting states, so the pending queue is not empty ---------------
+)
+
+
+#: The spine as it stood when the agent-trace fixtures were recorded: sixty pairs, in
+#: narrative order, for sixty slots.  Frozen — :class:`~recon.config.CuratedSpine` explains
+#: why it cannot be tidied, reordered or extended.  ``ReplayClient`` matches the digest of
+#: every recorded request, and those requests carry dossier contents, so editing one line
+#: here invalidates every recording and re-recording needs a live model.
+#:
+#: Kept verbatim rather than derived from :data:`CURATED_FAMILIES` and
+#: :data:`CURATED_EXTRAS`: those are free to change with the demo's needs, and a spine
+#: assembled from them would silently follow, which is the one thing this table must not do.
+RECORDED_SPINE: tuple[tuple[str, str], ...] = (
+    ("A-04", "C-00"),
+    ("A-04", "C-08"),
+    ("B-04", "C-00"),
+    ("B-04", "C-08"),
+    ("A-06", "C-00"),
+    ("A-06", "C-08"),
+    ("A-07", "C-00"),
+    ("A-08", "C-00"),
+    ("B-06", "C-00"),
+    ("B-07", "C-08"),
+    ("B-08", "C-00"),
+    ("B-09", "C-00"),
+    ("A-05", "C-00"),
+    ("B-05", "C-00"),
+    ("A-05", "C-09"),
+    ("A-04", "C-09"),
+    ("A-04", "C-10"),
+    ("A-01", "C-00"),
+    ("B-10", "C-00"),
+    ("B-11", "C-00"),
+    ("B-12", "C-00"),
+    ("B-13", "C-00"),
+    ("B-14", "C-00"),
+    ("B-01", "C-00"),
+    ("B-01", "C-08"),
+    ("A-10", "C-00"),
+    ("A-11", "C-00"),
+    ("A-16", "C-00"),
+    ("A-12", "C-00"),
+    ("A-13", "C-00"),
+    ("B-15", "C-00"),
+    ("A-17", "C-00"),
+    ("B-16", "C-00"),
+    ("A-04", "C-14"),
+    ("A-14", "C-00"),
+    ("A-15", "C-00"),
+    ("A-09", "C-00"),
+    ("A-04", "C-01"),
+    ("A-04", "C-02"),
+    ("A-04", "C-03"),
+    ("A-04", "C-05"),
+    ("A-04", "C-07"),
+    ("A-04", "C-11"),
+    ("A-04", "C-13"),
+    ("B-04", "C-01"),
+    ("B-04", "C-07"),
+    ("B-04", "C-13"),
+    ("A-01", "C-08"),
+    ("B-10", "C-08"),
+    ("A-10", "C-08"),
+    ("A-11", "C-08"),
+    ("A-16", "C-08"),
+    ("A-12", "C-08"),
+    ("A-01", "C-07"),
+    ("B-13", "C-07"),
+    ("B-12", "C-13"),
     ("A-02", "C-00"),
     ("A-02", "C-01"),
     ("B-02", "C-00"),
@@ -192,35 +322,108 @@ CURATED_PAIRS: tuple[tuple[str, str], ...] = (
 )
 
 
-def select_curated(catalogue: LeafCatalogue, *, episode_count: int) -> list[dict[str, Any]]:
-    """The ``demo`` profile: hand-placed verdict pairs, in narrative order.
+def select_curated(
+    catalogue: LeafCatalogue,
+    *,
+    episode_count: int,
+    master_seed: int,
+    profile_name: str,
+    spine: CuratedSpine = CuratedSpine.MIXED,
+) -> list[dict[str, Any]]:
+    """The ``demo`` profile: one guaranteed episode per edge case, then a seeded mix.
 
-    Deliberately **not** random and deliberately not stratified.  The debrief asks for one
-    claim traced end to end, and nobody does that against a 1,500-episode file — so this
-    profile exists purely to be legible.  Its spine is :data:`CURATED_PAIRS`.
+    Not stratified over the whole state space — the debrief asks for one claim traced end to
+    end, and nobody does that against a 1,500-episode file, so this profile exists to be
+    legible.  But it is no longer a fixed list of sixty either, and that distinction is the
+    point of this function:
+
+    * **The guarantee is the edge case, not the pair.**  One pair is drawn per family in
+      :data:`CURATED_FAMILIES`, by seed.  Because every member of a family demonstrates that
+      family's edge case, the assignment's coverage requirement holds under *any* seed while
+      the specific verdict still moves — ``denial`` lands on a point-of-sale rejection one
+      run and a lost appeal the next.
+    * **The remaining slots are sampled**, preferring :data:`CURATED_EXTRAS` and then the
+      rest of the reachable state space.  A fixed list exactly as long as ``episode_count``
+      is what made every rebuild report the same queue counts: with no slack, there was
+      nothing for the seed to choose.
+
+    ``spine=RECORDED`` opts out of all of that and walks :data:`RECORDED_SPINE` instead, for
+    the one caller that needs the composition frozen rather than fresh — see
+    :class:`~recon.config.CuratedSpine`.
 
     Within a pair the shallowest configuration is chosen, because the shortest decision path
     is the clearest worked example of that verdict — which is what someone reading by hand
     actually needs.
 
     Raises:
-        ValueError: if a curated pair is unreachable, which would mean
-            :data:`CURATED_PAIRS` has drifted from the state space.  Failing loudly beats
-            silently generating 59 episodes and calling it 60.
+        ValueError: if a curated pair is unreachable, which would mean the tables above have
+            drifted from the state space.  Failing loudly beats silently generating 59
+            episodes and calling it 60.
     """
     by_pair = catalogue.by_pair()
-    chosen: list[dict[str, Any]] = []
-    for pair in CURATED_PAIRS:
+    rng = rng_for(master_seed, profile_name, "curate")
+
+    def shallowest(pair: tuple[str, str], source: str) -> dict[str, Any]:
         candidates = by_pair.get(pair)
         if not candidates:
             raise ValueError(
-                f"curated pair {pair} is not reachable in the state space. CURATED_PAIRS has "
+                f"curated pair {pair} is not reachable in the state space. {source} has "
                 "drifted from decision_tree/leaves_classified.json."
             )
-        chosen.append(min(candidates, key=lambda leaf: (leaf["depth"], leaf["case_id"])))
-        if len(chosen) == episode_count:
+        return min(candidates, key=lambda leaf: (leaf["depth"], leaf["case_id"]))
+
+    if spine is CuratedSpine.RECORDED:
+        return [
+            shallowest(pair, "RECORDED_SPINE")
+            for pair in RECORDED_SPINE[:episode_count]
+        ]
+
+    # --- one per family, so no edge case can fall out of the demo ---------
+    guaranteed: list[tuple[str, str]] = []
+    for family, pairs in CURATED_FAMILIES:
+        if len(guaranteed) == episode_count:
             break
-    return chosen
+        # Two families can legitimately name the same pair — ("A-05", "C-09") is both an
+        # unmatched-cash case and an unmatched-rebate case. Draw from what is left of the
+        # family rather than spending two of sixty slots on one episode.
+        available = tuple(pair for pair in pairs if pair not in guaranteed)
+        if not available:
+            raise ValueError(
+                f"curated family {family!r} has no pair that another family has not already "
+                "claimed; it needs a member of its own or its edge case is not guaranteed."
+            )
+        guaranteed.append(stable_choice(rng, available))
+
+    # --- fill the rest from two pools, both wider than the slots they feed -
+    #
+    # The split is what makes the profile move.  Filling from the hand-placed pairs alone
+    # was the original defect in a second form: that pool is itself exactly as long as the
+    # slots it had to fill, so "sampling" it drew every member every time.  Half the
+    # remaining volume therefore comes from the curated near pool — enough that the demo
+    # still reads as hand-assembled — and half from the rest of the reachable state space,
+    # which is large enough that two seeds genuinely disagree about the queue mix.
+    taken = set(guaranteed)
+    near = tuple(
+        dict.fromkeys(pair for pair in CURATED_EXTRAS + CURATED_PAIRS if pair not in taken)
+    )
+    wider = tuple(sorted(pair for pair in by_pair if pair not in taken and pair not in near))
+
+    fill: list[tuple[str, str]] = []
+    remaining = episode_count - len(guaranteed)
+    quotas = ((near, remaining // 2), (wider, remaining - remaining // 2), (near, remaining))
+    for pool, quota in quotas:
+        if remaining <= 0:
+            break
+        available = tuple(pair for pair in pool if pair not in fill)
+        drawn = stable_sample(rng, available, min(quota, remaining, len(available)))
+        fill.extend(drawn)
+        remaining -= len(drawn)
+
+    # The guaranteed spine stays in narrative order, because the walkthrough reads it top to
+    # bottom; the sampled remainder sits behind it.
+    return [shallowest(pair, "CURATED_FAMILIES") for pair in guaranteed] + [
+        shallowest(pair, "the demo fill pool") for pair in fill
+    ]
 
 
 def select_configurations(

@@ -36,6 +36,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from conftest_pipeline import build_pipeline, score  # noqa: E402
+from recon.config import CuratedSpine  # noqa: E402
 
 #: Demo is exact. Full measures 1349/1354 — 99.6% — and the five stragglers are characterised
 #: rather than unexplained:
@@ -48,15 +49,32 @@ from conftest_pipeline import build_pipeline, score  # noqa: E402
 #:   so a weaker match stays visible in the audit trail;
 #: * one is a residual medical 340B key collision.
 #:
-#: The demo threshold is exact because demo is the walkthrough profile: if the curated sixty are
-#: not all correct, the thing a reviewer is shown is wrong.
+#: The demo threshold is exact on the **frozen** spine, because that is the walkthrough: if the
+#: hand-placed sixty are not all correct, the thing a reviewer is walked through is wrong.
 MIN_RESOLVABLE_RATE_DEMO = 1.0
 MIN_RESOLVABLE_RATE_FULL = 0.99
+
+#: The demo profile's default spine samples most of its composition from the seed, so it reaches
+#: into the same margins ``full`` does and cannot promise an exact score for every seed. Measured
+#: over eight seeds: seven scored 54/54, and the published seed scored 53/54 on one episode whose
+#: rebate deposit lost its addenda and was rescued against a different batch of the same amount
+#: inside the CORE-370 window — the fourth straggler category above, not a new defect. One miss in
+#: sixty is 98.3%, so the bar sits at 98% and a *second* independent miss trips it.
+MIN_RESOLVABLE_RATE_DEMO_MIXED = 0.98
 
 
 @pytest.fixture(scope="module")
 def demo_run(tmp_path_factory):
-    return build_pipeline("demo", tmp_path_factory.mktemp("e2e-demo"))
+    """The frozen walkthrough: the spine the agent-trace fixtures were recorded against."""
+    return build_pipeline(
+        "demo", tmp_path_factory.mktemp("e2e-demo"), curated_spine=CuratedSpine.RECORDED
+    )
+
+
+@pytest.fixture(scope="module")
+def demo_mixed_run(tmp_path_factory):
+    """What a rebuild actually produces now: guaranteed edge cases, seeded mix around them."""
+    return build_pipeline("demo", tmp_path_factory.mktemp("e2e-demo-mixed"))
 
 
 @pytest.fixture(scope="module")
@@ -76,6 +94,18 @@ def test_demo_reproduces_intended_verdicts(demo_run):
         "disagreement."
     )
     assert card.resolvable_rate >= MIN_RESOLVABLE_RATE_DEMO, _failure_report(card)
+
+
+def test_demo_on_the_seeded_spine_reproduces_intended_verdicts(demo_mixed_run):
+    """The same claim, on the composition a rebuild actually produces.
+
+    Separate from the frozen run above rather than replacing it, because the two answer
+    different questions: that one asks whether the walkthrough is correct, this one asks
+    whether the engine survives a demo it did not have hand-placed for it.
+    """
+    card = score(demo_mixed_run)
+    assert card.unmatched_episodes == 0
+    assert card.resolvable_rate >= MIN_RESOLVABLE_RATE_DEMO_MIXED, _failure_report(card)
 
 
 def test_full_reproduces_intended_verdicts(full_run):
