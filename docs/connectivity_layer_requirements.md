@@ -132,6 +132,32 @@ Doc 2 flags this on every vendor page and it is the defect that destroys a build
 
 ---
 
+### Group M — Mock source data *(prerequisite for Groups C and D)*
+
+No vendor credential is obtainable, so every source in this build is served by a local mock. The question that decides the design is whether those mocks are **new generators** or **formatters over existing generated data**. They must be formatters, and the reason is not convenience.
+
+The existing generator is built backwards from a proof. `decision_tree/` enumerates the state space, `sampling.py` picks leaves stratified over verdicts, and the orchestrator turns each leaf into facts — costing it into integer cents through the same pricing module the engine uses, computing every `received_at` from fixed lag windows, and **minting every cross-feed identifier** because those are the values two files must agree on. Each generator then receives a blind slice: `contracts.py` asserts at runtime that no generator can see an episode id, a verdict, or an expected amount, and that assertion is the only reason crosswalk accuracy is a measured 1,349/1,354 rather than a claim.
+
+A new Beacon or Verity generator would have to be handed the answer to produce a consistent story, which deletes that guarantee. A formatter re-dresses a slice that has already been through the blind-slice check, so the guarantee survives intact.
+
+**M1. Beacon and Verity identifiers are minted by the orchestrator, not by the mock.**
+Add `beacon_id` to the identifiers the orchestrator mints, in the same place and for the same reason as `trn02` and `allocation_code`: it is a value that two independent systems must agree on, so exactly one component may decide it. Verity-side references (accumulation id, invoice number) get the same treatment.
+*Acceptance:* `contracts.py` still passes — no slice carries an episode id, a verdict or an expected amount — and a Beacon ID appearing in a mock response is the same string the orchestrator minted.
+
+**M2. Mocks are formatters over generated data, and hold no domain logic.**
+`verity_export.py`, `craneware_export.py` and `beacon_server.py` read what `src/recon/generators/` already produced and re-dress it into vendor shape. None of them may decide whether a claim qualified, what it was worth, or when it arrived.
+*Acceptance:* a test asserts the mock modules import no pricing, no decision-tree and no ground-truth module, and contain no arithmetic on money.
+
+**M3. The Beacon response side is a re-dressing, not a new decision.**
+Beacon's acknowledgement, validation outcome and rebate status are already present in the generated data as `TPA_MANUFACTURER_DECISION` records. The mock server replays them under Beacon's field names over HTTP; it does not adjudicate.
+*Acceptance:* every response the mock returns traces back to a generated record, and the set of outcomes it can produce equals the set already in the feed.
+
+**M4. Invented fields are declared, never inferred silently.**
+Verity and Craneware publish dataset and report *names* but no field dictionary, so some payload fields are honest inventions. Each is listed in a `MOCK_FIELDS.md` beside its mapping module, marked real-spec or invented.
+*Acceptance:* every field in a vendor mapping appears in that file with a provenance marker; a test fails on an undeclared field.
+
+---
+
 ### Group C — Beacon connector *(Doc 2 steps 2–4)*
 
 Beacon is the only bidirectional connector in the entire document — every other source is a pull — and the only one of the six with enough public documentation to build faithfully. Doc 2's Beacon page names the partner model, the two-token auth, Read vs Read/Write permission, claim-level submission history, validation outcomes, Beacon IDs, and **published pharmacy and medical claim data templates**, which is an actual field list.
@@ -226,8 +252,9 @@ Mirrors Doc 2's own wave structure, which sequences by proven-path confidence.
 | Wave | Contents | Rationale |
 |---|---|---|
 | **0 — Framework** | A1, A2, A3, A5, B1, B2 | Doc 2's Weeks 2–4 row: the common gateway, credentials, schema registry and idempotency **before** any vendor adapter. |
+| **0.5 — Mock data** | M1, M2, M4 | One orchestrator change to mint `beacon_id` and the Verity references, then the formatters. Must precede waves 1 and 2 — a connector with nothing to connect to cannot be tested. |
 | **1 — File pattern** | A4, D1, D2, D3, B3 | Verity and Craneware are the highest-confidence sources in the whole assessment. SFTP is boring and proven. |
-| **2 — API pattern** | C1, C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. |
+| **2 — API pattern** | M3, C1, C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. |
 | **3 — Mapping** | E1–E5 | Cheap once real sources exist to exercise them; expensive to retrofit after. |
 | **4 — Proof** | F1, F2, F3 | Golden claims, control totals, readiness report. This wave is what makes the build claimable. |
 
@@ -323,7 +350,11 @@ src/recon/mocks/
   craneware_export.py # D3  ditto
 ```
 
-These consume what `src/recon/generators/` already produces. No new synthetic data engine — the existing orchestrator already mints every cross-feed identifier and withholds ground truth, so the mocks are **formatters, not generators**. That preserves the existing guarantee that generators never see an episode id or an expected amount.
+These consume what `src/recon/generators/` already produces. **No new synthetic data engine, and no new generators** — see Group M for why that distinction is load-bearing rather than stylistic.
+
+The one change inside the existing generator package is in `orchestrator.py`: it gains `beacon_id` and the Verity-side accumulation and invoice references to the identifiers it mints. That is the correct home for them — the orchestrator already mints `trn02`, `allocation_code` and every natural key, precisely because a cross-feed identifier is a value two independent systems must agree on, so exactly one component may decide it. A mock that minted its own Beacon ID would be inventing a fact the rest of the system then has to accept on faith.
+
+Everything else in `generators/` is untouched, including `contracts.py`, whose runtime blind-slice assertion is what makes the crosswalk a measurement instead of a claim. If a mock ever needs data that assertion forbids, the mock is wrong, not the assertion.
 
 ### 4.5 Schema additions (`src/recon/db/schema.sql`)
 
@@ -402,8 +433,9 @@ Connector-ready is reached when all of the following hold:
 4. Four golden claims — paid, rejected, reversed, unmatched — each trace end to end with figures asserted at five stages.
 5. A short feed and a schema-mismatched feed each fail with the right named condition instead of passing silently.
 6. The connector readiness report generates from code and states, per source, exactly what is real and what is mocked.
-7. The existing 585 tests still pass, unedited.
+7. Every mock is a formatter: `contracts.py` still passes unedited, and no mock module contains money arithmetic or a qualification decision.
+8. The existing 585 tests still pass, unedited.
 
-Items 1, 4, 5 and 7 are the ones worth defending in a walkthrough, and none of them depends on a vendor credential.
+Items 1, 4, 5, 7 and 8 are the ones worth defending in a walkthrough, and none of them depends on a vendor credential.
 
 **Explicitly not part of acceptance**, because it is step 6: scheduled unattended operation, alerting, retry-on-failure, backfill, quarantine queue, cutover parity against Inmar.
