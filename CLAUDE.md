@@ -236,12 +236,27 @@ Global Instructions
     OpenAI-compatible client. The loop, the checklist, the four outcomes, the
     tools, the human gate, the UI surface, and what we deliberately are not
     doing. Every claim is cited; where sources conflict the conflict is stated.
-  - docs/agent_layer_readiness.md -- what the agent already has. Short answer:
-    the data is done, the plumbing is not. The episode dossier is one call and
-    returns everything; INSUFFICIENT_DATA is genuinely emitted by the engine;
-    queue rows already carry age and variance for ranking.
+  - docs/agent_layer_data_readiness.md -- what the agent already has. Short
+    answer: the data is done, the plumbing is not. The episode dossier is one
+    call and returns everything; INSUFFICIENT_DATA is genuinely emitted by the
+    engine; queue rows already carry age and variance for ranking. (Wave 12
+    corrected this pointer: three places named it `agent_layer_readiness.md`,
+    which never existed.)
   - docs/remaining_work.md -- what is left across the whole project, and which
     decisions are still owed by the user.
+
+  Walkthroughs
+
+  Two documents trace the system end to end for a spoken walkthrough, written
+  for a reader who wants the flow rather than the internals. Both follow the
+  same episode -- verdicts A-07 and C-09 -- so they join into one story:
+
+  - docs/claim_walkthrough.md -- the deterministic half. One claim from the
+    generator through ingest, crosswalk, the engine and the queues, with a
+    pharmacy/medical/340B domain primer folded in where the machinery needs it.
+  - docs/agent_walkthrough.md -- the agent half. One request from the click
+    through the tool loop, the fence, the figure check, the propose/evaluate
+    loop and the human gate.
 
   Wave 10 of the knowledge graph records the decisions with provenance --
   four user decisions, the rest agent defaults marked as such.

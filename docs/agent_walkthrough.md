@@ -64,6 +64,20 @@ Look at the dotted line. It is the only arrow that reaches the database as a wri
 
 That difference shows up directly in the shape of the code. Investigator and Analyst are **single pass** — call the model, let it use tools, take the prose. Coordinator is a **loop** — propose, grade, feed back, repeat.
 
+```mermaid
+flowchart LR
+  subgraph SP["Single pass — one model, prose out"]
+    I["Investigator<br/>one claim"]
+    A["Analyst<br/>the whole book"]
+  end
+  subgraph LP["Loop — two models, structured action out"]
+    C["Coordinator<br/>Proposer plus Evaluator"]
+  end
+  I --> R1["4 paragraphs<br/>plus citations"]
+  A --> R2["4 paragraphs<br/>plus citations"]
+  C --> R3["an action, a score,<br/>and one of 4 outcomes"]
+```
+
 **The practitioner's detail:** the Decide button stays greyed out until Explain has been run at least once on that claim. Not a technical requirement — a deliberate ordering. Nobody should be reading a recommendation before they have read what happened.
 
 ---
@@ -218,15 +232,25 @@ The model does not answer. It asks for a tool:
                  "arguments": "{\"episode_id\":\"E-000042\",\"detail\":\"essential\"}"}}]}
 ```
 
-The role hands this to `dispatch()`, which:
+The role hands this to `dispatch()`, and this is the round trip in full:
 
+```mermaid
+flowchart TD
+  M["Model asks for<br/>get_episode"] --> V{"Arguments valid<br/>against the schema?"}
+  V -->|no| E1["envelope: invalid_input"]
+  V -->|yes| D{"Same call already<br/>made this run?"}
+  D -->|yes| E2["envelope: duplicate_call_blocked<br/>3rd block sets a stall signal"]
+  D -->|no| RUN["Run it against the database"]
+  RUN --> W["Fence the payer's free text<br/>see section 9"]
+  W --> ENV["Wrap in the 5-key envelope"]
+  E1 --> ENV
+  E2 --> ENV
+  ENV --> J["journal: tool_call + tool_result"]
+  ENV --> BACK["Back into the conversation<br/>as a tool message"]
+  BACK --> M
 ```
-validate the arguments against the tool's schema
-check this exact call has not already been made
-run the tool against the database
-wrap the answer in the five-key envelope
-write "tool_call" and "tool_result" to the journal
-```
+
+Note that **every path ends in the same envelope**. A validation failure, a blocked duplicate, a database error, a successful read — the model gets the same five keys every time and never sees a stack trace.
 
 The result goes back into the conversation as a `tool` message and the model gets another turn. This repeats — at most 5 rounds, at most 12 calls total for the Investigator. Typically it makes two or three.
 
@@ -388,7 +412,7 @@ flowchart TD
   P --> E["Evaluator<br/>grades it against a checklist"]
   E --> S["Python computes a score<br/>and runs 4 vetoes"]
   S --> G{"Gate"}
-  G -->|"score >= 80"| DONE["complete"]
+  G -->|"score 80 or more"| DONE["complete"]
   G -->|"a criterion is unanswerable"| ID["insufficient_data"]
   G -->|"3 rounds, no improvement"| ST["stalled"]
   G -->|"out of budget"| CAP["capped"]
@@ -437,6 +461,22 @@ For our claim the Proposer comes back with `ESCALATE` — the rebate was approve
 
 **Why that matters:** if the judge reads the arguing, it starts grading the arguing. The whole point of a second model is an independent look at the *output*, and reasoning is the most persuasive and least verifiable part of what the first model produced.
 
+```mermaid
+flowchart LR
+  subgraph PR["Proposer"]
+    P1["reasoning"]
+    P2["action"]
+    P3["evidence"]
+    P4["artifacts"]
+  end
+  P1 -.->|"NO FIELD EXISTS<br/>for this to travel in"| X["‖"]
+  P2 --> EV["Evaluator"]
+  P3 --> EV
+  P4 --> EV
+  EV --> F["per-criterion findings<br/>SUPPORTED / CONTRADICTED / NOT_ADDRESSED"]
+  F --> PY["Python computes the score"]
+```
+
 Three more things are deliberately different between the two:
 
 ```
@@ -474,6 +514,20 @@ score = 100 * gate * (earned / possible)
 | **G8** | Does the proposal claim to have *already* closed, posted, paid or moved money? |
 
 **Why vetoes rather than deductions:** because these four are not quality issues. A fabricated dollar amount is not a proposal that scores slightly lower — it is a proposal that must not reach a human at all. Making them multiply rather than subtract is what makes that structural.
+
+```mermaid
+flowchart LR
+  JC["8 judged criteria<br/>SUPPORTED adds its weight"] --> EARN["earned / possible"]
+  DC["6 Python criteria<br/>same arithmetic"] --> EARN
+  VET{"Did any of the 4<br/>vetoes fail?"} -->|yes| G0["gate = 0"]
+  VET -->|no| G1["gate = 1"]
+  EARN --> MUL["score = 100 x gate x earned/possible"]
+  G0 --> MUL
+  G1 --> MUL
+  MUL --> OUT["0.000, or a real score"]
+```
+
+A proposal can be SUPPORTED on every judged criterion and still score exactly zero. That is not a bug in the display — it is the gate doing the only job it has.
 
 **Why the judge only grades four of the eight criteria by default:** cost. Every judged criterion is a reasoned finding from a slow model. Four of them carry the argument — does the evidence actually support the claim, are the artifacts enough to act on, does the grounding clause justify the action, does it abstain when it should. The other four sit next to vetoes that already cover the same ground. A reviewer watching the fourth near-identical finding scroll past learns nothing the third one did not already say.
 

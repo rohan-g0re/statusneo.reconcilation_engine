@@ -61,7 +61,7 @@ Consequences for phase 2:
 
 <critical_requirement>
 **Phase 1 covers `docs/solutions/` AND the living design documents** — currently
-`docs/agent_layer_design.md`, `docs/agent_layer_readiness.md` and
+`docs/agent_layer_design.md`, `docs/agent_layer_data_readiness.md` and
 `docs/remaining_work.md`. Those go stale faster than the learnings do, because they
 describe work in flight rather than work finished. Check each against the code the same
 way, and against decisions made since they were written.

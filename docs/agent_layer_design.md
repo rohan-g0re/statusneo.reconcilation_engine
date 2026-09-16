@@ -72,6 +72,16 @@ def run_until(propose, evaluate, *, threshold=80, max_iterations=5):
     return Outcome("capped", max_iterations, history[-1][1], history)
 ```
 
+> **Correction, added after implementation.** The `stalled` line above —
+> `if verdict == history[-2][1] ...` — is wrong, and is left here unedited because
+> `src/recon/agents/rubric.py` cites it by line as the defect it corrects. It compares two
+> whole `Verdict` objects, which carry free-text reasoning a model never reproduces byte for
+> byte, so it is effectively `False` forever and `stalled` could never fire. The shipped
+> version compares *scores*: `_stalled` needs three scored rounds and returns true when
+> neither of the last two beats the best earlier round by more than `STALL_EPSILON` (1.0).
+> That in turn makes the outcome a claim about configuration — an iteration ceiling of 2
+> leaves it unreachable, which is why the shipped default is 3.
+
 **Four distinct outcomes, never one boolean.** `complete`, `insufficient_data`, `stalled`, `capped` are different facts about the world and each needs a different response from the operator. Collapsing them loses the distinction between "we determined this cannot be resolved from the available documents" and "we ran out of budget" — the first is an answer, the second is a failure.
 
 ### Prior art: OpenHands' Goal Completion Loop
@@ -277,7 +287,10 @@ harness.py       the loop: propose → verify → score → gate
   ↓
 rubric.py        weighted scorer list; LLM judge is one entry among deterministic ones
   ↓
-tools.py         7 tools over the existing repository layer
+tools.py         9 tools over the existing repository layer (7 when written;
+                 the Portfolio Analyst's two read models were excluded only
+                 because the third role was not being built, and that reason
+                 went away when it was)
   ↓
 client.py        Protocol + OpenAICompat + Replay
   ↓

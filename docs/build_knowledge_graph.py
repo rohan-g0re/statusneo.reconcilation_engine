@@ -967,10 +967,83 @@ def wave_11_agent_layer_built():
     R("One definition, or it drifts", "is the same family as", "Hand-counted state spaces drift")
 
 
+# ===========================================================================
+# WAVE 12 -- explaining the build to a human, and what that exposed
+# ===========================================================================
+#
+# Two walkthrough documents were written for the interview debrief and read back
+# section by section by someone who stops at the first gap. That reading found
+# defects in the documents, in a schema comment, and in three file pointers --
+# none of which any test could have caught, because none of them is code.
+
+
+def wave_12_explaining_the_build():
+
+    # --- correction to an earlier wave --------------------------------------
+
+    OBS("Build state",
+        "Two walkthrough documents exist for the interview debrief: docs/claim_walkthrough.md for the deterministic layer and docs/agent_walkthrough.md for the agent layer",
+        "Both trace the same episode -- verdicts A-07 and C-09 -- so the two documents join into one continuous story rather than two overlapping ones")
+
+    # --- what reading it aloud exposed --------------------------------------
+
+    E("A pipeline explanation breaks at the seam, not the hard part", "Learning",
+      "A reader followed the crosswalk, the verdict ladder and the deposit allocation without trouble, and got lost where one program ended and another began",
+      "Their words: 'I don't know where we are. I just think that we did not start from where we ended'",
+      "The missing step was between the generator writing a feed file and the connector reading it -- two separate programs with a folder between them, and no sentence saying so",
+      "What fixed it was three statements: program A exits, this is what survives on disk, program B starts fresh and can see only that",
+      "The same gap exists at every thread and request boundary, and is invisible to the writer because the writer knows both sides",
+      "PROVENANCE: agent default, found by a reader working through the document out loud")
+
+    E("Draw a diagram from its effects, not its branches", "Trap",
+      "The ingest diagram showed the decision -- does this record create an episode -- and stopped there, omitting that BOTH branches then write crosswalk_key",
+      "A reader who followed it concluded the crosswalk table appeared from nowhere one section later, and reported the two sections as contradicting each other",
+      "The engine diagram carried the same error pointed the other way: it drew the seven cross-track checks feeding the disposition, when the two verdict codes decide the bucket by lookup and the checks can only escalate it afterwards",
+      "Both were drawn from control flow, and both were therefore wrong about what actually lands",
+      "The rule is that every arrow ends in a named artifact -- a table, a file, a returned value -- and any branch that writes something has to show the write",
+      "PROVENANCE: agent default, both caught by the reader rather than by review")
+
+    E("A pointer that names a file nobody has", "Trap",
+      "CLAUDE.md, the /complete_compound command and src/recon/agents/roles/__init__.py all direct a reader to docs/agent_layer_readiness.md",
+      "No such file exists or ever did. The document is docs/agent_layer_data_readiness.md",
+      "Three independent references agreeing on one wrong name reads as verification, which is worse than a single reference being wrong",
+      "The same session found the schema commenting episode_id as 'EP-000001' while the connector mints 'E-000042'",
+      "Neither breaks anything at runtime, which is exactly why neither was found until somebody tried to follow the pointer",
+      "PROVENANCE: agent default, found while running this command's own discoverability step")
+
+    E("Wires run and not connected", "Learning",
+      "PROMPT_VERSION is computed in all four prompt modules -- a blake2b over that module's rendered template strings -- so a journal could record which prompt version produced a run",
+      "Nothing reads it. It is defined four times and referenced nowhere else in src/",
+      "The Outcome returned when the loop is capped by the TOKEN budget carries a note saying the ITERATION budget was exhausted, because the note is built from module constants rather than the live budget",
+      "The true cause is recorded correctly in that round's gate journal event, so the log is right and the returned object is wrong",
+      "Neither is a failure anything would notice: one is unused, the other is a wrong string sitting beside a right one",
+      "PROVENANCE: agent default, found while mapping the layer for documentation rather than by a test")
+
+    E("Measure the claim against the generated data", "Learning",
+      "A reader doubted two claims about the generator: that the decision tree is used there at all, and that each generator emits exactly one record per episode",
+      "Both were settled in one message by counting the demo feeds, not by explaining again",
+      "The counts: TPA events per dispense run 1 to 7, medical records per claim 2 to 4, pharmacy claim events per Rx 1 to 3 -- the record count varies because the leaf says what happened, not how many documents saying it takes",
+      "The doubt was reasonable rather than obstructive: this repository has a recorded case of a docstring asserting a test that did not exist, so confident prose about it is unverified by default",
+      "PROVENANCE: agent default, in response to the reader challenging the claim")
+
+    # --- relations ----------------------------------------------------------
+
+    R("A pipeline explanation breaks at the seam, not the hard part", "documents", "Build state")
+    R("Draw a diagram from its effects, not its branches", "is the same family as", "Silent dispatch miss")
+    R("Draw a diagram from its effects, not its branches", "threatens", "Episode dossier")
+    R("A pointer that names a file nobody has", "is the same family as", "A docstring is not a test")
+    R("A pointer that names a file nobody has", "threatens", "Decision provenance must be tracked")
+    R("Wires run and not connected", "constrains", "Agent layer")
+    R("Wires run and not connected", "is the same family as", "A docstring is not a test")
+    R("Measure the claim against the generated data", "realises", "A docstring is not a test")
+    R("Measure the claim against the generated data", "is the same family as", "Hand-counted state spaces drift")
+    R("A pipeline explanation breaks at the seam, not the hard part", "is the same family as", "State, do not narrate")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
-         wave_11_agent_layer_built]
+         wave_11_agent_layer_built, wave_12_explaining_the_build]
 
 
 def main():

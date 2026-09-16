@@ -1,11 +1,13 @@
-"""The two roles that actually talk to a model: the Exception Investigator and the
-Workflow Coordinator.
+"""The three roles that talk to a model: the Exception Investigator, the Workflow
+Coordinator and the Portfolio Analyst.
 
-The Portfolio Analyst named in `docs/agent_layer_design.md`'s three-role sketch is not
-built here -- `docs/agent_layer_readiness.md` and `docs/remaining_work.md` scope this
-assignment down to the two roles the analysis screen actually wires up (design S:8.6:
-"Explain" and "Decide next steps"), and this package matches that scope rather than the
-design doc's original three-role list.
+This docstring previously said the Portfolio Analyst was *not* built here, and pointed
+at `docs/agent_layer_readiness.md` for the scoping decision that excluded it. Both
+statements are now false and one of them never resolved: `analyst.py` sits in this
+package, and the readiness document is `docs/agent_layer_data_readiness.md`. The
+exclusion was real when it was written -- the design's three-role sketch was scoped down
+to the two roles the analysis screen wires up (design S:8.6, "Explain" and "Decide next
+steps") -- and it went away when the third role shipped onto the dashboard.
 
 `investigator.py` is a single pass with no propose/evaluate/score/gate -- it does not
 use `harness.run_until` at all, because there is nothing to gate: one tool-calling loop,
