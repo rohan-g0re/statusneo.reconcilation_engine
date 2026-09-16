@@ -99,7 +99,48 @@ There is no queue table. A queue is a `SELECT` over the latest verdict per episo
 
 ---
 
-## 5. Deterministic reconciliation
+## 5. How the synthetic data is generated
+
+The generator is not a fixture writer. It is built backwards from a proof, so that "does the connector reassemble these feeds correctly?" is a **measurement** rather than an assumption.
+
+**Step 1 — enumerate the state space before writing a generator.** `decision_tree/spec.py` declares each decision an episode can make — billing road, adjudication, payment, cash, reversal, 340B qualification, manufacturer decision — as a dimension with legality constraints. `build_tree.py` walks it and emits every legal leaf; `classify.py` labels each leaf with its verdict pair and coherence; `verify.py` re-derives every constraint **independently of the code that produced it**.
+
+- 12,093,235,200 unconstrained combinations → **4,224 legal configurations**
+- 3,860 coherent, 364 compliance anomalies
+- **372 reachable verdict pairs**, all reachable
+- The validator's first run reported 15 violations and *the validator* was wrong — which is the point of writing it separately
+
+**Step 2 — pick which leaves to realise.** `sampling.py` selects from `leaves_classified.json`:
+
+- `full` (1,500 episodes) takes **one leaf per verdict pair first**, so all 372 are covered by arithmetic rather than by luck, then fills the remainder round-robin
+- `demo` (60 episodes) guarantees one episode per named edge-case family, then samples the rest
+- Stratification is over **verdicts, not configurations**, because configuration frequency spans 252× and 99 of the 372 pairs have exactly one configuration behind them — uniform sampling would lose the rarest and most valuable cases
+- `bind_entities` then attaches a real drug, pharmacy, payer and manufacturer consistent with the leaf's billing road
+
+**Step 3 — the orchestrator turns one leaf into facts.** The leaf is a one-line plot summary: `ph_payment = PARTIAL`, `cash_reimb_in = MATCHED`. Everything concrete is decided here.
+
+- `plan.py` costs the leaf into **integer cents** through `reference/pricing.py` — the same module the engine will use, which is what makes an injected underpayment *exactly* the underpayment the engine reports
+- `timeline.py` computes every `received_at` from fixed lag windows; the generator has no concept of "now"
+- The orchestrator **mints every cross-feed identifier** — natural keys, `trn02`, `allocation_code`, `clm01` — because those are the values two files must agree on
+- It composes batches: which claims share a remittance, which `PLB` clawback lands on which *later* batch, which dispenses share a rebate payment
+- Money flows **declare → realize → format**: the orchestrator declares a movement, `realizer.py` decides what actually lands (partial, absent, addenda stripped), and only then does a generator format it
+
+**Step 4 — hand each generator a blind slice.** Each of `pbm.py`, `medical.py`, `tpa.py` and `bank.py` receives only what its real source system would know, and formats it in its own wire format.
+
+- A generator never sees an episode id, a verdict, or an expected amount. `contracts.py` asserts this **at runtime** over slice instances and fails the build on a violation
+- That assertion was written, correct, imported — and never called. When it was finally wired up it immediately caught every slice leaking the episode id through a free-text reference field
+- Generators mint only identifiers that live inside their own company — a PBM authorization number, a payer ICN, an ACH trace. Every one of those is *useless for matching*, which is the same rule stated differently
+- Four generators, **six files**: pharmacy and medical each split into claim + remittance because X12 separates the ask from the answer; 340B is one file carrying both directions because it is a vendor export with no standard behind it
+
+**Step 5 — withhold the answer key.** The orchestrator alone writes `truth/ground_truth.json`, recording the intended verdict pair, every expected amount, and which cross-feed links are resolvable **by design** versus unresolvable because a defect was injected. The ingestion package is structurally unable to read it: `load_feeds` accepts only a feeds directory. That is what turns crosswalk accuracy into 1,349/1,354 rather than a claim.
+
+Defects are injected at named, tunable rates rather than as noise — D-1 duplicate delivery, D-2 late arrival, D-3 orphan deposit, D-4 orphan rebate, D-6 identifier drift, D-7 allocation residual, plus per-feed business defects like underpayments whose `CO-45` does not explain the whole gap. Only the ~20% ACH addenda-loss rate is sourced; the rest are estimates. D-5, malformed records, is **deliberately absent** — it was an invented requirement that appeared nowhere in the brief.
+
+Reproducibility is structural: every random stream is seeded from a canonical path string hashed with `blake2b`, never Python's `hash()`, which is salted per process. Seeds are order- *and* insertion-independent, so adding one episode never reshuffles another's output, and the manifest SHA-256s every feed file so "same seed, same bytes" is checkable with a diff.
+
+---
+
+## 6. Deterministic reconciliation
 
 ![Engine pipeline](docs/images/engine-pipeline.png)
 
@@ -119,18 +160,11 @@ Anything finer than three dispositions belongs in reason codes, which are a *lis
 
 **`INSUFFICIENT_DATA` is a first-class outcome, not an error path.** The engine emits it in exactly three places where it deterministically knows it cannot decide: a clawback that cannot be tied to any bank movement (A-13), no cash on both tracks at once (X-5), and an expected amount it could not price. The alternative is reporting variance against an expectation of zero — a false zero, which renders an unpriceable claim as perfectly clean. It also matters downstream, because it hands the agent a *deterministic* "I don't know" instead of one it has to invent.
 
-**Measured, not asserted:**
-
-| | |
-|---|---|
-| Oracle reproduction | **4,224 / 4,224** configurations, exact on verdicts, cross-track flags and coherence. No threshold — one divergence means the port is no longer the thing that was proved |
-| Crosswalk vs withheld ground truth | **1,349 / 1,354** resolvable episodes (99.6%) on the full profile; **54/54** on the frozen demo spine, 53/54 on a freshly seeded rebuild |
-| Tests | **585 passed, 2 skipped** (587 collected), no API key, no network |
-| Query plans | Pinned by tests that assert no table scan, so an index regression fails a test instead of quietly costing latency |
+**Measured, not asserted:** the engine reproduces the oracle on **4,224 / 4,224** configurations with no threshold — one divergence means the port is no longer the thing that was proved. Against withheld ground truth the crosswalk reassembles **1,349 / 1,354** resolvable episodes (99.6%) on the full profile. **585 tests pass, 2 skip**, with no API key and no network. Full breakdown in `README.md`.
 
 ---
 
-## 6. Agent and tool design
+## 7. Agent and tool design
 
 Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatible client.
 
@@ -162,30 +196,25 @@ The write tool is never given to any model — role tool lists are built by *rem
 
 ---
 
-## 7. Security
+## 8. Security
 
-Scoped to what the brief asks for: no production deployment and no IAM buildout. I built it where it was cheap and visible, and named it honestly where it wasn't.
+Scoped to the brief: no production deployment, no IAM buildout. `README.md` carries the full control table; these four shape the architecture.
 
-**Built:**
+**The untrusted-text fence.** Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟧` with a per-run nonce before it reaches a prompt. You cannot sanitise a rejection reason — it *is* the data — so you mark its boundary and refuse instructions from inside it. The fenced-field list is derived from the projection table, so a newly projected field is fenced automatically rather than remembered.
 
-| Control | What it does |
-|---|---|
-| Untrusted-text fence | Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟧` with a per-run nonce before it reaches a prompt. The wrapped field list is *derived* from the projection table, so a newly projected field is fenced automatically |
-| Provenance check | A tool argument that appears only inside a previously-returned untrusted span is refused and journalled as `injection_attempt_recorded` — structural, and independent of whether the model obeys the prompt |
-| PHI redaction | Fail-closed on the raw-payload tool: if a PHI key is present but unparseable, the call is refused rather than answered. Output-only; the stored row is never altered |
-| Write boundary | 1 write tool of 9, `INSERT`-only, enforced by an AST test over the source |
-| Immutability | `RAISE(ABORT)` triggers on 8 tables (16 triggers) |
-| Audit | Append-only JSONL per run — every `llm_request`, `tool_call`, `tool_result` — flushed per line, secrets redacted before write. Human-gate decisions journalled separately with the proposed-vs-accepted diff |
-| Secrets | Env var or git-ignored `.env`; `__repr__` is overridden so a stack trace prints `api_key=<set>` |
-| Injection surface | All SQL parameterised; ordering whitelisted, with a test that `episode_id;DROP TABLE verdict` returns 422 |
+**A structural provenance check.** A tool argument appearing only inside previously-returned untrusted text is refused and journalled as `injection_attempt_recorded`. That holds whether or not the model obeys the prompt, which is the only kind of guarantee worth having here.
 
-**Not built, and named rather than hidden:** no authentication, no tenant isolation, no rate limiting, no request-size limit. In production I'd put OIDC at the edge, push tenant ID down as a mandatory predicate in the repository layer rather than trusting it at the handler, add per-tenant model-call budgets, and handle PHI under a BAA with minimum-necessary projections rather than redaction after the fact.
+**Least privilege as a shape.** One write tool of nine, `INSERT`-only, never in any model's tool list, enforced by an AST test. Eight tables carry `RAISE(ABORT)` immutability triggers. PHI redaction is fail-closed — unparseable means refused, not answered.
+
+**Audit is the run journal.** Append-only JSONL per run, flushed per line and secret-redacted before write, replayable through `GET /api/agent/runs/{run_id}`. Human-gate decisions are journalled separately with the proposed-versus-accepted diff, which makes override rate measurable.
+
+**Not built, and named rather than hidden:** no authentication, no tenant isolation, no rate limiting, no request-size limit, no retention policy. In production: OIDC at the edge, tenant id as a mandatory predicate in the repository layer rather than a filter trusted at the handler, per-tenant model-call budgets, and PHI under a BAA with minimum-necessary projections.
 
 **Three known gaps in what *is* built,** stated because a reviewer will find them: PHI redaction runs in the agent tool layer but not on the plain read API, so `/api/record/{raw_id}` returns a verbatim payload; `POST /api/regenerate` rebuilds the database with no auth; and the HTTP handler will self-mint a write token when the caller supplies none, which makes the token a draft-integrity check rather than a true authorization gate.
 
 ---
 
-## 8. What I'd build next
+## 9. What I'd build next
 
 Ordered by what a reviewer would miss most.
 
@@ -202,13 +231,4 @@ Ordered by what a reviewer would miss most.
 
 ## Appendix — where to look
 
-| | |
-|---|---|
-| Run it | `README.md` |
-| Present it | `DEMO.md` — click-by-click script with screenshots |
-| One claim end to end, deterministic layer | `docs/claim_walkthrough.md` |
-| One request end to end, agent layer | `docs/agent_walkthrough.md` |
-| The 372-pair state space and how it was derived | `docs/reconciliation_state_space.md`, `decision_tree/REPORT.md` |
-| Every decision with provenance | `docs/decision_ledger.md`, `docs/architecture_decisions.md` |
-| The deliberate failure case | `docs/eval_g3_veto_failure_case.md` |
-| Editable diagram sources | `docs/images/*.excalidraw` |
+`README.md` runs it and answers the six architecture areas in full. `DEMO.md` is the click-by-click script with screenshots. For a single path traced all the way through, `docs/claim_walkthrough.md` follows one claim through the deterministic layer and `docs/agent_walkthrough.md` follows one request through the agent layer. The state space and its derivation are in `docs/reconciliation_state_space.md` and `decision_tree/REPORT.md`; every decision with provenance is in `docs/decision_ledger.md` and `docs/architecture_decisions.md`; the deliberate failure case is `docs/eval_g3_veto_failure_case.md`; and the editable diagram sources sit beside their PNGs in `docs/images/`.
