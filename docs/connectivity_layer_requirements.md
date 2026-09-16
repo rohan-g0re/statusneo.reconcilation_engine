@@ -5,6 +5,8 @@
 **Scope:** connector-ready only. Production hardening is deliberately excluded.
 **Status:** requirements only — nothing in this document is built yet.
 
+> **Hard requirement, before anything else is built.** Beacon's and Verity's public documentation is indexed into `docs/vendor_evidence/` first, with verbatim excerpts, URLs and retrieval dates. Every subsequent artefact — mappings, mocks, the orchestrator's new identifiers, even prose in this repository — cites that index or is explicitly tagged `INVENTED`. Nothing about a vendor is written from memory or inference. See **Group V**, which gates every other group.
+
 ---
 
 ## 0. What this document is, and what it refuses to be
@@ -84,6 +86,42 @@ Doc 2, page 9, "Design implication" box, names four patterns the connector fabri
 ## 2. Requirements
 
 Each has an ID, a statement, an acceptance test, and its Doc 2 step. Nineteen requirements, all inside steps 1–5.
+
+### Group V — Vendor documentation index *(Doc 2 step 2 — **HARD PREREQUISITE, BUILT FIRST**)*
+
+**Nothing in Groups A through F may be written until Group V is complete for the vendor it touches.** This is a gate, not a guideline.
+
+The reason is the failure mode this whole build is exposed to. Beacon and Verity are real companies with real published behaviour, and the moment a field name, an auth flow, a status code or a cadence is written from memory or from plausible-sounding inference, the prototype stops being a connector built to a vendor contract and becomes a connector built to our imagination — while looking identical in every demo. Doc 2 makes the same point from the other direction when it warns not to equate "API-driven Beacon" with "public customer API." A mock that is wrong is worse than no mock, because it is confidently wrong.
+
+So the vendor documentation is **indexed into the repository as a first-class source**, before code, and every subsequent artefact cites it.
+
+**V1. Capture every public source into `docs/vendor_evidence/`.**
+One file per vendor (`beacon.md`, `verity.md`, and `craneware.md` if built), each entry carrying: a stable evidence id, the source URL, the retrieval date, the **verbatim excerpt**, and a one-line note on what it establishes. Paraphrase goes in the note; the excerpt is never rewritten.
+*Acceptance:* every claim made anywhere in this repository about Beacon or Verity behaviour resolves to an evidence id.
+
+**V2. Unreachable sources are recorded as unavailable, never reconstructed from memory.**
+Some vendor pages block automated retrieval. When a source cannot be fetched, the entry records the URL, the failure, and the date — and the fact it would have established is treated as **unknown**, exactly as Doc 2 treats "not publicly documented." A model's recollection of a vendor's API is not evidence.
+*Acceptance:* no evidence entry exists without either a verbatim excerpt or an explicit unavailability record.
+
+**V3. Three provenance tiers, marked on every field.**
+Every field in every mapping, mock and orchestrator change carries one of:
+- `SPEC` — taken from a cited vendor source
+- `STANDARD` — taken from a public standard (X12, NCPDP, ISO 20022, FHIR), cited to that standard
+- `INVENTED` — no public source exists; our own construction, with the reasoning recorded
+
+*Acceptance:* a field with no tier fails the build.
+
+**V4. Citation is enforced by test, not by discipline.**
+A machine-readable index (`docs/vendor_evidence/index.jsonl`) lists every evidence id. A test walks the vendor mappings, the mock modules and the orchestrator's new identifiers, and fails on any `SPEC`-tagged field whose evidence id is missing from the index, and on any untagged field.
+*Acceptance:* deleting one evidence entry turns the suite red.
+
+**V5. Doc 2 is evidence about vendors, and is cited as such.**
+Several facts we rely on — Beacon's two-token model, Read vs Read/Write permission, the published claim templates, Verity's Secure Data Exports and their cadence, the dataset names — come from `docs/Assignment_Doc_2.pdf` rather than from the vendor directly. That is a legitimate source and is indexed like any other, with page numbers, and marked as second-hand.
+*Acceptance:* every Doc 2-derived claim cites a page.
+
+> **Consequence for the build order:** Beacon's evidence file gates wave 2, Verity's and Craneware's gate wave 1, and the orchestrator changes in M1 are gated by whichever vendor's identifiers they mint. A vendor with no evidence file has no code.
+
+---
 
 ### Group A — Transport *(Doc 2 step 3)*
 
@@ -247,18 +285,25 @@ One generated document per source: transport implemented, auth implemented, sche
 
 ## 3. Build order
 
-Mirrors Doc 2's own wave structure, which sequences by proven-path confidence.
+Mirrors Doc 2's own wave structure, which sequences by proven-path confidence. **Documentation first, then data, then the system** — so every wave has something concrete to test against before the next one starts.
 
 | Wave | Contents | Rationale |
 |---|---|---|
-| **0 — Framework** | A1, A2, A3, A5, B1, B2 | Doc 2's Weeks 2–4 row: the common gateway, credentials, schema registry and idempotency **before** any vendor adapter. |
-| **0.5 — Mock data** | M1, M2, M4 | One orchestrator change to mint `beacon_id` and the Verity references, then the formatters. Must precede waves 1 and 2 — a connector with nothing to connect to cannot be tested. |
-| **1 — File pattern** | A4, D1, D2, D3, B3 | Verity and Craneware are the highest-confidence sources in the whole assessment. SFTP is boring and proven. |
-| **2 — API pattern** | M3, C1, C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. |
-| **3 — Mapping** | E1–E5 | Cheap once real sources exist to exercise them; expensive to retrofit after. |
-| **4 — Proof** | F1, F2, F3 | Golden claims, control totals, readiness report. This wave is what makes the build claimable. |
+| **0 — Evidence** | V1–V5 | **Hard gate.** Index Beacon's, Verity's and Craneware's public documentation into `docs/vendor_evidence/` with verbatim excerpts, URLs and retrieval dates, plus the citation-enforcing test. No vendor code exists before its evidence file does. |
+| **1 — Framework** | A1, A2, A3, A5, B1, B2 | Doc 2's Weeks 2–4 row: the common gateway, credentials, schema registry and idempotency **before** any vendor adapter. Testable on the existing local-directory path alone. |
+| **2 — Mock data** | M1, M2, M4 | One orchestrator change to mint `beacon_id` and the Verity references, then the formatters — every field tagged `SPEC`, `STANDARD` or `INVENTED` against wave 0. Must precede waves 3 and 4: a connector with nothing to connect to cannot be tested. |
+| **3 — File pattern** | A4, D1, D2, D3, B3 | Verity and Craneware are the highest-confidence sources in the whole assessment. SFTP is boring and proven. |
+| **4 — API pattern** | M3, C1, C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. |
+| **5 — Mapping** | E1–E5 | Cheap once real sources exist to exercise them; expensive to retrofit after. |
+| **6 — Proof** | F1, F2, F3 | Golden claims, control totals, readiness report. This wave is what makes the build claimable. |
 
-Wave 1 before wave 2 is Doc 2's own recommendation: prove the fabric on the easy transport first, so that when Beacon's harder auth model is being debugged, the framework underneath is already known-good.
+Wave 3 before wave 4 is Doc 2's own recommendation: prove the fabric on the easy transport first, so that when Beacon's harder auth model is being debugged, the framework underneath is already known-good.
+
+### The rule between waves
+
+**Each wave ends green before the next begins.** Every wave delivers something runnable and something asserted — wave 0 a test that fails when an evidence entry is deleted, wave 1 the existing suite passing through the new transport seam, wave 2 a mock file that parses, wave 3 a real SFTP fetch, wave 4 a submitted claim with a Beacon ID, wave 5 a resolving crosswalk key, wave 6 four traced claims. A wave that cannot be demonstrated on its own has been cut at the wrong boundary.
+
+This matters more than usual here because the build is against mocks. The only thing standing between a mock and a fiction is that each layer was checked when it was written, against evidence that was captured before it.
 
 ---
 
@@ -356,7 +401,24 @@ The one change inside the existing generator package is in `orchestrator.py`: it
 
 Everything else in `generators/` is untouched, including `contracts.py`, whose runtime blind-slice assertion is what makes the crosswalk a measurement instead of a claim. If a mock ever needs data that assertion forbids, the mock is wrong, not the assertion.
 
-### 4.5 Schema additions (`src/recon/db/schema.sql`)
+### 4.5 New directory: `docs/vendor_evidence/`
+
+Built first, before any code. Not documentation about the build — an input to it.
+
+```
+docs/vendor_evidence/
+  index.jsonl        # V4  machine-readable: evidence id, vendor, url, retrieved, status
+  beacon.md          # V1  verbatim excerpts, one entry per evidence id
+  verity.md          # V1
+  craneware.md       # V1  (only if wave 3 includes Craneware)
+  assignment_doc2.md # V5  second-hand claims lifted from Doc 2, cited by page
+```
+
+`index.jsonl` is machine-readable for the same reason `knowledge_graph.jsonl` is: a test has to walk it. The markdown files are for a human reading the excerpts; the JSONL is what makes V4 enforceable. Unlike the knowledge graph, this one is **hand-written and never generated**, so there is no builder that can silently destroy an edit.
+
+Each vendor mapping module then carries a provenance table beside it — the `MOCK_FIELDS.md` of M4 — listing every field as `SPEC` with an evidence id, `STANDARD` with a standard reference, or `INVENTED` with the reasoning. The test in V4 joins the two.
+
+### 4.6 Schema additions (`src/recon/db/schema.sql`)
 
 All additive. No existing column changes type; no existing table loses a constraint.
 
@@ -374,7 +436,7 @@ No `connector_fetch` table — per-fetch history is observability, which is step
 
 `control_total` should carry the same `RAISE(ABORT)` immutability treatment as `raw_record`, for the same reason: a control total you can edit is not a control total.
 
-### 4.6 Enum extensions (`src/recon/domain/enums.py`)
+### 4.7 Enum extensions (`src/recon/domain/enums.py`)
 
 Additive only. Existing members keep their string values, so no stored row changes meaning.
 
@@ -385,36 +447,37 @@ Additive only. Existing members keep their string values, so no stored row chang
 
 No `FetchOutcome` enum — that exists to populate a fetch-history table we are not building.
 
-### 4.7 `adapter_version` becomes per-source
+### 4.8 `adapter_version` becomes per-source
 
 `config.ADAPTER_VERSION = "1.0.0"` is a single global written onto every `normalized_record`. Once several vendors have independently versioned mappings, one global version is actively misleading — it claims all records were mapped by the same logic when they were not.
 
 Keep the constant as the *fabric* version, and add a per-source `mapping_version` on the registry row, stored alongside it on each normalized record. Low risk, high diagnostic value when one vendor changes a field.
 
-### 4.8 The "no ground truth" guarantee has to be restated
+### 4.9 The "no ground truth" guarantee has to be restated
 
 `load_feeds` currently takes a feeds directory and *cannot* reach `truth/` even by accident. That structural guarantee is load-bearing — it is why crosswalk accuracy is a measurement rather than a claim — and the refactor in 4.2 threatens it, because a `Transport` is a more general thing than a directory path.
 
 Preserve it explicitly: the `Transport` protocol must not expose arbitrary filesystem access, and a test must assert that no transport implementation can resolve a path under `truth/`. Restating the guarantee elsewhere is fine; losing it silently during a refactor is not.
 
-### 4.9 Configuration and credentials stay in separate namespaces
+### 4.10 Configuration and credentials stay in separate namespaces
 
 `config.py` allows path-only environment overrides (`RECON_DATA_DIR`, `RECON_DB_PATH`) — a deliberate restriction that keeps runs reproducible. Credentials break that rule by necessity, so keep the categories apart: paths stay in `config.py`, credentials go through `connectors/credentials.py`, and neither reads the other's namespace. The existing "same seed, same bytes" property then continues to hold for everything except the network, which was never reproducible anyway.
 
-### 4.10 Determinism
+### 4.11 Determinism
 
 Every random stream is seeded from a canonical path string hashed with `blake2b`, and `ingest_batch.loaded_at` is hardcoded to `1970-01-01T00:00:00Z` so no wall-clock leaks into the data. Real transport introduces a real clock.
 
 Contain it: wall-clock is permitted in `connector_checkpoint` and in logs, nowhere else. Nothing downstream may read a checkpoint timestamp, because `received_at` remains the only temporal field the pipeline honours, and the cursor is what makes replay equal reality.
 
-### 4.11 Testing implications
+### 4.12 Testing implications
 
 - The existing 585 tests must keep passing **unedited**. If any needs changing, the seam in 4.2 was cut in the wrong place.
 - New transport tests run against local servers — a loopback SFTP daemon and a loopback HTTP mock — so the suite's no-network, no-API-key guarantee holds.
 - The AST test forbidding SQL mutation outside the single write tool now also covers `connectors/`; the new package must not write to any table other than its own four.
-- Add a test asserting no transport can reach `truth/` (4.8).
+- Add a test asserting no transport can reach `truth/` (4.9).
+- Add the citation test (V4): walk every vendor mapping, mock module and orchestrator-minted identifier; fail on an untagged field, and on any `SPEC` tag whose evidence id is absent from `docs/vendor_evidence/index.jsonl`. This test is written in wave 0, before the code it will police — it should be red until the first evidence entry exists, and that is the correct starting state.
 
-### 4.12 Documentation to update
+### 4.13 Documentation to update
 
 - `DESIGN_NOTE.md` §3 — add the connector boundary as a fifth architectural boundary held by a test.
 - `DESIGN_NOTE.md` §9 — item 4 ("connector onboarding as config") moves from future work to built.
@@ -427,6 +490,7 @@ Contain it: wall-clock is permitted in `connector_checkpoint` and in logs, nowhe
 
 Connector-ready is reached when all of the following hold:
 
+0. **Every Beacon and Verity claim in this repository — in code, comments, mocks, mappings and documents — resolves to a cited evidence entry, or is tagged `INVENTED`.** Deleting one evidence entry turns the suite red.
 1. A source is added by writing a config row and a mapping module. No edit to `pipeline.py`.
 2. Verity and Craneware data arrives over real SFTP from a local server, checkpointed, with control totals reconciled.
 3. A claim submits to a local Beacon mock over authenticated HTTP, receives a Beacon ID, and that ID is a working crosswalk key.
