@@ -10,12 +10,12 @@ The assignment says that constraint three separate times, so I treated it as the
 
 A specialty pharmacy files a claim. Then money moves — or doesn't — down three independent pathways at once, each with its own counterparty, its own identifiers, and its own way of failing. A fourth feed, the bank, is the only proof cash actually landed.
 
-| Pathway | Pays for | The question | How it fails |
-|---|---|---|---|
-| Pharmacy benefit (PBM) | Drugs picked up at a counter | Was the expected reimbursement received and settled? | Underpayment, reversal, recoupment |
-| Medical benefit (payer) | Clinician-administered drugs | Was the claim paid, denied, or still pending? | Denial, partial payment, missing 835 |
-| 340B rebate (TPA) | Manufacturer rebate on the drug cost | Was the eligible rebate requested, approved, paid? | Rejected, delayed, unmatched |
-| Bank | Nothing — proof only | Can the financial event be tied to real cash? | Remittance with no cash, orphan deposit |
+| Pathway                 | Pays for                             | The question                                         | How it fails                            |
+| ----------------------- | ------------------------------------ | ---------------------------------------------------- | --------------------------------------- |
+| Pharmacy benefit (PBM)  | Drugs picked up at a counter         | Was the expected reimbursement received and settled? | Underpayment, reversal, recoupment      |
+| Medical benefit (payer) | Clinician-administered drugs         | Was the claim paid, denied, or still pending?        | Denial, partial payment, missing 835    |
+| 340B rebate (TPA)       | Manufacturer rebate on the drug cost | Was the eligible rebate requested, approved, paid?   | Rejected, delayed, unmatched            |
+| Bank                    | Nothing — proof only                | Can the financial event be tied to real cash?        | Remittance with no cash, orphan deposit |
 
 The operator's real question is not "what is the status." It's **what money should have arrived, what did, what's outstanding, and what needs a human.** Those are four different computations and only the last one is a judgement call. That split is the whole design.
 
@@ -31,11 +31,11 @@ A drug travels exactly one billing road — pills go to the PBM, infusions go to
 
 There is no shared claim ID in this world, and inventing one would delete the problem. Three identifier universes — NCPDP, X12, ACH — touch at three bridges, and each bridge breaks for a known reason:
 
-| Bridge | Joins on | Breaks when |
-|---|---|---|
-| PBM ↔ 340B | Natural key: NPI + Rx + NDC + fill date | TPA lags, or eligibility flips retroactively |
-| 837 ↔ 835 | `CLM01` round-tripped by the payer | Payer reprocesses and reassigns the ICN |
-| 835 ↔ bank | `TRN02` reassociation reference | ACH addenda stripped — **~1 deposit in 5** |
+| Bridge      | Joins on                                | Breaks when                                      |
+| ----------- | --------------------------------------- | ------------------------------------------------ |
+| PBM ↔ 340B | Natural key: NPI + Rx + NDC + fill date | TPA lags, or eligibility flips retroactively     |
+| 837 ↔ 835  | `CLM01` round-tripped by the payer    | Payer reprocesses and reassigns the ICN          |
+| 835 ↔ bank | `TRN02` reassociation reference       | ACH addenda stripped —**~1 deposit in 5** |
 
 A bank line carries no claim identifier at all, so it resolves in two hops: trace number finds the remittance, and the remittance holds the claim list. One deposit can cover dozens of claims.
 
@@ -43,14 +43,14 @@ A bank line carries no claim identifier at all, so it resolves in two hops: trac
 
 ## 2. Assumptions, stated up front
 
-| # | Assumption | Why | What it costs me |
-|---|---|---|---|
-| 1 | 340B modelled as **rebate** (cash back), not replenishment | The assignment's own words — "manufacturer payment", "unmatched rebate" — describe the rebate model. Replenishment has no bank leg, so there's nothing to reconcile | Replenishment dominates in the real world. This is out of scope, not a variant |
-| 2 | The insurer behind the PBM is not modelled | No source feed surfaces it as a distinct actor | PBM is treated as the reimbursing counterparty in full |
-| 3 | Cash-pay and silently-failed dispenses are excluded | Detecting them means anchoring on *dispenses*, not claims, which contradicts the claim-centric boundary the brief sets | Real revenue leakage this design cannot see |
-| 4 | **No SLA thresholds anywhere in verdict logic** | Deliberate. It makes "a verdict cannot change without a new inbound record" true by construction | Loses Medicare 30-day, CAQH ±3-day, 340B 45-day. Aging is a read-time sort key, never a verdict input |
-| 5 | Defect-injection rates are estimates | Only the ~20% addenda-loss rate is sourced | Rates are named config constants, tunable, not load-bearing |
-| 6 | Entity universe sized for *coverage*, not realism | 12 drugs, 2 pharmacies, 6 manufacturers — enough to generate every disqualification reason | Scale is demonstrated by config rows, not by universe size |
+| # | Assumption                                                      | Why                                                                                                                                                                   | What it costs me                                                                                       |
+| - | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 1 | 340B modelled as**rebate** (cash back), not replenishment | The assignment's own words — "manufacturer payment", "unmatched rebate" — describe the rebate model. Replenishment has no bank leg, so there's nothing to reconcile | Replenishment dominates in the real world. This is out of scope, not a variant                         |
+| 2 | The insurer behind the PBM is not modelled                      | No source feed surfaces it as a distinct actor                                                                                                                        | PBM is treated as the reimbursing counterparty in full                                                 |
+| 3 | Cash-pay and silently-failed dispenses are excluded             | Detecting them means anchoring on*dispenses*, not claims, which contradicts the claim-centric boundary the brief sets                                               | Real revenue leakage this design cannot see                                                            |
+| 4 | **No SLA thresholds anywhere in verdict logic**           | Deliberate. It makes "a verdict cannot change without a new inbound record" true by construction                                                                      | Loses Medicare 30-day, CAQH ±3-day, 340B 45-day. Aging is a read-time sort key, never a verdict input |
+| 5 | Defect-injection rates are estimates                            | Only the ~20% addenda-loss rate is sourced                                                                                                                            | Rates are named config constants, tunable, not load-bearing                                            |
+| 6 | Entity universe sized for*coverage*, not realism              | 12 drugs, 2 pharmacies, 6 manufacturers — enough to generate every disqualification reason                                                                           | Scale is demonstrated by config rows, not by universe size                                             |
 
 ---
 
@@ -76,14 +76,14 @@ A bank line carries no claim identifier at all, so it resolves in two hops: trac
 
 The Claim Financial Episode is the semantic anchor. **Records live outside it**, joined by pointer, because one 835 covers dozens of claims and cannot sit inside any one of them.
 
-| Layer | Tables | Append-only |
-|---|---|---|
-| Raw | `raw_record`, `ingest_batch`, `quarantined_record` | `raw_record` ✔ |
-| Canonical | `normalized_record` (14 record kinds) | ✔ |
-| Semantic | `episode`, `crosswalk_key` (8 key types) | `episode` ✔ |
-| Verdict | `verdict`, `verdict_reason`, `verdict_cross_track_flag`, `verdict_evidence` | all ✔ |
+| Layer      | Tables                                                                                      | Append-only                               |
+| ---------- | ------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Raw        | `raw_record`, `ingest_batch`, `quarantined_record`                                    | `raw_record` ✔                         |
+| Canonical  | `normalized_record` (14 record kinds)                                                     | ✔                                        |
+| Semantic   | `episode`, `crosswalk_key` (8 key types)                                                | `episode` ✔                            |
+| Verdict    | `verdict`, `verdict_reason`, `verdict_cross_track_flag`, `verdict_evidence`         | all ✔                                    |
 | Unresolved | `parked_record`, `parked_record_key`, `parked_record_resolution`, `cash_allocation` | resolutions appended, parks never deleted |
-| Agent | `work_item` | ✔ plus an idempotent unique index |
+| Agent      | `work_item`                                                                               | ✔ plus an idempotent unique index        |
 
 Three rules carry most of the weight.
 
@@ -144,15 +144,15 @@ Reproducibility is structural: every random stream is seeded from a canonical pa
 
 ![Engine pipeline](docs/images/engine-pipeline.png)
 
-| | |
-|---|---|
-| Reimbursement codes | **31** — 16 pharmacy (A-xx), 15 medical (B-xx) |
-| Rebate codes | **12** (C-xx, where C-00 means the track is absent) |
-| Reachable verdict pairs | **372**, all reachable, proved by exhaustive enumeration |
-| Cross-track compliance rules | **7** (X-1…X-7) |
-| Data-integrity exceptions | **7** (D-1…D-7) |
-| Total deterministic rules | **50** = 43 track + 7 cross-track |
-| Dispositions | **3** — `CLOSED`, `PENDING`, `EXCEPTION` |
+|                              |                                                                |
+| ---------------------------- | -------------------------------------------------------------- |
+| Reimbursement codes          | **31** — 16 pharmacy (A-xx), 15 medical (B-xx)          |
+| Rebate codes                 | **12** (C-xx, where C-00 means the track is absent)      |
+| Reachable verdict pairs      | **372**, all reachable, proved by exhaustive enumeration |
+| Cross-track compliance rules | **7** (X-1…X-7)                                         |
+| Data-integrity exceptions    | **7** (D-1…D-7)                                         |
+| Total deterministic rules    | **50** = 43 track + 7 cross-track                        |
+| Dispositions                 | **3** — `CLOSED`, `PENDING`, `EXCEPTION`          |
 
 Anything finer than three dispositions belongs in reason codes, which are a *list* rather than a value, because an episode can be `UNDERPAID` and `REBATE_NO_CASH` at the same time. Episode status is worst-wins across the two tracks, so the track that needs a human is the one that surfaces. Cross-track rules run last and may only add reasons or force an upgrade to `EXCEPTION` — never a downgrade.
 
@@ -168,11 +168,11 @@ Anything finer than three dispositions belongs in reason codes, which are a *lis
 
 Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatible client.
 
-| Role | Question | Shape |
-|---|---|---|
-| Exception Investigator | Why is this claim open? | Single pass, 8 read tools, ≤5 rounds / 12 calls |
-| Workflow Coordinator | What should a person do? | Propose ⇄ Evaluate loop |
-| Portfolio Analyst | What's the state of the book? | Single pass, aggregate tools |
+| Role                   | Question                      | Shape                                            |
+| ---------------------- | ----------------------------- | ------------------------------------------------ |
+| Exception Investigator | Why is this claim open?       | Single pass, 8 read tools, ≤5 rounds / 12 calls |
+| Workflow Coordinator   | What should a person do?      | Propose ⇄ Evaluate loop                         |
+| Portfolio Analyst      | What's the state of the book? | Single pass, aggregate tools                     |
 
 ![Agent loop](docs/images/agent-loop.png)
 
