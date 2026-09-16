@@ -325,7 +325,7 @@ The deterministic core is a library. FastAPI depends on it; it never depends on 
 
 ## I. Reconciliation decisions (2026-09-12)
 
-Rulings made when the four parallel implementation plans were reconciled. Full rationale per conflict lives in `plans/RECONCILIATION.md`; these are the binding outcomes.
+Rulings made when the four parallel implementation plans were reconciled. Full rationale per conflict lived in the implementation plans, which have since been removed as stale; these are the binding outcomes.
 
 ### 37. The medical 340B join is a natural key with no Rx number
 
@@ -365,7 +365,7 @@ Rulings made when the four parallel implementation plans were reconciled. Full r
 - **Division of labour.** The orchestrator owns all facts, all dates (`received_at` included), all per-claim/per-line amounts, and **batch composition** (which claim payments share a remittance, which PLB entries attach to which later batch, which dispenses share a rebate batch — the netting ledger is orchestrator machinery). Generators own native formatting and their own identifier namespaces (`authorization_number`, `clp07`, `ach_trace_number`, `record_id`), and they own their channel's **wire arithmetic**: each batch generator computes `BPR = Σ(CLP04) − Σ(PLB, signed)` from its slice's lines and totals a rebate batch from its dispense lines. Batch slices carry no precomputed net total; the total exists exactly once, where it is formatted.
 - **Money flows declare → realize → format.** Payer-side generators return `MoneyMovement[]` (amount = the net they computed, PLB already applied; `payer_reference` = trn02 or allocation_code). The **orchestrator's realizer** — the only place cash faults live — turns movements into `CashEvent[]` applying `MATCHED`/`PARTIAL`/`ABSENT`, injects D-3 orphans and true-reversal debits, and decides `trn02` presence (the ~20% drop) so ground truth can record link resolvability. `gen_bank` is a pure formatter of `CashEvent[]`: it never learns a deposit is missing because it never sees an expected figure.
 - **No file back-channels.** Generators communicate with the orchestrator only through return values (`Record[]`, `MoneyMovement[]`). The previously proposed `_remittance_manifest.jsonl` under `data/generated/_internal/` is disallowed; the orchestrator, which invoked the generators, already holds everything ground truth needs.
-- **Minting.** The orchestrator mints all cross-feed values (natural keys, `trn02`, `allocation_code`, `clm01`, `cardholder_id`) per the crossing matrix in `plans/G2-orchestrator.md`; a value may be handed to two generators only where it genuinely crosses those systems in reality (natural keys, TRN02, allocation_code).
+- **Minting.** The orchestrator mints all cross-feed values (natural keys, `trn02`, `allocation_code`, `clm01`, `cardholder_id`) per the orchestrator's crossing matrix; a value may be handed to two generators only where it genuinely crosses those systems in reality (natural keys, TRN02, allocation_code).
 
 ### 45. Entity universe sizes (closes the former open question)
 
@@ -421,4 +421,4 @@ Not yet decided, listed so they aren't silently assumed:
 - **Whether the mock workflow/Epic feed gets generated.** Leaning yes — it's the fifth box in the assignment's own architecture diagram, and it's the agent's only write target (Decision 31), so its absence would leave that write path untestable. If it lands it is an additive slice type in the Decision 44 contract; nothing else changes.
 - **Agent framework choice.** Leaning toward a plain tool-calling loop over an agent framework, because the agent logic here is simple (investigate, cite, sort, recommend, write one work item) and a framework would obscure exactly the tool boundary (Decision 29) the assignment is testing.
 
-*(Formerly open, now closed: entity universe sizes → Decision 45; defect injection rates → Decision 46; the drug price table → G1's reference/pricing unit, `plans/G1-foundation.md` U6.)*
+*(Formerly open, now closed: entity universe sizes → Decision 45; defect injection rates → Decision 46; the drug price table → `src/recon/reference/pricing.py`.)*

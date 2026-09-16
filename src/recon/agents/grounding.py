@@ -1,6 +1,6 @@
 """Turning the project knowledge graph into clauses an agent can be graded against.
 
-``CLAUDE.md`` ("THE GRAPH IS A RUNTIME DEPENDENCY") makes ``docs/knowledge_graph.jsonl``
+The project treats ``docs/knowledge_graph.jsonl`` as a RUNTIME DEPENDENCY, which makes it
 an input the agent layer reads at process start, not a document a person reads.  This
 module is where that dependency is paid: it loads the graph, validates it against every
 routing table below, and derives one immutable :class:`Clause` per observation.
@@ -84,7 +84,8 @@ class Clause:
 #
 # spec_grounding_rubric.md S:1.3 pins hashlib.sha256 for this, not blake2b.  That is a
 # deliberate departure from the seeding convention in src/recon/rng.py ("Seeding must
-# use blake2b, never builtin hash()", START_HERE.md S:8): blake2b there stands in for a
+# use blake2b, never builtin hash()", asserted by an AST test in tests/test_decisions.py):
+# blake2b there stands in for a
 # PRNG seed, which needs no cryptographic property at all, just reproducibility across
 # machines.  A clause id has a different job -- it is a content address a journal row
 # can cite forever -- and the spec's worked example (KG-DETERMINISTIC-BOUNDARY-3f2a91c7)
@@ -465,7 +466,7 @@ def _build_clauses(entities: dict[str, dict[str, Any]]) -> tuple[dict[str, tuple
 
 # ═══ module-level: run every guard once, at import ══════════════════════════════════
 #
-# This is the runtime dependency CLAUDE.md ("THE GRAPH IS A RUNTIME DEPENDENCY") and
+# This is the runtime dependency the graph-rebuild workflow and
 # spec_grounding_rubric.md S:1.6 describe: a broken graph must fail here, at process
 # start, not the first time an episode happens to route through the missing entity.
 

@@ -1,7 +1,7 @@
 """Tests for the grounding layer: ``docs/knowledge_graph.jsonl`` as a runtime dependency.
 
 Named and shaped after ``spec_grounding_rubric.md`` S:7's table (T1-T13).  The point of
-this file is exactly what ``CLAUDE.md`` says under "THE GRAPH IS A RUNTIME DEPENDENCY":
+this file is exactly what "THE GRAPH IS A RUNTIME DEPENDENCY" means in practice:
 a graph rebuild that drops an entity a routing table still references must fail a test
 here, at CI time, rather than silently break the agent layer the next time an episode
 happens to route through the missing entity.
@@ -447,7 +447,7 @@ def test_selection_drops_whole_entities_rather_than_truncating_mid_entity(monkey
 # -- and, worse, an `observations` value that was accidentally a *string* (rather
 # than a list of strings) raised nothing at all: `enumerate("a sentence")` iterates
 # per character, minting one garbage clause per letter with no error whatsoever. That
-# is silent corruption of a runtime dependency (CLAUDE.md, "THE GRAPH IS A RUNTIME
+# is silent corruption of a runtime dependency ("THE GRAPH IS A RUNTIME
 # DEPENDENCY"), worse than a crash. `load_graph` now validates entity row shape at
 # load time, before any of it reaches `_build_clauses`.
 

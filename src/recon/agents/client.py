@@ -141,7 +141,8 @@ def request_digest(
 
     ``blake2b``, never the builtin ``hash()`` -- ``hash()`` is salted per process by
     ``PYTHONHASHSEED`` and would not reproduce across the record and replay
-    processes (the same ban as ``recon.rng``; see START_HERE.md S8).
+    processes (the same ban as ``recon.rng``, which is enforced by an AST test in
+    ``tests/test_decisions.py``).
     """
     canonical = json.dumps(
         {"model": model, "messages": messages, "tools": tools, "tool_choice": tool_choice},

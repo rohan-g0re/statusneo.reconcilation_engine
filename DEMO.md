@@ -28,11 +28,11 @@ RECON_AGENT_INVESTIGATOR_MODEL=deepseek-v4-pro
 
 Measured from the journals in `data/agent_runs/` under exactly that config:
 
-| Role | Model | Wall clock | Outcome |
-|---|---|---|---|
-| Portfolio Analyst | `deepseek-chat` | 7s, 8s | fine |
-| Exception Investigator | `deepseek-v4-pro` | 154s, 176s | fine, but ~3 minutes |
-| Workflow Coordinator | `deepseek-v4-pro` | 614s, 836s | **both failed** — `evaluator_unavailable`, `llm_error` |
+| Role                   | Model               | Wall clock | Outcome                                                           |
+| ---------------------- | ------------------- | ---------- | ----------------------------------------------------------------- |
+| Portfolio Analyst      | `deepseek-chat`   | 7s, 8s     | fine                                                              |
+| Exception Investigator | `deepseek-v4-pro` | 154s, 176s | fine, but ~3 minutes                                              |
+| Workflow Coordinator   | `deepseek-v4-pro` | 614s, 836s | **both failed** — `evaluator_unavailable`, `llm_error` |
 
 A ten-minute Decide that then fails is not a demo. Those three lines were added on a day the provider's fast tier was down. **Delete them** — the code defaults to `deepseek-chat` for all three — then confirm the fast tier answers:
 
@@ -191,17 +191,17 @@ Ask it *"which reason code carries the most money in the exception queue right n
 
 Valid only for this seed. If you press "Rebuild", re-derive this table before demoing again.
 
-| Episode | Verdicts | Variance | Why you'd open it |
-|---|---|---|---|
-| **E-000006** | `B-10` / `C-08` | $84,240.00 | **The hero.** Claim denied, rebate paid anyway. Biggest money, cross-track compliance story, agent traces already recorded against it |
-| **E-000014** | `A-13` / `C-00` | $6,536.77 | The netted recoupment. `RECOUPMENT_UNTRACEABLE` + `INSUFFICIENT_DATA` |
-| **E-000040** | `A-05` / `C-09` | $18,943.91 + $5,391.00 | Both tracks dry. `CORRELATED_CASH_GAP` + `INSUFFICIENT_DATA`. Cross-track rule X-5 |
-| **E-000020** | `A-07` / `C-00` | $603.14 | Plain `UNDERPAID`. The simplest possible exception if you want an easy opener |
-| **E-000060** | `A-01` / `C-08` | $0.00 | Rejected at the counter, rebate paid anyway — `REBATE_ON_UNDISPENSED_CLAIM`. Pure compliance, no money |
-| **E-000027** | `A-17` / `C-00` | −$6,638.63 | `DUPLICATE_PAYMENT`. Negative variance means they paid twice |
-| **E-000018** | `A-04` / `C-14` | −$6,219.00 | `DUPLICATE_REBATE` on the rebate track |
-| **E-000037** | `B-13` / `C-07` | $19,125.00 | `APPEAL_LOST` + `DENIED` + `REBATE_REJECTED` + `TOTAL_LOSS`. Worst case, four reasons at once |
-| **E-000003** | `A-02` / `C-01` | $24,964.55 + $6,948.00 | A healthy PENDING, if they ask what "not an exception" looks like |
+| Episode            | Verdicts            | Variance               | Why you'd open it                                                                                                                           |
+| ------------------ | ------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **E-000006** | `B-10` / `C-08` | $84,240.00             | **The hero.** Claim denied, rebate paid anyway. Biggest money, cross-track compliance story, agent traces already recorded against it |
+| **E-000014** | `A-13` / `C-00` | $6,536.77              | The netted recoupment.`RECOUPMENT_UNTRACEABLE` + `INSUFFICIENT_DATA`                                                                    |
+| **E-000040** | `A-05` / `C-09` | $18,943.91 + $5,391.00 | Both tracks dry.`CORRELATED_CASH_GAP` + `INSUFFICIENT_DATA`. Cross-track rule X-5                                                       |
+| **E-000020** | `A-07` / `C-00` | $603.14                | Plain`UNDERPAID`. The simplest possible exception if you want an easy opener                                                              |
+| **E-000060** | `A-01` / `C-08` | $0.00                  | Rejected at the counter, rebate paid anyway —`REBATE_ON_UNDISPENSED_CLAIM`. Pure compliance, no money                                    |
+| **E-000027** | `A-17` / `C-00` | −$6,638.63            | `DUPLICATE_PAYMENT`. Negative variance means they paid twice                                                                              |
+| **E-000018** | `A-04` / `C-14` | −$6,219.00            | `DUPLICATE_REBATE` on the rebate track                                                                                                    |
+| **E-000037** | `B-13` / `C-07` | $19,125.00             | `APPEAL_LOST` + `DENIED` + `REBATE_REJECTED` + `TOTAL_LOSS`. Worst case, four reasons at once                                       |
+| **E-000003** | `A-02` / `C-01` | $24,964.55 + $6,948.00 | A healthy PENDING, if they ask what "not an exception" looks like                                                                           |
 
 ---
 
@@ -223,41 +223,41 @@ Ten scenarios graded on tool path and outcome shape, replaying committed fixture
 
 ## 7. Questions they will ask, and the one-line answer
 
-| Question | Answer |
-|---|---|
-| "How do you join these without a shared ID?" | You don't join — you bridge, three times, and each bridge has a named failure mode. Miss → park, re-check on every later arrival, never guess. Two candidates park rather than pick one |
-| "Why no identifier normalisation?" | Because the miss *is the product* — D-6 is a crosswalk-failure exception. A test asserts no `lstrip("0")` exists on the match path. Smoothing drift away is indistinguishable from getting it right, and only one of those is worth building |
-| "How do you stop the LLM hallucinating a number?" | Three independent layers: it has no arithmetic tool, `calculate_reconciliation()` is a call into Python; every figure in generated prose is matched in Python against tool results; and G3 is a veto that zeroes the whole score |
-| "Why no LangGraph or CrewAI?" | Four harnesses were checked, none ships an evaluator/scorer abstraction, so that loop is hand-written either way. A framework would add a dependency across exactly the tool boundary being graded. ~150 lines instead |
-| "Why two agents?" | Self-critique is measured to degrade results; external verification improves them. The evaluator gets a fresh trace and the proposer's reasoning field does not exist on the object it receives |
-| "Is the evaluator biased toward its own proposal?" | Potentially yes — proposer and evaluator currently share a model because a thinking-model evaluator averaged 466s per call against the proposer's 4.1s. Say so; it's item 6 on the what-I'd-build-next list. Don't claim independence you don't have |
-| "What about security?" | Built: untrusted-text fence with a per-run nonce, structural provenance check on tool arguments, fail-closed PHI redaction, append-only tables with `RAISE(ABORT)` triggers, parameterised SQL with a whitelisted `ORDER BY`. Not built and named honestly: no auth, no tenant isolation, no rate limiting — plus three known gaps in what *is* built |
-| "Does it scale?" | Event-driven, not scan-driven. An inbound document carries its own lookup keys and pulls only the episodes it touches, so a 200-day-old claim costs the same as this morning's. There's no time window to tune. A new TPA is an adapter plus config rows |
-| "What doesn't work?" | 5 of 1,354 full-profile episodes don't reproduce their intended verdict; `verdict_evidence` records what was *visible* at that cursor, not what *drove* the verdict; the SQLite file isn't byte-reproducible though the feed files are; no front-end tests |
+| Question                                           | Answer                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "How do you join these without a shared ID?"       | You don't join — you bridge, three times, and each bridge has a named failure mode. Miss → park, re-check on every later arrival, never guess. Two candidates park rather than pick one                                                                                                                                                                   |
+| "Why no identifier normalisation?"                 | Because the miss*is the product* — D-6 is a crosswalk-failure exception. A test asserts no `lstrip("0")` exists on the match path. Smoothing drift away is indistinguishable from getting it right, and only one of those is worth building                                                                                                            |
+| "How do you stop the LLM hallucinating a number?"  | Three independent layers: it has no arithmetic tool,`calculate_reconciliation()` is a call into Python; every figure in generated prose is matched in Python against tool results; and G3 is a veto that zeroes the whole score                                                                                                                           |
+| "Why no LangGraph or CrewAI?"                      | Four harnesses were checked, none ships an evaluator/scorer abstraction, so that loop is hand-written either way. A framework would add a dependency across exactly the tool boundary being graded. ~150 lines instead                                                                                                                                      |
+| "Why two agents?"                                  | Self-critique is measured to degrade results; external verification improves them. The evaluator gets a fresh trace and the proposer's reasoning field does not exist on the object it receives                                                                                                                                                             |
+| "Is the evaluator biased toward its own proposal?" | Potentially yes — proposer and evaluator currently share a model because a thinking-model evaluator averaged 466s per call against the proposer's 4.1s. Say so; it's item 6 on the what-I'd-build-next list. Don't claim independence you don't have                                                                                                       |
+| "What about security?"                             | Built: untrusted-text fence with a per-run nonce, structural provenance check on tool arguments, fail-closed PHI redaction, append-only tables with`RAISE(ABORT)` triggers, parameterised SQL with a whitelisted `ORDER BY`. Not built and named honestly: no auth, no tenant isolation, no rate limiting — plus three known gaps in what *is* built |
+| "Does it scale?"                                   | Event-driven, not scan-driven. An inbound document carries its own lookup keys and pulls only the episodes it touches, so a 200-day-old claim costs the same as this morning's. There's no time window to tune. A new TPA is an adapter plus config rows                                                                                                    |
+| "What doesn't work?"                               | 5 of 1,354 full-profile episodes don't reproduce their intended verdict;`verdict_evidence` records what was *visible* at that cursor, not what *drove* the verdict; the SQLite file isn't byte-reproducible though the feed files are; no front-end tests                                                                                             |
 
 ---
 
 ## 8. Every asset in this deck
 
-| Diagram | File | Use it for |
-|---|---|---|
-| System architecture | `docs/images/arch-system.png` | The four boundaries, and where the LLM is and isn't allowed |
-| Two-track model | `docs/images/domain-two-track.png` | One dispense, pharmacy XOR medical, 340B on top |
-| Crosswalk bridges | `docs/images/crosswalk-bridges.png` | Three identifier universes, three bridges, park on miss |
-| Engine pipeline | `docs/images/engine-pipeline.png` | Evidence → dimensions → verdict pair → disposition |
-| Agent loop | `docs/images/agent-loop.png` | Propose ⇄ evaluate, the wall, the four vetoes, four outcomes |
-| Human gate | `docs/images/human-gate.png` | The write boundary and the write token |
+| Diagram             | File                                  | Use it for                                                    |
+| ------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| System architecture | `docs/images/arch-system.png`       | The four boundaries, and where the LLM is and isn't allowed   |
+| Two-track model     | `docs/images/domain-two-track.png`  | One dispense, pharmacy XOR medical, 340B on top               |
+| Crosswalk bridges   | `docs/images/crosswalk-bridges.png` | Three identifier universes, three bridges, park on miss       |
+| Engine pipeline     | `docs/images/engine-pipeline.png`   | Evidence → dimensions → verdict pair → disposition         |
+| Agent loop          | `docs/images/agent-loop.png`        | Propose ⇄ evaluate, the wall, the four vetoes, four outcomes |
+| Human gate          | `docs/images/human-gate.png`        | The write boundary and the write token                        |
 
 All six have editable `.excalidraw` sources beside them in `docs/images/`.
 
-| Screenshot | File |
-|---|---|
-| Dashboard | `docs/images/01-dashboard.png` |
-| Exception queue | `docs/images/02-exception-queue.png` |
-| Feed exceptions | `docs/images/03-feed-exceptions.png` |
-| Episode dossier | `docs/images/04-episode-dossier.png` |
+| Screenshot                               | File                                     |
+| ---------------------------------------- | ---------------------------------------- |
+| Dashboard                                | `docs/images/01-dashboard.png`         |
+| Exception queue                          | `docs/images/02-exception-queue.png`   |
+| Feed exceptions                          | `docs/images/03-feed-exceptions.png`   |
+| Episode dossier                          | `docs/images/04-episode-dossier.png`   |
 | Detailed timeline with raw source record | `docs/images/05-timeline-detailed.png` |
-| Portfolio Analyst | `docs/images/06-portfolio-analyst.png` |
-| Agent Explain output | `docs/images/07-agent-explain.png` |
+| Portfolio Analyst                        | `docs/images/06-portfolio-analyst.png` |
+| Agent Explain output                     | `docs/images/07-agent-explain.png`     |
 
 Two shots are not captured: the streaming Decide log and the work-item form. Both are live moments and you'll be showing them in the app anyway — if you need a static fallback, the `agent-loop.png` and `human-gate.png` diagrams cover exactly those two beats.

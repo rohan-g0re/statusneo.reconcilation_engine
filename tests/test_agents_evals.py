@@ -352,7 +352,7 @@ def test_e000032_no_cash(demo_conn, demo_settings, tmp_path):
     repair existed, so it contains no response for the repair request and
     `ReplayClient` correctly reports a miss. That is the assertion: the harness is
     proven to attempt a repair rather than raise. Measured on 3 of 5 real recordings
-    (see docs/agent_layer_forced_tool_choice_fragility.md) -- kept visible rather than
+    (the provider's forced tool_choice is unreliable on thinking models) -- kept visible rather than
     smoothed over, because "the provider sometimes ignores a forced tool_choice" is
     exactly the kind of fact an eval set exists to preserve."""
     agent_settings = _agent_settings(tmp_path)

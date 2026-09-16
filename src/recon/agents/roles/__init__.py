@@ -4,7 +4,7 @@ Coordinator and the Portfolio Analyst.
 This docstring previously said the Portfolio Analyst was *not* built here, and pointed
 at `docs/agent_layer_readiness.md` for the scoping decision that excluded it. Both
 statements are now false and one of them never resolved: `analyst.py` sits in this
-package, and the readiness document is `docs/agent_layer_data_readiness.md`. The
+package. (The readiness document it cited has since been removed.) The
 exclusion was real when it was written -- the design's three-role sketch was scoped down
 to the two roles the analysis screen wires up (design S:8.6, "Explain" and "Decide next
 steps") -- and it went away when the third role shipped onto the dashboard.

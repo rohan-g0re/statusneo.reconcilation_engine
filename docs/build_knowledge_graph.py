@@ -1040,10 +1040,43 @@ def wave_12_explaining_the_build():
     R("A pipeline explanation breaks at the seam, not the hard part", "is the same family as", "State, do not narrate")
 
 
+# ===========================================================================
+# WAVE 13 -- trimming the repository for submission
+# ===========================================================================
+#
+# The repository was cut down to what a reviewer should read. Process artefacts
+# that documented HOW it was built were removed; everything the code reads at
+# runtime, and everything the design note cites, stayed.
+
+
+def wave_13_trimmed_for_submission():
+
+    OBS("START_HERE.md",
+        "REMOVED FROM THE REPOSITORY at submission. It was the handoff document for picking the project up to work on it, which is not what a reviewer is doing",
+        "Its content did not vanish: the domain primer is now docs/claim_walkthrough.md, the architecture summary is DESIGN_NOTE.md, and the reading order is the pointer block at the top of README.md",
+        "This entity is kept rather than deleted because the graph records what the project decided, and 'we removed the handoff document' is one of those decisions")
+
+    OBS("Build state",
+        "Trimmed for submission: plans/ (five stale implementation plans whose schema START_HERE.md itself recorded as wrong), docs/solutions/, four agent-layer process documents, START_HERE.md, and the agent tooling under .agents/ and .claude/ were removed or untracked",
+        "What stayed is what the code reads at runtime or the design note cites -- docs/knowledge_graph.jsonl above all, which grounding.py resolves by path at import",
+        "The submission surface is now README.md, DESIGN_NOTE.md, DEMO.md, two walkthroughs, the feed spec, the state space, the ledger, the glossary, and docs/images/")
+
+    E("Deleting a document orphans every pointer into it", "Trap",
+      "Removing eight documents left dangling citations in four source modules, two test modules and two design documents -- all of them comments, none of them caught by any test",
+      "The suite stayed green through the entire deletion, because a docstring naming a file that no longer exists is not a failure any runner checks",
+      "The check that works is mechanical: after deleting a file, grep every tracked file for its basename and fix what comes back",
+      "This is the same failure the previous wave recorded as 'A pointer that names a file nobody has', arriving from the opposite direction -- that one was a name that never existed, this one is a name that stopped existing",
+      "PROVENANCE: agent default, found by grepping after the deletion rather than by a test")
+
+    R("Deleting a document orphans every pointer into it", "is the same family as", "A pointer that names a file nobody has")
+    R("Deleting a document orphans every pointer into it", "threatens", "Build state")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
-         wave_11_agent_layer_built, wave_12_explaining_the_build]
+         wave_11_agent_layer_built, wave_12_explaining_the_build,
+         wave_13_trimmed_for_submission]
 
 
 def main():

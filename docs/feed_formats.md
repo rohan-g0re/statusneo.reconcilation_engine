@@ -4,7 +4,7 @@
 
 What each generator emits. Every feed is written as if by a source system that has never heard of the other three — its own identifiers, its own format, its own timing.
 
-Status: **All four feeds drafted. Reconciled 2026-09-12 — see `plans/RECONCILIATION.md` for the rulings applied (fictional entity names, medical 340B dispenses, 277CA acknowledgments, rebate request/decision events, PLB `RA` sign, settlement encoding, worked-example corrections).**
+Status: **All four feeds drafted. Reconciled 2026-09-12 — rulings applied (fictional entity names, medical 340B dispenses, 277CA acknowledgments, rebate request/decision events, PLB `RA` sign, settlement encoding, worked-example corrections).**
 
 ### Confidentiality: every entity name is fictional
 
