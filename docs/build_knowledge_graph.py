@@ -1072,11 +1072,164 @@ def wave_13_trimmed_for_submission():
     R("Deleting a document orphans every pointer into it", "threatens", "Build state")
 
 
+# ===========================================================================
+# WAVE 14 -- the connectivity assignment
+# ===========================================================================
+
+def wave_14_connectivity():
+
+    E("Connectivity assignment", "Artifact",
+      "docs/Assignment_Doc_2.pdf -- StatusNeo's Connectivity Assessment, dated 11 September 2026, delivered after the reconciliation build was already complete",
+      "Assesses Beacon plus five priority 340B TPAs -- Verity 340B, PharmaForce, Craneware, Macro Helix, Pillr/RxStrategies -- on whether a direct machine-to-machine interface is publicly proven",
+      "Its subject is the layer UPSTREAM of everything already built: how data is obtained, authorised and landed, not what is done with it afterwards",
+      "Introduces the Shields connector fabric, a six-step connector build method, a working-connection versus production-ready split, and a Week 1-3 Go/Amber/Red vendor-access gate inside a 26-week programme",
+      "Of the five TPAs, only Verity and Craneware publish a proven machine-to-machine path, and it is scheduled SFTP rather than an API. Macro Helix, PharmaForce and Pillr have no public specification for transport or payload",
+      "Answered by docs/connectivity_layer_requirements.md on the connectivity_layer branch")
+
+    E("Beacon", "DomainActor",
+      "The 340B rebate-model platform manufacturers use -- it sits IN FRONT OF the manufacturer, not in front of the covered entity",
+      "Receives already-qualified claims and returns an acknowledgement, a validation outcome, a Beacon ID, a rebate status and a payment reference",
+      "A claim a TPA calls qualified can still die at Beacon -- the two decisions are independent, which is exactly why they are separate systems of record",
+      "Authentication is a documented two-token model, an Access Token plus a separate Private Token, with the covered entity granting Read or Read/Write partner permission per 340B ID",
+      "The only source in the whole assessment with published pharmacy and medical claim field templates, which is why it is the only one a faithful adapter can be built for",
+      "Absent from the existing object model entirely: the 340B feed collapses TPA qualification and the manufacturer decision into one track, where Doc 2 splits them across two companies",
+      "CORRECTS the `340B TPA` and `Manufacturer` entities without editing them, because both are grounding material. A TPA works for the COVERED ENTITY -- the hospital hires and pays it, so it argues for the hospital's discount -- while Beacon works for the manufacturer. They sit on opposite sides of the table",
+      "Source-of-truth split: the TPA is authoritative for qualification, Beacon for rebate status, the bank for settled cash, and Shields for nothing except the consolidated financial picture",
+      "Cash flows FROM the manufacturer TO the covered entity's own account. The manufacturer's bank is never a system we connect to, because under the rebate model the hospital already paid full commercial price and is out of pocket until the rebate arrives")
+
+    E("Only Beacon is an outbound connector", "Learning",
+      "Every other source in the connector fabric is a pull -- the Direction row on each TPA page reads inbound to Shields, and only Beacon's reads outbound as well",
+      "Shields is a consumer and reconciler, not a router: the pharmacy system feeds the TPA directly through the vendor's own contracted flow, and Shields ingests a copy in parallel",
+      "Putting Shields in the path before the TPA would make it the operational system of record for qualification, which the source-of-truth table explicitly refuses",
+      "Submission ownership is a per-covered-entity decision -- mode A has Shields submitting directly, mode B has the TPA submitting. If both do it, the same claim is submitted twice")
+
+    E("Shields connector fabric", "Mechanism",
+      "One shared middleware strip every source passes through: API/SDK gateway, secure file and EDI, auth and secrets, schema registry, idempotency, retry/replay, monitoring",
+      "The argument inside that one box is build this once, not seven times -- adding a vendor becomes an adapter on an existing spine",
+      "Four production patterns must be supported: API/SDK, SFTP/structured files, healthcare EDI X12/NCPDP, and banking/ERP -- direct-source does not mean API-only",
+      "Scored against what exists: EDI/X12/NCPDP is finished, SFTP and banking are half-built and need only transport, API/SDK is the one genuinely new build",
+      "The vendors own the interfaces, Shields owns permission and identity, and the delivery team owns the fabric -- Shields itself has none of it today, which is the premise of the engagement")
+
+    E("Connector-ready", "Decision",
+      "A third scope level, named because neither of Doc 2's own two is reachable in a prototype: both working connection and production-ready begin with the word authorized",
+      "Beacon, Verity, Craneware, Macro Helix, PharmaForce and Pillr are contracted enterprise products gated behind a covered entity -- no self-service signup, no token obtainable from outside a customer relationship",
+      "Means: adapter built to the vendor's published contract, exercised against a mock reproducing that contract, wrapped in the real transport and auth machinery, switchable to a live endpoint by configuration alone",
+      "Defensible on the document's own terms -- it says the interface packs must be obtained through vendor support, and that no public specification exists for four of the six platforms",
+      "PROVENANCE: approved by the user")
+
+    E("Production hardening is out of scope", "Decision",
+      "Doc 2's six-step build method supplies the cut line for free: steps 1-5 produce a working connection, step 6 is the entire delta to production-ready",
+      "Dropped accordingly -- retry, backoff, replay orchestration, connector observability, alerting, DQ quarantine surfacing, secrets rotation, backfill, runbooks, lineage tooling, cutover, performance, and exhaustive edge-case reconciliation",
+      "Kept despite sounding like hardening: checkpointing, idempotency and schema validation are named in STEP 3, and control totals in STEP 5. Reading the steps rather than the adjective is what settles it",
+      "The first draft mixed the two levels and had to be cut back, from 30 requirements to 19; the user rejected it in one sentence",
+      "PROVENANCE: approved by the user, explicitly and forcefully")
+
+    E("The data layer is built first", "Decision",
+      "Before any transport, connector or fabric code: produce real Beacon- and Verity-format data on disk, covering every vendor record type and all four golden-claim archetypes",
+      "The reason is testability, not convenience -- a transport with nothing to move, a schema registry with nothing to validate and a mapping with nothing to map can only be checked by reading them",
+      "Must stand alone: the data generates, is inspected and is asserted on with src/recon/connectors/ absent from the repository entirely",
+      "Reordered mid-session. The first plan had the data layer third, behind the framework, and the user moved it to first",
+      "PROVENANCE: approved by the user, stated as a hard requirement")
+
+    E("Vendor claims are cited or tagged INVENTED", "Decision",
+      "Beacon's and Verity's public documentation is indexed into docs/vendor_evidence/ with verbatim excerpts, source URLs and retrieval dates, before any code that names one of their fields",
+      "Every field in every mapping, mock and orchestrator change carries one of three tags: SPEC for a cited vendor source, STANDARD for X12/NCPDP/ISO 20022/FHIR, INVENTED for our own construction with the reasoning recorded",
+      "A source that cannot be fetched is recorded as unavailable with the failure and the date, and the fact it would have established is treated as unknown -- a model's recollection of a vendor's API is not evidence",
+      "Enforced by a test rather than by discipline: it walks the mappings, mocks and minted identifiers against index.jsonl, and deleting one evidence entry turns the suite red",
+      "The failure it prevents: a mock that is wrong is worse than no mock, because it is confidently wrong and looks identical in every demo",
+      "PROVENANCE: approved by the user, stated as a hard requirement")
+
+    E("Mocks are formatters, not generators", "Decision",
+      "Every source is served by a local mock, so the design question is whether those mocks generate data or re-dress data the orchestrator already produced",
+      "They re-dress it. A new Beacon or Verity generator would have to be handed the answer to produce a consistent story, which deletes the runtime blind-slice assertion in contracts.py",
+      "That assertion is the only reason crosswalk accuracy is a measured 1,349/1,354 rather than a claim, so it outranks any convenience a generator would buy",
+      "beacon_id and the Verity accumulation and invoice references are minted by the orchestrator alongside trn02 and allocation_code -- a cross-feed identifier is a value two systems must agree on, so exactly one component may decide it",
+      "If a mock ever needs data the assertion forbids, the mock is wrong, not the assertion",
+      "PROVENANCE: agent default, accepted by the user")
+
+    E("load_feeds transport seam", "Plan",
+      "The single genuine refactor the connectivity layer needs. Everything else in it is additive",
+      "load_feeds currently takes a feeds directory and walks config.FEED_FILENAMES, a fixed six-tuple, against FEED_SOURCE_SYSTEMS, a dict literal keyed by filename -- both assume a local directory of exactly six known files",
+      "The change makes the source the parameter instead of the directory, with LocalDirectoryTransport preserving today's behaviour and the old signature kept as a thin wrapper so no call site moves",
+      "Everything below load_feeds is untouched: ingest, _process_raw_record, _attach, _park, _recheck_parked and the allocator all operate on raw_record rows, and a row is a row regardless of how it arrived",
+      "That is the payoff of the original event-driven decision -- a record arriving over SFTP or HTTP is indistinguishable downstream from one read off disk")
+
+    E("A refactor can quietly delete a guarantee", "Trap",
+      "load_feeds takes a feeds directory and therefore CANNOT reach truth/ even by accident. That structural inability is why crosswalk accuracy is scoreable rather than assumed",
+      "A Transport protocol is a more general thing than a directory path, so the seam that makes the connector layer possible is also the seam that could silently restore reach to the answer key",
+      "The guarantee has to be restated in the new place: no transport implementation may expose arbitrary filesystem access, asserted by a test",
+      "Restating a structural guarantee somewhere else is fine. Losing it during a refactor that nothing fails on is not",
+      "PROVENANCE: agent default, found while planning the seam rather than by a test")
+
+    E("An instruction file goes stale silently", "Trap",
+      "CLAUDE.md carried six dead pointers -- START_HERE.md, docs/solutions/ twice, docs/agent_layer_data_readiness.md and docs/remaining_work.md -- all removed by wave 13's trim",
+      "It is exactly the trap wave 13 recorded, arriving on the one file loaded into every session's context, where a wrong pointer costs a search before any work starts",
+      "It survived because CLAUDE.md is not tracked by git, so the grep-after-deletion check that fixed the source comments never ran over it",
+      "The check that works is the same one, widened: grep every file for a deleted basename, tracked or not",
+      "Discovered by running /complete_compound and finding phase 1 had nothing to refresh -- the command's own scope was the stale pointer",
+      "PROVENANCE: agent default")
+
+    E("An observation on a routed entity rewrites the prompt", "Trap",
+      "Adding three observations to `340B TPA` and two to `Manufacturer` turned the eval suite from 23 passed to 4 failed, with no code change anywhere",
+      "The chain: those two entities sit on eleven ReasonCode and CrossTrackFlag routes in grounding.py, routed entities become Clauses, the clause index is rendered into the proposer prompt as a string, and client.py's ReplayClient keys recorded traces on a digest of the whole request -- so a new observation is a new prompt is a replay miss",
+      "The existing guidance was half right. It says grep src/recon/agents/ before any UNOBS, because removing grounding material breaks resolution. Adding is the mirror hazard and was not covered: it does not break resolution, it silently invalidates every recorded eval trace",
+      "There is a second-order version with no error at all. MAX_CLAUSES caps the index at 72, so observations added to a routed entity can push OTHER entities' clauses out of the window -- changing what the model can cite, quietly, in a passing build",
+      "The fix that keeps both properties: put the correction on a NEW entity and wire a relation to the routed one. Traversal still reaches it, the clause index does not move, and the recorded traces stay valid",
+      "The rule, stated once: treat any entity named in ROUTES as frozen. Correct it from the outside",
+      "PROVENANCE: agent default, found by running the suite after a graph rebuild rather than by reasoning about it")
+
+    E("HRSA rebate model pilot", "DomainConcept",
+      "HRSA issued a notice on 31 July 2026 letting qualifying manufacturers deliver the 340B price as a retrospective REBATE instead of an upfront discount",
+      "Limited to drugs selected under Medicare price negotiation for initial price applicability years 2026 and 2027, to deduplicate the Maximum Fair Price against the 340B discount",
+      "Manufacturer rebate plans were due 24 August 2026, HRSA approvals by 24 September 2026, and approved plans take effect 1 January 2027",
+      "Vindicates the project's single riskiest assumption -- modelling 340B as a rebate rather than replenishment, which the design note flagged as out of scope rather than a variant",
+      "It is also the deadline behind the connectivity urgency: a connector that cannot submit to Beacon and reconcile a rebate by January is late",
+      "hrsa.gov returned 403 to automated retrieval; the dates are cited from Epstein Becker Green, Covington and HLC summaries instead")
+
+    R("Connectivity assignment", "introduces", "Shields connector fabric")
+    R("Connectivity assignment", "introduces", "Beacon")
+    R("Connectivity assignment", "is answered by", "Connector-ready")
+    R("Beacon", "fronts", "Manufacturer")
+    R("Beacon", "decides independently of", "340B TPA")
+    R("Only Beacon is an outbound connector", "constrains", "Shields connector fabric")
+    R("Only Beacon is an outbound connector", "describes", "Beacon")
+    R("Connector-ready", "is bounded by", "Production hardening is out of scope")
+    R("Connector-ready", "requires", "The data layer is built first")
+    R("The data layer is built first", "is gated by", "Vendor claims are cited or tagged INVENTED")
+    R("The data layer is built first", "is realised by", "Mocks are formatters, not generators")
+    R("Mocks are formatters, not generators", "protects", "Generator independence")
+    R("Mocks are formatters, not generators", "extends", "Orchestrator")
+    R("load_feeds transport seam", "realises", "Shields connector fabric")
+    R("load_feeds transport seam", "preserves", "Event-driven ingestion")
+    R("A refactor can quietly delete a guarantee", "threatens", "load_feeds transport seam")
+    R("A refactor can quietly delete a guarantee", "protects", "Measure the claim against the generated data")
+    R("An instruction file goes stale silently", "is the same family as", "Deleting a document orphans every pointer into it")
+    R("An observation on a routed entity rewrites the prompt", "constrains", "Knowledge graph is generated, never written to")
+    R("An observation on a routed entity rewrites the prompt", "threatens", "Test suite")
+    R("An observation on a routed entity rewrites the prompt", "is why", "Beacon")
+    R("Beacon", "corrects from outside", "340B TPA")
+    R("Beacon", "corrects from outside", "Manufacturer")
+    R("HRSA rebate model pilot", "validates", "Rebate model")
+    R("HRSA rebate model pilot", "motivates", "Connectivity assignment")
+
+    # The corrections to `340B TPA` and `Manufacturer` deliberately live on the new
+    # entities above rather than on those two.  Both are grounding material -- they sit
+    # on eleven ReasonCode and CrossTrackFlag routes -- and an observation added to a
+    # routed entity becomes a clause in the index the proposer prompt embeds.  See the
+    # trap entity below; the relations wired above are the traversal path a reader
+    # follows from either entity to the correction.
+
+    OBS("Build state",
+        "Branch connectivity_layer carries the response to the second assignment: docs/connectivity_layer_requirements.md, 24 requirements in seven groups across seven waves. Nothing built yet",
+        "decision_tree/NOTES.md was removed -- REPORT.md supersedes it, and its four findings are named entities in this graph",
+        "The GitHub remote moved to statusneo.reconcilation_engine, one fewer l. Pushes still succeed through a redirect, but the configured origin URL is stale")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
          wave_11_agent_layer_built, wave_12_explaining_the_build,
-         wave_13_trimmed_for_submission]
+         wave_13_trimmed_for_submission, wave_14_connectivity]
 
 
 def main():
