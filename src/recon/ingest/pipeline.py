@@ -50,7 +50,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Sequence
 
 from recon import config
-from recon.connectors.registry import _GENERATED_SOURCE_SYSTEMS
+from recon.connectors.registry import (
+    _GENERATED_SOURCE_SYSTEMS,
+    PayloadFormat,
+    UnknownPayloadFormatError,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - types only
     from recon.connectors.registry import Source
@@ -71,7 +75,64 @@ from recon.ingest.allocate import (
 )
 from recon.ingest.adapters import AdapterError, CanonicalRecord
 
-__all__ = ["IngestStats", "load_feeds", "load_from_sources", "ingest", "FEED_SOURCE_SYSTEMS"]
+__all__ = [
+    "IngestStats",
+    "UnknownSourceSystemError",
+    "load_feeds",
+    "load_from_sources",
+    "ingest",
+    "FEED_SOURCE_SYSTEMS",
+]
+
+
+class UnknownSourceSystemError(RuntimeError):
+    """A document declared a ``source_system`` no adapter is registered for.
+
+    Raised at **load** time by :func:`_read_rows`, and it stops the load rather than
+    quarantining the record.  That is the one place in this module where a bad record is not
+    held, so it is worth saying why — "quarantine it like everything else" is the obvious
+    answer and it is not available here.
+
+    * Quarantine has a precondition this path cannot meet.  ``quarantined_record.raw_id`` is
+      ``NOT NULL REFERENCES raw_record(raw_id)`` and no ``raw_record`` exists yet; the row is
+      being *built* here.  A quarantine row with nothing to point at is a reason code with no
+      evidence, which is the opposite of what the queue is for.
+    * Landing the raw row first is not available either.  ``raw_record.source_system`` carries
+      a SQL ``CHECK`` over the known systems, so the offending value cannot be stored even as
+      a record of what arrived.  The only way in would be to attribute it to something it did
+      not claim — precisely the confidently wrong attribution this path exists to prevent.
+    * And the defect is not record-shaped.  An export that misspells a system misspells it on
+      every line, so quarantining would emit one row per record for a single configuration
+      mistake and leave an ingest that looks partially successful.
+
+    Aborting is also safe to abort *into*, which is what makes it the right answer rather than
+    merely the available one: ``load_from_sources`` builds the whole row list before inserting
+    a batch, so the failing document lands nothing, documents already loaded keep their
+    batches, and loading is idempotent on the file hash — a re-run skips those and resumes
+    here.
+
+    A ``RuntimeError`` rather than a ``ValueError``, and that is load-bearing rather than
+    taste: :func:`_process_raw_record` catches ``(AdapterError, ValueError)`` and quarantines
+    what it catches, so a ``ValueError`` here would be one refactor away from being swallowed
+    into the quarantine this docstring argues cannot work.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source_id: str,
+        document: str,
+        line_no: int,
+        value: object,
+        permitted: tuple[str, ...],
+    ) -> None:
+        super().__init__(message)
+        self.source_id = source_id
+        self.document = document
+        self.line_no = line_no
+        self.value = value
+        self.permitted = permitted
 
 
 #: Which source system each feed file carries.  The 340B feed carries two, distinguished per
@@ -164,7 +225,15 @@ def load_from_sources(conn: sqlite3.Connection, sources: Sequence["Source"]) -> 
             if repository.batch_for_file_sha256(conn, file_sha) is not None:
                 continue
 
-            rows = list(_read_rows(source.payload_format, text, source.source_system))
+            rows = list(
+                _read_rows(
+                    source.payload_format,
+                    text,
+                    source.source_system,
+                    source_id=source.source_id,
+                    document=document.name,
+                )
+            )
             batch_id = repository.insert_ingest_batch(
                 conn,
                 source_file=document.name,
@@ -216,10 +285,50 @@ def load_feeds(conn: sqlite3.Connection, feeds_dir: Path) -> IngestStats:
     return load_from_sources(conn, registry.local_sources(Path(feeds_dir)))
 
 
+def _attributed_source_system(
+    declared: object,
+    default: SourceSystem,
+    *,
+    source_id: str,
+    document: str,
+    line_no: int,
+) -> SourceSystem:
+    """Which system a record belongs to: its own claim, else its source row's default.
+
+    One helper for every payload format, and that is the fix rather than a tidy-up.  The bug
+    this replaces existed *because* two branches answered the same question differently — the
+    delimited branch returned a hardcoded ``BANK`` and never consulted the source row at all,
+    so a new delimited vendor was silently attributed to the bank while its own batch header
+    said otherwise.  Nothing downstream can detect that; it simply reads as a bank record.
+    The next format added — fixed-width, XML — would have been free to get it wrong the same
+    way.
+    """
+    if not declared:
+        return default
+    try:
+        return SourceSystem(declared)
+    except ValueError:
+        permitted = tuple(member.value for member in SourceSystem)
+        raise UnknownSourceSystemError(
+            f"{document!r} line {line_no} (source {source_id!r}) declares source_system "
+            f"{declared!r}, which no adapter is registered for. Permitted values: "
+            f"{', '.join(permitted)}. Either the export names a system this build does not "
+            "model yet, or the source row points at the wrong feed.",
+            source_id=source_id,
+            document=document,
+            line_no=line_no,
+            value=declared,
+            permitted=permitted,
+        ) from None
+
+
 def _read_rows(
-    payload_format: str,
+    payload_format: "PayloadFormat | str",
     text: str,
     default_source_system: SourceSystem,
+    *,
+    source_id: str = "<unregistered>",
+    document: str = "<unnamed>",
 ) -> Iterable[tuple[str, str | None, str, SourceSystem]]:
     """Yield ``(payload_json, record_id, received_at, source_system)`` per source row.
 
@@ -228,34 +337,65 @@ def _read_rows(
     "the synthetic source record" is intact, which is what the assignment actually grades.
 
     **Both the format and the fallback attribution arrive as arguments rather than being
-    looked up by filename.**  They used to be derived from the name — the CSV branch compared
-    against ``BANK_TRANSACTIONS_FILE`` and the fallback indexed ``FEED_SOURCE_SYSTEMS`` — which
-    meant a source outside the original six raised ``KeyError`` on the first record that did
-    not declare its own ``source_system``.  Requirement A1's acceptance is that a seventh
-    source needs no edit to this module, and while those lookups were here that was simply
-    untrue, in a way only a new vendor would ever have discovered.
+    looked up by filename.**  They used to be derived from the name — the delimited branch
+    compared against ``BANK_TRANSACTIONS_FILE`` and the fallback indexed
+    ``FEED_SOURCE_SYSTEMS`` — which meant a source outside the original six raised
+    ``KeyError`` on the first record that did not declare its own ``source_system``.
+    Requirement A1's acceptance is that a seventh source needs no edit to this module, and
+    while those lookups were here that was simply untrue, in a way only a new vendor would
+    ever have discovered.
+
+    The format dispatch is **total**.  A format that is neither member raises rather than
+    falling through to the line-delimited reader, which is what the original free-string
+    version did — so a typo misread every record in the file and landed whatever survived,
+    with no signal at all.
     """
     import json
 
-    if payload_format == "bank_csv":
+    fmt = PayloadFormat(payload_format)
+
+    if fmt is PayloadFormat.BANK_CSV:
         reader = csv.DictReader(io.StringIO(text))
-        for row in reader:
+        for line_no, row in enumerate(reader, start=2):  # row 1 is the header
             cleaned = adapters.parse_bank_row(row)
             yield (
                 json.dumps(cleaned, separators=(",", ":"), sort_keys=True),
                 cleaned.get("ach_trace_number"),
                 cleaned["received_at"],
-                SourceSystem.BANK,
+                _attributed_source_system(
+                    cleaned.get("source_system"),
+                    default_source_system,
+                    source_id=source_id,
+                    document=document,
+                    line_no=line_no,
+                ),
             )
         return
 
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        payload = adapters.parse_jsonl_line(line)
-        declared = payload.get("source_system")
-        source_system = SourceSystem(declared) if declared else default_source_system
-        yield line, payload.get("record_id"), payload["received_at"], source_system
+    if fmt is PayloadFormat.JSONL:
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            payload = adapters.parse_jsonl_line(line)
+            yield (
+                line,
+                payload.get("record_id"),
+                payload["received_at"],
+                _attributed_source_system(
+                    payload.get("source_system"),
+                    default_source_system,
+                    source_id=source_id,
+                    document=document,
+                    line_no=line_no,
+                ),
+            )
+        return
+
+    raise UnknownPayloadFormatError(
+        f"{fmt!r} is a registered payload format with no reader in {__name__}. Adding a "
+        "PayloadFormat member without adding a branch here is the one way the original "
+        "silent misparse could come back."
+    )
 
 
 # ═══ the event loop ═════════════════════════════════════════════════════════

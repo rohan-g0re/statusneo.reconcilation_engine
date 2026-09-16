@@ -370,13 +370,58 @@ requirement ids closed, what was discovered, and the test delta.
 
 | Wave | Requirements | Status | Tests | Commit |
 |---|---|---|---|---|
-| 0 Evidence | V1–V5 | ✅ | +14 (599) | `b2e0d11` |
+| 0 Evidence | V1–V5 | ✅ *(see V1 caveat)* | +14 (599) | `b2e0d11` |
 | 1 Data layer | M1–M6, D2, D3, C1a | ✅ | +29 (628) | `dcafce5` |
-| 2 Framework | A1, A2, A3, A5, B1, B2 | ✅ | +28 (656) | `9bd79aa` |
-| 3 File pattern | A4, D1, B3 | 🔄 | — | — |
-| 4 API pattern | C1b, C2–C5 | ⬜ | — | — |
+| 2 Framework | A1, **A2 partial**, A3, A5†, B1, B2† | 🔄 | +28 (656) | `9bd79aa` |
+| 3 File pattern | A4, D1, B3, **A2 (SFTP)** | 🔄 | — | — |
+| 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ⬜ | — | — |
 | 5 Mapping | E1–E5 | ⬜ | — | — |
 | 6 Proof | F1–F3 | ⬜ | — | — |
 | 7 UI | goal item 5 | ⬜ | — | — |
 
 Baseline was **585**. All 585 still pass **unedited**.
+
+### Corrections after adversarial review
+
+Two Fable reviewers audited waves 0–2, each directing Opus workers. Fable B's verdict was
+**no regression** — all eight standing guarantees verified empirically, including
+cross-commit byte comparison of every feed hash on three profiles, 52 adversarial `truth/`
+path vectors, and an old-database rejection test. Fable A found real defects, and the
+status table above is corrected accordingly rather than left flattering.
+
+**A2 is one implementation of three, not complete.** `SftpTransport` and `HttpApiTransport`
+do not exist; `TransportKind` declares `SFTP` and `HTTP_API` with nothing behind them. A2's
+acceptance — *"the same suite passes with `SftpTransport` pointed at a local SFTP server"* —
+cannot be run yet. The protocol and `LocalDirectoryTransport` are done; A2 completes in
+waves 3 and 4.
+
+**† A5 meets its acceptance sentence only.** Measured with a counting transport: the second
+run ingests zero records and the database fingerprint is identical, but `fetch()` still runs
+and the bytes are still pulled. The requirement says "must not be re-downloaded **or**
+re-ingested". The download half needs A4's checkpoint, in wave 3.
+
+**† B2 covers 3 registered contracts, not every source.** The six live feeds and 12 of 15
+vendor record types have neither a schema nor a document. The shipped test checks only
+*registered* sources, so it cannot see the gap.
+
+**V1's universal claim does not hold.** The citation test verifies that *cited* ids resolve;
+it never verifies that a *claim* is cited, and it does not police code comments or
+docstrings. Concrete uncited vendor claims exist in `mocks/__init__.py`, `credentials.py`
+and the requirements document itself. The machine-enforced core is real; the universal
+statement in §5 item 0 is not, and no amount of the current test shape can make it true.
+
+**SPEC is over-claimed against the file's own rule.** `MOCK_FIELDS.md` states that a field is
+`SPEC` only when a retrievable source names *that field on that payload*. Six of the seven
+`SPEC` rows are envelope fields (`direction`, `template`) that Beacon never published. Under
+the stated rule the honest count is nearer 0–1 than 7. The values are verbatim from the
+cited excerpts and the thinness is disclosed, so this is inconsistent tiering rather than
+fabrication — but it is inconsistent, and `payload_kind` with identical provenance is tagged
+`INVENTED`.
+
+**Fixed immediately after the review:** three credential leak paths (key material echoed
+from `SSH_KEY_PATH`, `__getstate__` bypassing the pickle refusal, a `JSONDecodeError`
+retaining the whole secrets file via `__context__`); the `bank_csv` branch ignoring the
+source row's attribution; `payload_format` accepting any string; a bare `ValueError` on an
+unknown `source_system`; the diagram band re-render not being idempotent; a false "mirrors
+archetype exactly" docstring; and `ingest/__init__.py` promising a ground-truth scan that
+did not exist — the scan now exists and covers `ingest/`, `engine/` and `api/`.

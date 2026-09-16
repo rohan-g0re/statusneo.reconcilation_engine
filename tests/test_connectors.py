@@ -21,19 +21,24 @@ reviewing the diff — because the diff is exactly what a reviewer stops reading
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
 import json
+import pickle
 import re
 import sqlite3
+import traceback
 from pathlib import Path
 
 import pytest
 
 from recon import config
+from recon.config import load_settings
 from recon.connectors import credentials, registry, schema_registry, transport
 from recon.connectors.transport import Document, ForbiddenPathError, LocalDirectoryTransport
 from recon.db import connection, migrate, repository
 from recon.domain.enums import QuarantineReason, SourceSystem, TransportKind
+from recon.generators.orchestrator import generate, write_outputs
 from recon.ingest import pipeline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +60,20 @@ def db() -> sqlite3.Connection:
         yield handle
     finally:
         handle.close()
+
+
+@pytest.fixture(scope="session")
+def generated_feeds_dir(tmp_path_factory) -> Path:
+    """The six generated feeds, written once, under a temp directory.
+
+    Generated rather than read out of ``data/``, for the reason the root ``settings``
+    fixture gives: no test touches the committed dataset.  ``demo`` because this is the
+    real path's smallest honest instance — six files, both 340B source systems, a
+    delimited feed — and nothing here scales with record count.
+    """
+    settings = load_settings("demo", data_dir=tmp_path_factory.mktemp("connector_feeds"))
+    write_outputs(settings, generate(settings))
+    return settings.feeds_dir()
 
 
 # ═══ §4.9 — no transport may reach ground truth ═══
@@ -189,6 +208,195 @@ def test_a_seventh_source_needs_no_edit_to_the_pipeline(tmp_path, db):
     assert attributed["source_system"] == str(SourceSystem.BANK), (
         "a record that declares no source system must be attributed from its source row"
     )
+
+
+# ═══ A1 — attribution comes from the source row, in every payload format ═══
+
+
+def test_a_delimited_source_is_attributed_to_its_own_system_not_to_the_first_ones(tmp_path, db):
+    """The half-applied fix: one branch honoured the source row and the other did not.
+
+    ``_read_rows`` learned to take its fallback attribution as an argument, and only the
+    line-delimited branch started using it — the delimited branch went on naming a source
+    system outright.  So a delimited source outside the original six was attributed to a
+    system its own registry row does not mention.
+
+    That is the expensive kind of defect, because it does not fail.  It writes a clean raw
+    row, picks a different adapter on the way through, and reads identically to a correct
+    attribution in every report afterwards — while the batch header stored beside it says
+    something else entirely.
+    """
+    (tmp_path / "tpa_export.csv").write_text(
+        "record_id,amount,received_at\nT-1,10.00,2025-07-02T17:23:01Z\n",
+        encoding="utf-8",
+        newline="",
+    )
+    source = registry.Source(
+        source_id="tpa_delimited",
+        vendor="a-new-vendor",
+        transport_kind=TransportKind.LOCAL_DIRECTORY,
+        source_system=SourceSystem.TPA_PORTAL,
+        filenames=("tpa_export.csv",),
+        # Supplied as the string a config row would carry, not as the member, so this also
+        # pins that a valid string is accepted and stored as the member it names.
+        payload_format="bank_csv",
+        endpoint=str(tmp_path),
+        transport=LocalDirectoryTransport(tmp_path),
+    )
+    assert source.payload_format is registry.PayloadFormat.BANK_CSV
+
+    assert pipeline.load_from_sources(db, [source]).raw_records == 1
+    stored = db.execute(
+        "SELECT b.source_system AS declared, r.source_system AS attributed"
+        "  FROM raw_record r JOIN ingest_batch b ON b.batch_id = r.batch_id"
+    ).fetchone()
+    assert stored["declared"] == str(SourceSystem.TPA_PORTAL)
+    assert stored["attributed"] == str(SourceSystem.TPA_PORTAL), (
+        "a delimited source was attributed to a system its own registry row does not name"
+    )
+
+
+def test_the_six_generated_feeds_attribute_exactly_as_they_always_have(generated_feeds_dir, db):
+    """The guard on the other side of the same fix: the real path must not have moved.
+
+    Making the delimited branch consult the source row is exactly the sort of change that
+    silently re-attributes the feed it was already getting right, and a wrong attribution
+    here would be invisible — every count still balances, every report still renders.
+
+    Asserted as the set of *(document, attributed system)* pairs rather than as counts, so
+    it says the thing worth saying: five feeds attribute wholly from their registry row, and
+    the 340B feed alone splits in two because a manufacturer's payment batch and a TPA's
+    qualification decision genuinely come from different systems exported together.
+    """
+    stats = pipeline.load_feeds(db, generated_feeds_dir)
+    assert stats.raw_records > 0, "nothing loaded, so this would pass vacuously"
+
+    census = {
+        (row["source_file"], row["attributed"])
+        for row in db.execute(
+            "SELECT b.source_file AS source_file, r.source_system AS attributed"
+            "  FROM raw_record r JOIN ingest_batch b ON b.batch_id = r.batch_id"
+            " GROUP BY 1, 2"
+        ).fetchall()
+    }
+    assert census == {
+        (config.PBM_CLAIM_EVENTS_FILE, str(SourceSystem.PBM_ADJUDICATION)),
+        (config.PBM_REMITTANCE_835_FILE, str(SourceSystem.PBM_REMITTANCE)),
+        (config.MEDICAL_837_SUBMISSIONS_FILE, str(SourceSystem.CLEARINGHOUSE_837)),
+        (config.MEDICAL_835_REMITTANCE_FILE, str(SourceSystem.MEDICAL_REMITTANCE)),
+        (config.TPA_340B_EVENTS_FILE, str(SourceSystem.TPA_PORTAL)),
+        (config.TPA_340B_EVENTS_FILE, str(SourceSystem.MANUFACTURER_REBATE)),
+        (config.BANK_TRANSACTIONS_FILE, str(SourceSystem.BANK)),
+    }
+
+    bank_rows = db.execute(
+        "SELECT COUNT(*) FROM raw_record WHERE source_system = ?", (str(SourceSystem.BANK),)
+    ).fetchone()[0]
+    assert bank_rows > 0, "the delimited feed contributed nothing, so its branch went unchecked"
+
+
+def test_an_unknown_source_system_on_the_wire_names_the_source_document_and_value(tmp_path, db):
+    """``SourceSystem(declared)`` raised a bare ``ValueError`` naming nothing.
+
+    Not the source, not the document, not the line, not the value — and it aborted a
+    multi-source load from somewhere inside a generator.  ``connectors/`` says repeatedly
+    that a wrong input produces a named failure rather than a stack trace, and this was the
+    one place in the load path that did not.
+
+    It still aborts, and this test is also the case for that.  ``_read_rows`` runs before
+    any ``raw_record`` exists, so there is nothing for a quarantine row to reference and
+    ``raw_record.source_system`` could not store the offending value anyway — its ``CHECK``
+    lists the seven known systems.  So the abort is made clean and resumable instead: the
+    failing document lands nothing, the documents ahead of it in the same load keep their
+    batches, and the re-run skips those on the file hash and picks up where it stopped.
+    """
+    good = {"record_id": "G-1", "received_at": "2025-07-02T00:00:00Z"}
+    (tmp_path / "good.jsonl").write_text(
+        json.dumps(good) + "\n", encoding="utf-8", newline=""
+    )
+    # A real export's mistake, not a nonsense string: one letter missing from a system that
+    # does exist, which is precisely the value a reviewer's eye slides over.
+    bad = {
+        "record_id": "B-1",
+        "source_system": "PBM_ADJUDICATON",
+        "received_at": "2025-07-02T00:00:00Z",
+    }
+    bad_path = tmp_path / "eighth.jsonl"
+    # A leading blank line, so "line 2" can only have come from counting the document's own
+    # lines rather than the records yielded from it.
+    bad_path.write_text("\n" + json.dumps(bad) + "\n", encoding="utf-8", newline="")
+
+    sources = [
+        registry.Source(
+            source_id=source_id,
+            vendor="a-new-vendor",
+            transport_kind=TransportKind.LOCAL_DIRECTORY,
+            source_system=SourceSystem.BANK,
+            filenames=(f"{source_id}.jsonl",),
+            endpoint=str(tmp_path),
+            transport=LocalDirectoryTransport(tmp_path),
+        )
+        for source_id in ("good", "eighth")
+    ]
+
+    with pytest.raises(pipeline.UnknownSourceSystemError) as caught:
+        pipeline.load_from_sources(db, sources)
+
+    message = str(caught.value)
+    assert "eighth.jsonl" in message, "the message must name the document"
+    assert "'eighth'" in message, "the message must name the source"
+    assert "PBM_ADJUDICATON" in message, "the message must quote the offending value"
+    assert "line 2" in message, "the message must name the line"
+    assert str(SourceSystem.PBM_ADJUDICATION) in message, (
+        "the message must list the permitted values, or it says what is wrong without "
+        "saying what would be right"
+    )
+    assert (caught.value.source_id, caught.value.document) == ("eighth", "eighth.jsonl")
+    assert (caught.value.line_no, caught.value.value) == (2, "PBM_ADJUDICATON")
+    assert str(SourceSystem.PBM_ADJUDICATION) in caught.value.permitted
+
+    landed = dict(
+        db.execute(
+            "SELECT b.source_file, COUNT(*) FROM raw_record r"
+            "  JOIN ingest_batch b ON b.batch_id = r.batch_id GROUP BY 1"
+        ).fetchall()
+    )
+    assert landed == {"good.jsonl": 1}, (
+        "the failing document must land nothing, and the one ahead of it must keep its batch"
+    )
+
+    # Resumable, which is what makes aborting the right answer rather than merely the
+    # available one: correct the export, re-run, and only the corrected document loads.
+    bad["source_system"] = str(SourceSystem.PBM_ADJUDICATION)
+    bad_path.write_text(json.dumps(bad) + "\n", encoding="utf-8", newline="")
+    assert pipeline.load_from_sources(db, sources).raw_records == 1
+    assert db.execute("SELECT COUNT(*) FROM ingest_batch").fetchone()[0] == 2
+
+
+@pytest.mark.parametrize("declared", ["csv", "CSV", "JSONL", "ndjson", "bank-csv", "", None])
+def test_an_unknown_payload_format_is_refused_when_the_source_row_is_written(tmp_path, declared):
+    """``payload_format`` was a free string, and free was the whole problem.
+
+    The loader branched on one known value and treated everything else as line-delimited
+    JSON, so a typo did not raise — it misread the entire document and landed whatever
+    survived.  A registry row is configuration, and configuration that is wrong has to fail
+    where it is declared, not one transport and one parse later.
+    """
+    with pytest.raises(registry.UnknownPayloadFormatError) as caught:
+        registry.Source(
+            source_id="typo",
+            vendor="a-new-vendor",
+            transport_kind=TransportKind.LOCAL_DIRECTORY,
+            source_system=SourceSystem.BANK,
+            filenames=("x.csv",),
+            payload_format=declared,
+            endpoint=str(tmp_path),
+        )
+    message = str(caught.value)
+    assert "'typo'" in message, "the message must name the source whose row is wrong"
+    assert repr(declared) in message, "the message must quote the offending value"
+    for known in registry.PayloadFormat:
+        assert str(known) in message, "the message must list the permitted values"
 
 
 def test_a_disabled_source_is_not_fetched(tmp_path, db):
@@ -434,7 +642,8 @@ def test_no_credential_value_appears_in_any_tracked_file():
     what stops it quietly becoming a place to paste a token.
     """
     suspicious = re.compile(
-        r"(?i)(access_token|private_token|password|passphrase|secret)\s*[:=]\s*[\"'][^\"'{}$<>]{8,}[\"']"
+        r"(?i)(access_token|private_token|credential_ref|password|passphrase|secret)"
+        r"\s*[:=]\s*[\"'][^\"'{}$<>]{8,}[\"']"
     )
     offenders: list[str] = []
     for path in sorted(CONNECTORS_DIR.rglob("*.py")):
@@ -448,6 +657,237 @@ def test_the_registry_holds_credential_names_never_values(tmp_path):
     for source in registry.local_sources(tmp_path):
         assert source.credential_ref is None or isinstance(source.credential_ref, str)
         assert not isinstance(source.credential_ref, credentials.Secret)
+
+
+# ═══ A3 — the three routes the value found out anyway ═══
+#
+# Everything above this line tests the front door: a secret is asked to render itself and
+# refuses.  An adversarial pass over `credentials.py` found three ways the value left the
+# module without ever being asked — an error message that echoed what it was complaining
+# about, a serialisation hook Python supplies for free, and an exception chain that kept a
+# reference to the file it failed to parse.  None of them goes through `__repr__`, which
+# is why none of them was caught by the test above.
+
+#: A plausible pasted private key.  Shape matters, not content: multi-line, PEM-headed and
+#: far longer than a path, which is exactly what the module now describes instead of prints.
+_PASTED_KEY_MATERIAL = (
+    "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+    + "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gt\n" * 20
+    + "-----END OPENSSH PRIVATE KEY-----\n"
+)
+
+#: The value every test below asserts is absent from whatever it produced.
+_VALUE = "super-secret-value"
+
+
+def test_key_material_pasted_into_the_path_variable_is_named_but_never_echoed(tmp_path):
+    """The most available mistake in the whole module, and it used to answer with the key.
+
+    ``..._SSH_KEY`` takes inline material, ``..._SSH_KEY_PATH`` takes a path, and both
+    exist on purpose — which makes pasting the key into the path variable the confusion the
+    two-variable design itself invites.  The "does not exist" check then printed the path
+    it had looked for: correct for a path, and the entire private key in a log line for a
+    key.  A3's own *a wrong credential produces a clear named failure* case, answered by
+    leaking the credential.
+
+    The fix is a rule, not a filter: name the variable that was wrong, describe the value's
+    shape, never repeat its content.
+    """
+    with pytest.raises(credentials.MalformedCredentialError) as caught:
+        credentials.resolve_ssh_key(
+            "verity_sftp",
+            env={"RECON_CONNECTOR_VERITY_SFTP_SSH_KEY_PATH": _PASTED_KEY_MATERIAL},
+            secrets_file=tmp_path / "absent.json",
+        )
+    message = str(caught.value)
+
+    leaked = [line for line in _PASTED_KEY_MATERIAL.splitlines() if line and line in message]
+    assert not leaked, f"the error message repeats the key material: {leaked[0][:40]}..."
+    assert "RECON_CONNECTOR_VERITY_SFTP_SSH_KEY_PATH" in message, (
+        "a named failure must name the variable that was wrong"
+    )
+    assert "RECON_CONNECTOR_VERITY_SFTP_SSH_KEY" in message, (
+        "and the variable the value belonged in, or the operator repeats the mistake"
+    )
+    assert str(len(_PASTED_KEY_MATERIAL)) in message and "contains newlines" in message, (
+        "the shape is what makes the message actionable without the content"
+    )
+
+
+def test_key_material_cannot_reach_the_one_field_that_renders_in_the_clear():
+    """The same leak one layer down, where ``resolve`` is not standing in front of it.
+
+    ``SshKeyCredential.key_path`` is deliberately not a :class:`Secret` — a path is not a
+    credential and the generated repr should show it. That makes it the single field on the
+    object where pasted key material would print, so the refusal is stated on the type as
+    well as on the resolution path, and holds for an object built by hand.
+    """
+    with pytest.raises(credentials.MalformedCredentialError) as caught:
+        credentials.SshKeyCredential(
+            credential_ref="verity_sftp", key_path=Path(_PASTED_KEY_MATERIAL)
+        )
+    message = str(caught.value)
+    leaked = [line for line in _PASTED_KEY_MATERIAL.splitlines() if line and line in message]
+    assert not leaked, f"the error message repeats the key material: {leaked[0][:40]}..."
+    assert "key_path" in message and "key_material" in message
+
+
+def test_a_path_that_is_merely_wrong_is_still_printed_in_full(tmp_path):
+    """The other half of the rule, kept honest: a path is not a secret.
+
+    A check that refused to print anything would be safe and useless — *which file did it
+    look for* is the entire question when a key fails to load.  Only values shaped like key
+    material are described rather than shown.
+    """
+    with pytest.raises(credentials.MalformedCredentialError) as caught:
+        credentials.resolve_ssh_key(
+            "verity_sftp",
+            env={"RECON_CONNECTOR_VERITY_SFTP_SSH_KEY_PATH": str(tmp_path / "id_ed25519")},
+            secrets_file=tmp_path / "absent.json",
+        )
+    assert "id_ed25519" in str(caught.value)
+
+
+def test_a_secret_has_no_serialised_form_not_even_the_one_python_supplies_for_free():
+    """``__reduce__`` was blocked. Python 3.11 then added a ``__getstate__`` that was not.
+
+    On a slotted class the default returns ``(None, {"_value": <the value>})`` — the raw
+    credential, out of a method nobody wrote and no ``.reveal()`` grep would ever find.
+    Generic serialisers reach for it by name: ``json.dumps(obj, default=lambda o:
+    o.__getstate__())`` printed the token in full.  The lesson is that blocking *the* hook
+    is not the same as blocking the hooks, so all five are refused, and the refusal itself
+    must not quote what it is refusing.
+    """
+    secret = credentials.Secret(_VALUE)
+
+    with pytest.raises(credentials.CredentialError) as caught:
+        secret.__getstate__()
+    assert _VALUE not in str(caught.value), "the refusal quoted the thing it refused"
+
+    with pytest.raises(credentials.CredentialError):
+        json.dumps(secret, default=lambda o: o.__getstate__())
+
+    # The routes that were already closed stay closed.
+    for route in (
+        lambda: secret.__reduce__(),
+        lambda: secret.__reduce_ex__(pickle.HIGHEST_PROTOCOL),
+        lambda: pickle.dumps(secret),
+        lambda: copy.copy(secret),
+        lambda: copy.deepcopy(secret),
+    ):
+        with pytest.raises(credentials.CredentialError):
+            route()
+
+    assert secret.reveal() == _VALUE, "reveal() is still the one escape hatch"
+
+
+def test_a_malformed_secrets_file_cannot_be_reached_from_the_error_it_raises(tmp_path):
+    """``raise ... from None`` clears ``__cause__`` and leaves ``__context__`` untouched.
+
+    The context was the ``json.JSONDecodeError``, and its ``.doc`` attribute is the *whole
+    file* — every credential in it, including refs this caller never asked for.  Nothing
+    prints that by default, which is why it survived: it surfaces in an error reporter that
+    walks exception attributes, or in frame locals captured by one.  So the parse failure is
+    now carried out of the handler as a string and raised after the handler has exited,
+    leaving no exception in flight to chain to.
+    """
+    other_ref_token = "NOT-THE-REF-THE-CALLER-ASKED-FOR"
+    secrets_file = tmp_path / "connector_secrets.json"
+    secrets_file.write_text(
+        '{"beacon_partner": {"access_token": "' + other_ref_token + '",,}',
+        encoding="utf-8",
+        newline="",
+    )
+
+    with pytest.raises(credentials.MalformedCredentialError) as caught:
+        credentials.resolve_token_pair("some_other_source", env={}, secrets_file=secrets_file)
+
+    chain: list[BaseException] = []
+    current: BaseException | None = caught.value
+    while current is not None and not any(current is seen for seen in chain):
+        chain.append(current)
+        rendered = " ".join(
+            repr(part)
+            for part in (current, str(current), current.args, getattr(current, "doc", None))
+        )
+        assert other_ref_token not in rendered, (
+            f"{type(current).__name__} in the chain still carries the file's contents"
+        )
+        current = current.__cause__ or current.__context__
+    assert len(chain) == 1, f"the parser's exception is still chained: {chain}"
+
+    # And not in the frames either, which is where an error reporter looks next.
+    frame_tb = caught.value.__traceback__
+    while frame_tb is not None:
+        frame = frame_tb.tb_frame
+        if frame.f_globals.get("__name__") == credentials.__name__:
+            for name, value in frame.f_locals.items():
+                assert other_ref_token not in repr(value), (
+                    f"the file survives in {frame.f_code.co_name}() local {name!r}"
+                )
+        frame_tb = frame_tb.tb_next
+
+    assert str(secrets_file) in str(caught.value), "the failure still names the file to fix"
+
+
+def _inside_a_credential_dataclass(secret: credentials.Secret) -> str:
+    """The generated repr of the real credential type, which is how this leaks in practice."""
+    return repr(
+        credentials.TokenPairCredential(
+            credential_ref="beacon_partner", access_token=secret, private_token=secret
+        )
+    )
+
+
+def _inside_a_rendered_traceback(secret: credentials.Secret) -> str:
+    """A secret interpolated into an exception message, then printed by the default handler."""
+    try:
+        raise RuntimeError(f"authenticating with {secret}")
+    except RuntimeError:
+        return traceback.format_exc()
+
+
+#: Every route from an object to text that this codebase can plausibly take. Swept in one
+#: test rather than checked where each is used, because the leak is never at the call site
+#: someone remembered — it is the one they did not.
+_RENDER_PATHS = [
+    ("repr", repr),
+    ("str", str),
+    ("f-string", lambda s: f"{s}"),
+    ("f-string with a spec", lambda s: f"{s:>40}"),
+    ("f-string with !r", lambda s: f"{s!r}"),
+    ("f-string with !s", lambda s: f"{s!s}"),
+    ("percent-s", lambda s: "%s" % (s,)),
+    ("percent-r", lambda s: "%r" % (s,)),
+    ("str.format", lambda s: "{}".format(s)),  # noqa: UP032 -- the point is this path
+    ("str.format with !r", lambda s: "{!r}".format(s)),
+    ("format builtin", format),
+    ("format builtin with a spec", lambda s: format(s, ">40")),
+    ("json.dumps with default=str", lambda s: json.dumps({"token": s}, default=str)),
+    ("nested in a list", lambda s: repr([s])),
+    ("nested in a dict", lambda s: repr({"token": s})),
+    ("nested in a tuple", lambda s: repr((s,))),
+    ("nested two deep", lambda s: repr({"creds": [{"token": (s,)}]})),
+    ("a dataclass repr", _inside_a_credential_dataclass),
+    ("a rendered traceback", _inside_a_rendered_traceback),
+]
+
+
+@pytest.mark.parametrize("render", [pytest.param(fn, id=name) for name, fn in _RENDER_PATHS])
+def test_no_way_of_turning_an_object_into_text_reaches_the_value(render):
+    """One sweep over every render path, because the leak is always the unswept one.
+
+    Each of these bottoms out in ``__repr__``, ``__str__`` or ``__format__``, which is the
+    whole reason the redaction lives on the value instead of at the call sites: a new log
+    line, a new dataclass field or a new serialiser is covered the day it is written rather
+    than the day someone remembers to redact it.
+    """
+    rendered = render(credentials.Secret(_VALUE))
+    assert _VALUE not in rendered
+    assert credentials.REDACTED in rendered, (
+        "redacted is not enough — the placeholder must be visible, or a reader "
+        "cannot tell a hidden value from an absent one"
+    )
 
 
 # ═══ §4.12 — the connector package writes only its own tables ═══
@@ -502,3 +942,56 @@ def test_the_connector_package_never_reads_ground_truth():
             if name and ("ground_truth" in name or "truth_dir" in name):
                 offenders.append(f"{path.name}: {name}")
     assert not offenders, f"connector modules evaluating ground truth: {offenders}"
+
+
+def test_no_module_on_the_ingest_path_evaluates_ground_truth():
+    """``src/recon/ingest/__init__.py`` promises this scan exists. Now it does.
+
+    The promise was there before the scan was, which is the worst arrangement of the two:
+    an auditor reads "enforced by a test that scans this package", believes it, and stops
+    looking. ``tests/test_generators.py`` covers ``db/`` and ``crosswalk/`` only.
+
+    The stakes rose with requirement A2. The prohibition used to be structural — the loader
+    took a feeds directory and could not reach ``truth/`` even by accident — and a
+    ``Transport`` is a more general thing than a path. ``api/`` is included because it is the
+    only production caller of ``load_feeds``, and a guarantee that holds everywhere except at
+    its own entry point is not a guarantee.
+
+    Evaluated code only, for the same reason as every other scan in this repository: these
+    modules have to stay free to document the prohibition, and the cheap way to pass a raw
+    text scan is to delete the sentence rather than the dependency.
+    """
+    offenders: list[str] = []
+    for package in ("ingest", "engine", "api"):
+        for path in sorted((REPO_ROOT / "src" / "recon" / package).rglob("*.py")):
+            for name in _evaluated_names(path.read_text(encoding="utf-8")):
+                if "ground_truth" in name or "truth_dir" in name:
+                    offenders.append(f"{package}/{path.name}: {name}")
+    assert not offenders, (
+        f"modules on the ingest path evaluating ground truth: {offenders}; "
+        "the crosswalk stops being a measurement the moment one of them can read the answer"
+    )
+
+
+def _evaluated_names(source: str) -> set[str]:
+    """Identifiers and non-docstring string literals the module actually evaluates."""
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and getattr(node, "body", None)
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if id(node) not in docstrings:
+                names.add(node.value)
+    return names

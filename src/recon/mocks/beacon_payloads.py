@@ -181,11 +181,24 @@ def _manufacturer_decision(dispense: Dispense) -> tuple[str | None, str | None, 
 def _outcome(dispense: Dispense) -> tuple[str, str | None, str | None, str | None]:
     """``(outcome, reason_code, outcome_source, decided_at)`` — all four read, none decided.
 
-    The precedence mirrors :meth:`recon.mocks.source.Dispense.archetype` exactly: reversal
-    first, then either gate's rejection, then approval.  Mirroring it is the point — two
-    orderings over the same fields would let this module disagree with the archetype the
-    coverage report counts by, and the disagreement would show up as a Beacon response that
-    contradicts our own summary of the same claim.
+    The precedence follows :meth:`recon.mocks.source.Dispense.archetype` — reversal first,
+    then either gate's rejection, then approval — but the two **deliberately disagree on one
+    population**, and that is worth stating precisely because an earlier version of this
+    docstring claimed they matched "exactly" and they never did.
+
+    ``archetype`` reads the ``MANUFACTURER_DECISION`` event only.  This function also reads
+    the payment line, via :func:`_manufacturer_decision`, because ``orchestrator.py`` emits a
+    decision record **only** when the outcome is ``REJECTED``, or ``APPROVED`` with no
+    payment.  So every paid dispense has no decision event at all: reading the event alone
+    reports ``PENDING`` for a rebate the manufacturer demonstrably paid, which would
+    contradict the feed rather than replay it.
+
+    The measured consequence is that an approved-but-unpaid dispense is ``unmatched`` to the
+    coverage report and ``ACCEPTED`` here — 1 record of 30 on ``demo``, 98 of 1395 on
+    ``full``.  Both sides are field reads and neither adjudicates, so requirement M3 holds;
+    the two answers are to two different questions.  ``archetype`` asks *did the money
+    arrive*, which is what a coverage count needs.  This asks *what did the manufacturer
+    say*, which is what a Beacon validation outcome means.
     """
     reversal = dispense.event("DISPENSE_REVERSAL")
     if reversal is not None:

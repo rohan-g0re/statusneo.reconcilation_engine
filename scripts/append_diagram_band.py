@@ -29,9 +29,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
+
+#: Any element this script has ever created, whichever wave made it.
+_BAND_ID = re.compile(r"^c\d+_")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CANVAS = REPO_ROOT / "docs" / "images" / "project-overview.excalidraw"
@@ -194,19 +198,31 @@ def box(
 
 
 class Band:
-    """Accumulates elements for one wave and hands out monotonic fractional indices."""
+    """Accumulates elements for one wave and hands out stable fractional indices.
 
-    def __init__(self, prefix: str, base_index: str) -> None:
+    The index scheme is derived from the **wave number**, never from whatever happens to be
+    on the canvas at the time.  An earlier version took the base from the maximum index over
+    every kept element — which included *later* bands, so re-rendering band 1 while band 2
+    existed gave band 1 indices after band 2's, reshuffling z-order and rewriting thirty
+    lines for no visual change.  Worse, it never converged: each alternating re-run grew the
+    index strings again.
+
+    Keying on the wave makes ``--wave N`` a pure function of N and the band definition, which
+    is what "re-running a band is byte-identical" has to mean if it is worth claiming.
+    """
+
+    def __init__(self, prefix: str, wave: int, base_index: str) -> None:
         self.prefix = prefix
+        self._wave = wave
         self._base_index = base_index
         self._n = 0
         self.elements: list[dict[str, Any]] = []
 
     def next_index(self) -> str:
-        # Appending characters to the current maximum index keeps the new element sorting
-        # after every existing one, which is all Excalidraw's fractional index needs.
+        # Appending to the pre-band maximum keeps every band after the original canvas; the
+        # zero-padded wave number keeps the bands ordered among themselves.
         self._n += 1
-        return f"{self._base_index}{self._n:04d}"
+        return f"{self._base_index}z{self._wave:02d}{self._n:04d}"
 
     def text(self, name: str, **kwargs: Any) -> None:
         self.elements.append(text(f"{self.prefix}{name}", self.next_index(), **kwargs))
@@ -519,11 +535,25 @@ def apply_band(wave: int) -> None:
     kept = [el for el in elements if not str(el.get("id", "")).startswith(prefix)]
     replaced = len(elements) - len(kept)
 
-    base_index = max(str(el.get("index") or "") for el in kept)
-    band = Band(prefix, base_index)
+    # The base is the maximum index over the *original* canvas only — every element not
+    # created by any band.  Measuring against ``kept`` would fold later bands into the base
+    # and make this band's indices depend on which other bands happen to exist, which is
+    # exactly the non-determinism this scheme exists to remove.
+    original = [el for el in kept if not _BAND_ID.match(str(el.get("id", "")))]
+    base_index = max(str(el.get("index") or "") for el in original)
+
+    band = Band(prefix, wave, base_index)
     builder(band, BAND_ORIGIN_Y + wave * BAND_STEP_Y)
 
-    document["elements"] = kept + band.elements
+    # Sorted by index rather than simply appended.  Stable indices are only half of
+    # idempotency: appending puts a re-rendered band at the end of the array, so the file
+    # changed even when every element in it was identical.  Sorting makes the array order a
+    # pure function of the indices, which the scheme above already made a pure function of
+    # the wave.  ``index`` is Excalidraw's own ordering key, so this is the order it would
+    # have applied anyway.
+    document["elements"] = sorted(
+        kept + band.elements, key=lambda el: str(el.get("index") or "")
+    )
     CANVAS.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     verb = "replaced" if replaced else "appended"

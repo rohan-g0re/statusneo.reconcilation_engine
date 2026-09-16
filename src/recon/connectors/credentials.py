@@ -55,6 +55,15 @@ acceptance is "a wrong credential produces a clear named failure, not a stack tr
 a missing value says which ref, which environment variables were looked for, which file
 was consulted and what to do about it; a secrets file that is not JSON says so with the
 path rather than raising ``JSONDecodeError`` from inside ``json``.
+
+**And a named failure names the variable, never the value.**  The two halves of A3's
+acceptance pull against each other: the clearer the message, the more tempting it is to
+quote what was found.  Two places where that tipped over are fixed and commented in
+:func:`_build_ssh_key` and :func:`_load_entry` — an SSH key pasted into the *path*
+variable used to print in full, and a malformed secrets file used to stay reachable
+through the raised error's ``__context__``, carrying every credential in the file.  The
+rule both now follow: describe the value's shape, never its content, and make sure nothing
+the parser touched survives the raise.
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import NoReturn
 
 __all__ = [
     "ENV_PREFIX",
@@ -97,6 +107,21 @@ SECRETS_PATH_ENV_VAR = "RECON_CONNECTOR_SECRETS"
 #: What a secret renders as, everywhere.  One constant, so a test asserting "the value did
 #: not leak" and a human reading a log are looking at the same string.
 REDACTED = "<redacted>"
+
+#: Salt for :meth:`Secret.__hash__`, drawn once per process and never written down.
+#:
+#: Python already salts ``hash(str)``, but only until someone sets ``PYTHONHASHSEED`` —
+#: and this repository is one flag away from that, because "same seed, same bytes" is its
+#: whole discipline and six modules explain that they avoid ``hash()`` for exactly that
+#: reason.  Pinned, an unsalted ``hash(secret)`` becomes reproducible across processes and
+#: therefore an offline oracle: guess, hash, compare.  This makes the number a fact about
+#: this process rather than about the value.
+_HASH_SALT = os.urandom(32)
+
+#: Longer than this and a value offered as a filesystem path is not one.  ``PATH_MAX`` is
+#: 4096 on Linux and 260 on unextended Windows; a PEM private key body is 1700-3300
+#: characters.  512 sits between the two with room on both sides.
+_IMPLAUSIBLE_PATH_LENGTH = 512
 
 
 # --- failures --------------------------------------------------------------
@@ -163,9 +188,12 @@ class Secret:
     * a ``str`` comparison.  ``secret == "token"`` returns ``False`` rather than comparing,
       because a bare string on the other side of that ``==`` is usually a hardcoded
       credential someone is about to commit.
-    * pickling.  ``__reduce__`` raises, because a pickled secret is a secret written to
-      disk by something that never intended to write one — which also blocks ``copy`` and
-      ``deepcopy``, and an immutable wrapper has no need of either.
+    * every serialisation hook.  ``__reduce__``, ``__reduce_ex__``, ``__getstate__``,
+      ``__copy__`` and ``__deepcopy__`` all raise, because a pickled secret is a secret
+      written to disk by something that never intended to write one, and an immutable
+      wrapper has no need of a copy.  All five, not just the one that blocks ``pickle``:
+      see the refusal block below for the default ``__getstate__`` that used to hand the
+      raw value to any caller who asked.
 
     :meth:`reveal` is the single escape hatch, and it is named to be greppable: the
     complete list of places this process can emit a credential is the list of ``.reveal()``
@@ -216,13 +244,69 @@ class Secret:
         return hmac.compare_digest(self._value, other._value)
 
     def __hash__(self) -> int:
-        return hash((type(self).__name__, self._value))
+        # Salted with :data:`_HASH_SALT`, not taken over the value.  ``hash(secret)`` is
+        # otherwise a confirmation oracle: anything that emits a hash -- a dict key in a
+        # debug dump, a set repr, a cache key in a log -- lets a holder of that number test
+        # a guess against it.  The salt keeps the half of the contract that matters, equal
+        # Secrets hashing equal within one process, and drops the half that leaks.
+        return hash(hmac.digest(_HASH_SALT, self._value.encode("utf-8"), "sha256"))
 
-    def __reduce__(self):  # noqa: ANN204 -- it never returns
+    # --- no route out but reveal() -----------------------------------------
+    #
+    # Five hooks, one refusal.  Blocking ``__reduce__`` alone was not enough: Python 3.11
+    # gave every object a default ``__getstate__``, and on a slotted class it returns
+    # ``(None, {"_value": <the value>})`` -- the raw credential, out of a method nobody
+    # wrote and no ``.reveal()`` grep would ever find.  Generic serialisers reach for
+    # exactly that: ``json.dumps(obj, default=lambda o: o.__getstate__())`` printed the
+    # token in full.  So the refusal is now stated on every documented serialisation hook
+    # rather than on the one that happened to have been thought of.
+
+    def _refuse(self, verb: str) -> NoReturn:
         raise CredentialError(
-            "a Secret must not be pickled, copied or otherwise serialised; resolve it "
-            "again from the environment instead"
+            f"a Secret must not be {verb}: it has no form other than the one reveal() "
+            "returns. Resolve it again from the environment instead."
         )
+
+    def __reduce__(self) -> NoReturn:
+        self._refuse("pickled")
+
+    def __reduce_ex__(self, protocol: int) -> NoReturn:
+        del protocol
+        self._refuse("pickled")
+
+    def __getstate__(self) -> NoReturn:
+        self._refuse("serialised")
+
+    def __copy__(self) -> NoReturn:
+        self._refuse("copied")
+
+    def __deepcopy__(self, memo: dict) -> NoReturn:
+        del memo
+        self._refuse("copied")
+
+
+def _key_material_shape(value: str) -> str | None:
+    """Why a value offered as a key *path* is in fact key *material* — never the value.
+
+    The description is assembled from properties of the string, so a message can say what
+    is wrong without repeating a single character of it.  ``None`` means "this is plausibly
+    a path", and a path is not a secret: it is printed in full, because *which file did it
+    look for* is the whole question when a key does not load.
+
+    Lives next to :class:`Secret` rather than beside its callers because both of them are
+    the same rule — a path field is the one field in this module that renders in the clear,
+    so a value that is not a path must never reach one.
+    """
+    marks: list[str] = []
+    if "\n" in value or "\r" in value:
+        marks.append("contains newlines")
+    if value.lstrip().startswith("-----BEGIN"):
+        marks.append("starts with a PEM header")
+    if len(value) > _IMPLAUSIBLE_PATH_LENGTH:
+        marks.append("is longer than any filesystem path allows")
+    if not marks:
+        return None
+    return f"{len(value)} characters, " + ", ".join(marks)
 
 
 # --- the two shapes --------------------------------------------------------
@@ -272,6 +356,20 @@ class SshKeyCredential:
                 raise MalformedCredentialError(
                     f"{type(self).__name__}.{name} must be a Secret, got "
                     f"{type(value).__name__}; a bare string here would print in full"
+                )
+        # `key_path` is the one field on this object that is *meant* to render in the
+        # clear, which makes it the one field key material must never land in.  `resolve`
+        # already refuses it at the variable, with a message naming the right variable;
+        # this is the same refusal stated on the type, so it also holds for an object
+        # constructed directly -- by a test, a readiness report, or a later transport.
+        if self.key_path is not None:
+            shape = _key_material_shape(str(self.key_path))
+            if shape is not None:
+                raise MalformedCredentialError(
+                    f"{type(self).__name__}.key_path holds key material rather than a path "
+                    f"({shape}); it renders in full in this object's repr. Inline material "
+                    "goes in key_material, which is a Secret. The value is described here "
+                    "and not repeated -- requirement A3."
                 )
         if (self.key_path is None) == (self.key_material is None):
             raise MalformedCredentialError(
@@ -379,17 +477,31 @@ def _load_entry(path: Path, credential_ref: str) -> dict[str, str]:
     """
     if not path.exists():
         return {}
+
+    # The failure is carried out of the handler as a *string*, and the raise happens after
+    # the handler has exited.  `raise ... from None` -- what this used to do -- is not
+    # enough, and the gap is not obvious: `from None` clears `__cause__` and leaves
+    # `__context__` pointing at the original exception.  `json.JSONDecodeError.doc` is the
+    # *entire file text*, so the raised error still had a chain leading to every credential
+    # in the secrets file, including refs this caller never asked for.  Any error reporter
+    # that walks exception attributes -- Sentry, a `repr(vars(exc))` debug line, pytest's
+    # own chained-traceback rendering -- prints all of them.  Outside the handler there is
+    # no exception in flight, so `__context__` is None and there is no chain to walk.
+    failure: str | None = None
+    document: object = None
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        # `from None` deliberately: A3's acceptance is a clear named failure rather than a
-        # stack trace, and the parser's frames add nothing the line and column do not.
-        raise MalformedCredentialError(
+        # Position and reason only.  `exc.msg` is a fixed phrase ("Expecting value"), and
+        # `exc.doc` -- the file -- is deliberately never read.
+        failure = (
             f"{path} is not valid JSON (line {exc.lineno}, column {exc.colno}: {exc.msg}). "
             "The secrets file is a JSON object keyed by credential ref."
-        ) from None
+        )
     except OSError as exc:
-        raise MalformedCredentialError(f"{path} could not be read: {exc}") from None
+        failure = f"{path} could not be read: {exc}"
+    if failure is not None:
+        raise MalformedCredentialError(failure)
 
     if not isinstance(document, dict):
         raise MalformedCredentialError(
@@ -505,13 +617,31 @@ def _build_ssh_key(credential_ref: str, found: Mapping[str, str], path: Path) ->
 
     key_path: Path | None = None
     if has_path:
-        key_path = Path(found["ssh_key_path"]).expanduser()
+        offered = found["ssh_key_path"]
+        path_var = _env_var(credential_ref, "ssh_key_path")
+        # Checked *before* the value is treated as a path, because the "does not exist"
+        # message below prints the path it looked for -- and this module offers both
+        # `..._SSH_KEY` and `..._SSH_KEY_PATH`, which makes pasting the key into the path
+        # variable the single most available mistake an operator can make.  Printed, that
+        # message is the entire private key in a log line: A3's own "wrong credential"
+        # case, answered by leaking the credential.  So the value is described and never
+        # echoed.
+        shape = _key_material_shape(offered)
+        if shape is not None:
+            raise MalformedCredentialError(
+                f"credential {credential_ref!r}: {path_var} must name a key file, but the "
+                f"value looks like key material rather than a path ({shape}). Inline key "
+                f"material goes in {_env_var(credential_ref, 'ssh_key')}, which wraps it so "
+                f"it never renders. The value is described here and not repeated, because "
+                f"an error message is a log line -- requirement A3."
+            )
+        key_path = Path(offered).expanduser()
         if not key_path.exists():
             # Checked here rather than left to the SSH library, whose failure for a
             # missing key file is indistinguishable from its failure for a rejected one.
             raise MalformedCredentialError(
                 f"credential {credential_ref!r}: SSH key file {key_path} does not exist "
-                f"(from {_env_var(credential_ref, 'ssh_key_path')} or the secrets file)"
+                f"(from {path_var} or the secrets file)"
             )
 
     return SshKeyCredential(

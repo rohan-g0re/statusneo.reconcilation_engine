@@ -23,6 +23,7 @@ the per-source value says which vendor mapping actually ran.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import Sequence
 
@@ -31,11 +32,51 @@ from recon.connectors.transport import LocalDirectoryTransport, Transport
 from recon.domain.enums import SourceSystem, TransportKind
 
 __all__ = [
+    "PayloadFormat",
+    "UnknownPayloadFormatError",
     "Source",
     "local_sources",
     "enabled",
     "by_id",
 ]
+
+
+class PayloadFormat(StrEnum):
+    """How a document is split into records.  A closed vocabulary, checked at construction.
+
+    It used to be a free string, and a free string fails here in the worst available way.
+    The loader branched on one known value and treated **everything else** as line-delimited
+    JSON, so ``"csv"``, ``"CSV"`` or ``"ndjson"`` never raised — they misread the whole
+    document and landed whatever survived, with no signal at all.  A typo in a registry row
+    is a plausible mistake; a typo that silently changes how every record in a file is
+    parsed is not a failure mode anything downstream can detect.
+
+    Deliberately **not** in ``domain.enums``, where the other closed vocabularies live.
+    That module's own rule is that a vocabulary belongs to it when it appears on the wire
+    and is backed by a SQL ``CHECK``.  A payload format is neither: no column stores it and
+    no source ever sends it.  It is connector configuration, and the precedent for connector
+    configuration keeping its own enum next to the code that reads it is
+    :class:`~recon.connectors.credentials.CredentialKind`.
+
+    ``BANK_CSV`` names a *shape* — a header row, one record per line, an empty cell meaning
+    absent — and not the source that first had that shape.  Any delimited source declares
+    it, and each is attributed from its own registry row.
+    """
+
+    JSONL = "jsonl"
+    BANK_CSV = "bank_csv"
+
+
+class UnknownPayloadFormatError(ValueError):
+    """A source row declares a payload format nothing knows how to split.
+
+    A ``ValueError``, which is the opposite of the choice
+    :class:`~recon.connectors.credentials.CredentialError` makes and for the same reason
+    read in reverse.  A missing credential is a fact about the environment the process is
+    running in, so it is a ``RuntimeError``.  A bad ``payload_format`` is a fact about an
+    argument a caller passed — a registry row written wrong, in this repository, by us —
+    which is what ``ValueError`` is for.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,12 +102,37 @@ class Source:
     endpoint: str
     #: How to split a document into records.  A property of the source, never inferred from
     #: the filename — inferring it is what made the loader need editing for every new vendor.
-    payload_format: str = "jsonl"
+    payload_format: PayloadFormat = PayloadFormat.JSONL
     #: The *name* of a credential, resolved at fetch time. Never a secret.
     credential_ref: str | None = None
     mapping_version: str = config.ADAPTER_VERSION
     enabled: bool = True
     transport: Transport | None = field(default=None, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Refuse an unknown payload format at the moment the row is written.
+
+        Construction is the only place this check is worth anything.  Deferred to parse
+        time it would fire once per document, after a transport has already fetched, and
+        the old code did not even do that — it fell through to the line-delimited reader
+        and misread the file.  A registry row is configuration, and configuration that is
+        wrong should fail where it is declared.
+        """
+        try:
+            payload_format = PayloadFormat(self.payload_format)
+        except ValueError:
+            raise UnknownPayloadFormatError(
+                f"source {self.source_id!r} declares payload_format "
+                f"{self.payload_format!r}, which is not a format this fabric can split. "
+                f"Permitted values: {', '.join(PayloadFormat)}. Onboarding a source whose "
+                "documents are shaped differently is a new member here plus a branch in "
+                "the loader, never a new string in a source row."
+            ) from None
+        # Stored as the member rather than as whatever string it arrived as, so the
+        # annotation is true and an ``is`` comparison downstream means what it reads as.
+        # ``object.__setattr__`` because the row is frozen — which is also why this is the
+        # only place in the module that does it.
+        object.__setattr__(self, "payload_format", payload_format)
 
     def with_transport(self, transport: Transport) -> "Source":
         return replace(self, transport=transport)
@@ -102,7 +168,9 @@ def local_sources(feeds_dir: Path | str) -> tuple[Source, ...]:
                 source_system=_GENERATED_SOURCE_SYSTEMS[filename],
                 filenames=(filename,),
                 payload_format=(
-                    "bank_csv" if filename == config.BANK_TRANSACTIONS_FILE else "jsonl"
+                    PayloadFormat.BANK_CSV
+                    if filename == config.BANK_TRANSACTIONS_FILE
+                    else PayloadFormat.JSONL
                 ),
                 endpoint=str(feeds_dir),
                 transport=transport,
