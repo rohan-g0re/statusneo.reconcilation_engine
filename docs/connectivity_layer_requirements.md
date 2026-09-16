@@ -5,7 +5,11 @@
 **Scope:** connector-ready only. Production hardening is deliberately excluded.
 **Status:** requirements only — nothing in this document is built yet.
 
-> **Hard requirement, before anything else is built.** Beacon's and Verity's public documentation is indexed into `docs/vendor_evidence/` first, with verbatim excerpts, URLs and retrieval dates. Every subsequent artefact — mappings, mocks, the orchestrator's new identifiers, even prose in this repository — cites that index or is explicitly tagged `INVENTED`. Nothing about a vendor is written from memory or inference. See **Group V**, which gates every other group.
+> **Two hard requirements, in this order.**
+>
+> **First, build the complete data layer.** Before any transport, any connector, any fabric code: produce real Beacon- and Verity-format data on disk, covering every record type each vendor emits and all four golden-claim archetypes. Everything built afterwards is then tested against actual vendor-shaped data rather than against a placeholder, and every later wave has something concrete to assert on from its first line. See **Group M**.
+>
+> **Underneath that, and over everything else: nothing about a vendor is written from memory or inference.** Beacon's and Verity's public documentation is indexed into `docs/vendor_evidence/` with verbatim excerpts, URLs and retrieval dates, and every artefact — the data layer included, in fact the data layer *especially* — cites that index or is explicitly tagged `INVENTED`. This is a standing constraint on every wave, not a phase that finishes. See **Group V**.
 
 ---
 
@@ -119,7 +123,45 @@ A machine-readable index (`docs/vendor_evidence/index.jsonl`) lists every eviden
 Several facts we rely on — Beacon's two-token model, Read vs Read/Write permission, the published claim templates, Verity's Secure Data Exports and their cadence, the dataset names — come from `docs/Assignment_Doc_2.pdf` rather than from the vendor directly. That is a legitimate source and is indexed like any other, with page numbers, and marked as second-hand.
 *Acceptance:* every Doc 2-derived claim cites a page.
 
-> **Consequence for the build order:** Beacon's evidence file gates wave 2, Verity's and Craneware's gate wave 1, and the orchestrator changes in M1 are gated by whichever vendor's identifiers they mint. A vendor with no evidence file has no code.
+> **Consequence for the build order:** a vendor with no evidence file has no code — and that includes the data layer. Group M cannot format a Beacon payload before `beacon.md` exists, because the field names are the thing being cited.
+
+---
+
+### Group M — The data layer *(**BUILT FIRST**, before transport, connectors or fabric)*
+
+**This group ships before any other code.** Not because it is easy, but because everything built after it needs something real to be tested against. A transport with nothing to move, a schema registry with nothing to validate and a mapping with nothing to map are all untestable in the same way — they can only be checked by reading them. Once Beacon- and Verity-format data exists on disk, every later wave is asserted against actual vendor-shaped records from its first line of code.
+
+The deliverable is a **complete** data layer, not a sample: every record type each vendor emits, all four golden-claim archetypes (paid, rejected, reversed, unmatched), and both directions of Beacon's exchange. Partial data would push the interesting failures into the wave least able to absorb them.
+
+No vendor credential is obtainable, so every source is served by a local mock. The question that decides the design is whether those mocks are **new generators** or **formatters over existing generated data**. They must be formatters, and the reason is not convenience.
+
+The existing generator is built backwards from a proof. `decision_tree/` enumerates the state space, `sampling.py` picks leaves stratified over verdicts, and the orchestrator turns each leaf into facts — costing it into integer cents through the same pricing module the engine uses, computing every `received_at` from fixed lag windows, and **minting every cross-feed identifier** because those are the values two files must agree on. Each generator then receives a blind slice: `contracts.py` asserts at runtime that no generator can see an episode id, a verdict, or an expected amount, and that assertion is the only reason crosswalk accuracy is a measured 1,349/1,354 rather than a claim.
+
+A new Beacon or Verity generator would have to be handed the answer to produce a consistent story, which deletes that guarantee. A formatter re-dresses a slice that has already passed the blind-slice check, so the guarantee survives intact.
+
+**M1. Beacon and Verity identifiers are minted by the orchestrator, not by the mock.**
+Add `beacon_id` to the identifiers the orchestrator mints, in the same place and for the same reason as `trn02` and `allocation_code`: it is a value two independent systems must agree on, so exactly one component may decide it. Verity-side references (accumulation id, invoice number) get the same treatment.
+*Acceptance:* `contracts.py` still passes — no slice carries an episode id, a verdict or an expected amount — and a Beacon ID appearing in a mock response is the same string the orchestrator minted.
+
+**M2. Mocks are formatters over generated data, and hold no domain logic.**
+`verity_export.py`, `craneware_export.py` and `beacon_server.py` read what `src/recon/generators/` already produced and re-dress it into vendor shape. None may decide whether a claim qualified, what it was worth, or when it arrived.
+*Acceptance:* a test asserts the mock modules import no pricing, no decision-tree and no ground-truth module, and contain no arithmetic on money.
+
+**M3. The Beacon response side is a re-dressing, not a new decision.**
+Beacon's acknowledgement, validation outcome and rebate status are already present in the generated data as `TPA_MANUFACTURER_DECISION` records. The mock server replays them under Beacon's field names over HTTP; it does not adjudicate.
+*Acceptance:* every response the mock returns traces back to a generated record, and the set of outcomes it can produce equals the set already in the feed.
+
+**M4. Invented fields are declared, never inferred silently.**
+Verity and Craneware publish dataset and report *names* but no field dictionary, so some payload fields are honest inventions. Each is listed in a `MOCK_FIELDS.md` beside its mapping module, tagged `SPEC`, `STANDARD` or `INVENTED` per V3.
+*Acceptance:* every field in a vendor mapping appears in that file with a provenance tag; a test fails on an undeclared field.
+
+**M5. Coverage is complete, and completeness is measured.**
+Every record type each vendor emits gets a formatter — for Verity that is the documented dataset list (accumulations, contract-pharmacy claims backing, invoices, matches and split transactions, unmatched claims); for Beacon it is submission, acknowledgement, validation outcome, rebate status and payment reference. All four golden-claim archetypes appear in the output.
+*Acceptance:* a coverage report lists every vendor record type against the count produced, and a test fails on a type with zero rows.
+
+**M6. The data layer stands alone, before any transport exists.**
+Output is written to disk as files a human can open and a test can read directly — no SFTP, no HTTP, no connector required to inspect it. Transport arrives later and only changes how the bytes move.
+*Acceptance:* the full data layer generates, is inspected and is asserted on with `src/recon/connectors/` absent from the repository entirely.
 
 ---
 
@@ -167,32 +209,6 @@ Doc 2 flags this on every vendor page and it is the defect that destroys a build
 *Acceptance:* each vendor mapping declares its reversal representation explicitly, and a golden reversed claim produces exactly one net effect on the ledger — not zero, not two.
 
 > Exhaustive handling of every partial-payment and reversal permutation is **step 6**. Step 2 requires the semantics to be declared and one golden case to work.
-
----
-
-### Group M — Mock source data *(prerequisite for Groups C and D)*
-
-No vendor credential is obtainable, so every source in this build is served by a local mock. The question that decides the design is whether those mocks are **new generators** or **formatters over existing generated data**. They must be formatters, and the reason is not convenience.
-
-The existing generator is built backwards from a proof. `decision_tree/` enumerates the state space, `sampling.py` picks leaves stratified over verdicts, and the orchestrator turns each leaf into facts — costing it into integer cents through the same pricing module the engine uses, computing every `received_at` from fixed lag windows, and **minting every cross-feed identifier** because those are the values two files must agree on. Each generator then receives a blind slice: `contracts.py` asserts at runtime that no generator can see an episode id, a verdict, or an expected amount, and that assertion is the only reason crosswalk accuracy is a measured 1,349/1,354 rather than a claim.
-
-A new Beacon or Verity generator would have to be handed the answer to produce a consistent story, which deletes that guarantee. A formatter re-dresses a slice that has already been through the blind-slice check, so the guarantee survives intact.
-
-**M1. Beacon and Verity identifiers are minted by the orchestrator, not by the mock.**
-Add `beacon_id` to the identifiers the orchestrator mints, in the same place and for the same reason as `trn02` and `allocation_code`: it is a value that two independent systems must agree on, so exactly one component may decide it. Verity-side references (accumulation id, invoice number) get the same treatment.
-*Acceptance:* `contracts.py` still passes — no slice carries an episode id, a verdict or an expected amount — and a Beacon ID appearing in a mock response is the same string the orchestrator minted.
-
-**M2. Mocks are formatters over generated data, and hold no domain logic.**
-`verity_export.py`, `craneware_export.py` and `beacon_server.py` read what `src/recon/generators/` already produced and re-dress it into vendor shape. None of them may decide whether a claim qualified, what it was worth, or when it arrived.
-*Acceptance:* a test asserts the mock modules import no pricing, no decision-tree and no ground-truth module, and contain no arithmetic on money.
-
-**M3. The Beacon response side is a re-dressing, not a new decision.**
-Beacon's acknowledgement, validation outcome and rebate status are already present in the generated data as `TPA_MANUFACTURER_DECISION` records. The mock server replays them under Beacon's field names over HTTP; it does not adjudicate.
-*Acceptance:* every response the mock returns traces back to a generated record, and the set of outcomes it can produce equals the set already in the feed.
-
-**M4. Invented fields are declared, never inferred silently.**
-Verity and Craneware publish dataset and report *names* but no field dictionary, so some payload fields are honest inventions. Each is listed in a `MOCK_FIELDS.md` beside its mapping module, marked real-spec or invented.
-*Acceptance:* every field in a vendor mapping appears in that file with a provenance marker; a test fails on an undeclared field.
 
 ---
 
@@ -289,19 +305,21 @@ Mirrors Doc 2's own wave structure, which sequences by proven-path confidence. *
 
 | Wave | Contents | Rationale |
 |---|---|---|
-| **0 — Evidence** | V1–V5 | **Hard gate.** Index Beacon's, Verity's and Craneware's public documentation into `docs/vendor_evidence/` with verbatim excerpts, URLs and retrieval dates, plus the citation-enforcing test. No vendor code exists before its evidence file does. |
-| **1 — Framework** | A1, A2, A3, A5, B1, B2 | Doc 2's Weeks 2–4 row: the common gateway, credentials, schema registry and idempotency **before** any vendor adapter. Testable on the existing local-directory path alone. |
-| **2 — Mock data** | M1, M2, M4 | One orchestrator change to mint `beacon_id` and the Verity references, then the formatters — every field tagged `SPEC`, `STANDARD` or `INVENTED` against wave 0. Must precede waves 3 and 4: a connector with nothing to connect to cannot be tested. |
-| **3 — File pattern** | A4, D1, D2, D3, B3 | Verity and Craneware are the highest-confidence sources in the whole assessment. SFTP is boring and proven. |
-| **4 — API pattern** | M3, C1, C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. |
+| **0 — Evidence** | V1–V5 | **Hard gate.** Index Beacon's, Verity's and Craneware's public documentation into `docs/vendor_evidence/` with verbatim excerpts, URLs and retrieval dates, plus the citation-enforcing test. No vendor code exists before its evidence file does — the data layer included, since the field names it writes are the thing being cited. |
+| **1 — Data layer** | M1–M6, and with them D2, D3, C1 | **Built first.** The orchestrator change to mint `beacon_id` and the Verity references, then every formatter: Verity exports, Craneware exports, and the Beacon mock server's payloads. Output is files on disk, inspectable with no transport in existence. Every field tagged `SPEC`, `STANDARD` or `INVENTED` against wave 0. |
+| **2 — Framework** | A1, A2, A3, A5, B1, B2 | Doc 2's Weeks 2–4 row: the common gateway, credentials, schema registry and idempotency **before** any vendor adapter — and now testable against wave 1's real vendor-format files rather than a placeholder. |
+| **3 — File pattern** | A4, D1, B3 | Point SFTP at the Verity and Craneware files wave 1 already produced. Verity and Craneware are the highest-confidence sources in the whole assessment; SFTP is boring and proven. |
+| **4 — API pattern** | C2, C3, C4, C5 | Beacon. The only outbound path, and the only vendor with published field templates. The mock it talks to already exists from wave 1. |
 | **5 — Mapping** | E1–E5 | Cheap once real sources exist to exercise them; expensive to retrofit after. |
 | **6 — Proof** | F1, F2, F3 | Golden claims, control totals, readiness report. This wave is what makes the build claimable. |
 
-Wave 3 before wave 4 is Doc 2's own recommendation: prove the fabric on the easy transport first, so that when Beacon's harder auth model is being debugged, the framework underneath is already known-good.
+Two orderings carry an argument. **Data before framework** is the hard requirement: a transport with nothing to move and a schema registry with nothing to validate can only be checked by reading them, so building the data first means every later wave is asserted against real vendor-shaped records from its first line. **File pattern before API pattern** is Doc 2's own recommendation: prove the fabric on the easy transport first, so that when Beacon's harder auth model is being debugged, the framework underneath is already known-good.
+
+Note that D2, D3 and C1 are written in wave 1 even though they are listed under Groups D and C. They are the data layer's deliverables; waves 3 and 4 only connect to them.
 
 ### The rule between waves
 
-**Each wave ends green before the next begins.** Every wave delivers something runnable and something asserted — wave 0 a test that fails when an evidence entry is deleted, wave 1 the existing suite passing through the new transport seam, wave 2 a mock file that parses, wave 3 a real SFTP fetch, wave 4 a submitted claim with a Beacon ID, wave 5 a resolving crosswalk key, wave 6 four traced claims. A wave that cannot be demonstrated on its own has been cut at the wrong boundary.
+**Each wave ends green before the next begins.** Every wave delivers something runnable and something asserted — wave 0 a test that fails when an evidence entry is deleted, wave 1 vendor-format files on disk with a coverage report showing no record type at zero, wave 2 the existing suite passing through the new transport seam, wave 3 a real SFTP fetch of wave 1's files, wave 4 a submitted claim with a Beacon ID, wave 5 a resolving crosswalk key, wave 6 four traced claims. A wave that cannot be demonstrated on its own has been cut at the wrong boundary.
 
 This matters more than usual here because the build is against mocks. The only thing standing between a mock and a fiction is that each layer was checked when it was written, against evidence that was captured before it.
 
@@ -410,7 +428,7 @@ docs/vendor_evidence/
   index.jsonl        # V4  machine-readable: evidence id, vendor, url, retrieved, status
   beacon.md          # V1  verbatim excerpts, one entry per evidence id
   verity.md          # V1
-  craneware.md       # V1  (only if wave 3 includes Craneware)
+  craneware.md       # V1  (only if Craneware is in scope)
   assignment_doc2.md # V5  second-hand claims lifted from Doc 2, cited by page
 ```
 
@@ -491,6 +509,7 @@ Contain it: wall-clock is permitted in `connector_checkpoint` and in logs, nowhe
 Connector-ready is reached when all of the following hold:
 
 0. **Every Beacon and Verity claim in this repository — in code, comments, mocks, mappings and documents — resolves to a cited evidence entry, or is tagged `INVENTED`.** Deleting one evidence entry turns the suite red.
+0b. **The data layer stands alone.** Beacon- and Verity-format files generate to disk, cover every vendor record type and all four archetypes, and can be inspected and asserted on with `src/recon/connectors/` absent from the repository.
 1. A source is added by writing a config row and a mapping module. No edit to `pipeline.py`.
 2. Verity and Craneware data arrives over real SFTP from a local server, checkpointed, with control totals reconciled.
 3. A claim submits to a local Beacon mock over authenticated HTTP, receives a Beacon ID, and that ID is a working crosswalk key.
