@@ -202,13 +202,14 @@ def insert_ingest_batch(
     file_sha256: str,
     record_count: int,
     loaded_at: str,
+    source_id: str | None = None,
 ) -> int:
     system = _enum(SourceSystem, source_system, "source_system")
     with _atomic(conn) as tx:
         cursor = tx.execute(
-            "INSERT INTO ingest_batch(source_file, source_system, file_sha256, record_count, loaded_at)"
-            " VALUES (?,?,?,?,?)",
-            (source_file, str(system), file_sha256, record_count, loaded_at),
+            "INSERT INTO ingest_batch(source_file, source_system, file_sha256, record_count,"
+            " loaded_at, source_id) VALUES (?,?,?,?,?,?)",
+            (source_file, str(system), file_sha256, record_count, loaded_at, source_id),
         )
         return int(cursor.lastrowid)
 

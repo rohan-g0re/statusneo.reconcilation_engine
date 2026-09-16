@@ -47,9 +47,13 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence
 
 from recon import config
+from recon.connectors.registry import _GENERATED_SOURCE_SYSTEMS
+
+if TYPE_CHECKING:  # pragma: no cover - types only
+    from recon.connectors.registry import Source
 from recon.domain.enums import (
     AllocationBasis,
     KeyType,
@@ -67,21 +71,19 @@ from recon.ingest.allocate import (
 )
 from recon.ingest.adapters import AdapterError, CanonicalRecord
 
-__all__ = ["IngestStats", "load_feeds", "ingest", "FEED_SOURCE_SYSTEMS"]
+__all__ = ["IngestStats", "load_feeds", "load_from_sources", "ingest", "FEED_SOURCE_SYSTEMS"]
 
 
 #: Which source system each feed file carries.  The 340B feed carries two, distinguished per
 #: record by its own ``source_system`` field, because a manufacturer's payment batch and a
 #: TPA's qualification decision genuinely come from different systems that happen to be
 #: exported together.
-FEED_SOURCE_SYSTEMS: dict[str, SourceSystem] = {
-    config.PBM_CLAIM_EVENTS_FILE: SourceSystem.PBM_ADJUDICATION,
-    config.PBM_REMITTANCE_835_FILE: SourceSystem.PBM_REMITTANCE,
-    config.MEDICAL_837_SUBMISSIONS_FILE: SourceSystem.CLEARINGHOUSE_837,
-    config.MEDICAL_835_REMITTANCE_FILE: SourceSystem.MEDICAL_REMITTANCE,
-    config.TPA_340B_EVENTS_FILE: SourceSystem.TPA_PORTAL,
-    config.BANK_TRANSACTIONS_FILE: SourceSystem.BANK,
-}
+#:
+#: The table itself moved to ``connectors.registry`` when sources became data (requirement
+#: A1) — a module that must not name a vendor cannot own the vendor attribution table.  The
+#: name is re-exported here because it is part of this module's published surface and
+#: nothing is gained by breaking that; it is one definition seen from two places, not two.
+FEED_SOURCE_SYSTEMS: dict[str, SourceSystem] = _GENERATED_SOURCE_SYSTEMS
 
 
 #: Record kinds that are resolution targets rather than records seeking resolution.
@@ -132,70 +134,110 @@ class IngestStats:
 # ═══ loading: files to immutable raw rows ═══════════════════════════════════
 
 
-def load_feeds(conn: sqlite3.Connection, feeds_dir: Path) -> IngestStats:
-    """Read the six feed files into ``raw_record``, verbatim.
+def load_from_sources(conn: sqlite3.Connection, sources: Sequence["Source"]) -> IngestStats:
+    """Land every document a registered source currently offers into ``raw_record``.
 
-    ``feeds_dir`` is the only path this function accepts.  It cannot reach ``truth/`` even by
-    accident, which is the enforcement mechanism behind "the connector never reads ground
-    truth" — a comment would not be.
+    The transport-agnostic half of loading (requirement A2).  A source knows how to obtain
+    its documents; this function knows what to do with one once it exists, and the two no
+    longer have to agree about directories.
 
-    Re-loading a file already ingested is a no-op, detected by file hash.  That is the
-    file-level half of idempotency; the record-level half is in :func:`ingest`.
+    **Nothing below this function changed.**  :func:`ingest`, :func:`_process_raw_record`,
+    :func:`_attach`, :func:`_park`, :func:`_recheck_parked` and the allocator all operate on
+    ``raw_record`` rows, and a row is a row regardless of whether it arrived off a disk, over
+    SFTP or from an HTTP response.  That is the payoff of the original event-driven decision,
+    and it is why a connector layer is additive here rather than a rewrite.
+
+    Re-loading a document already ingested is a no-op, detected by file hash.  That is the
+    file-level half of idempotency; the record-level half is in :func:`ingest`.  The
+    fetch-level half — not re-downloading in the first place — belongs to the transport and
+    its checkpoint, which is requirement A4.
     """
+    from recon.connectors import registry
     from recon.db import repository
 
     stats = IngestStats()
-    feeds_dir = Path(feeds_dir)
 
-    for feed_file in config.FEED_FILENAMES:
-        path = feeds_dir / feed_file
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8")
-        file_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        if repository.batch_for_file_sha256(conn, file_sha) is not None:
-            continue
+    for source in registry.enabled(sources):
+        for document in source.require_transport().fetch(source):
+            text = document.text
+            file_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if repository.batch_for_file_sha256(conn, file_sha) is not None:
+                continue
 
-        rows = list(_read_rows(feed_file, text))
-        batch_id = repository.insert_ingest_batch(
-            conn,
-            source_file=feed_file,
-            source_system=str(FEED_SOURCE_SYSTEMS[feed_file]),
-            file_sha256=file_sha,
-            record_count=len(rows),
-            # Operational wall-clock, explicitly not a domain date.  It is the one place the
-            # system is allowed to know what time it is, and nothing downstream reads it.
-            loaded_at="1970-01-01T00:00:00Z",
-        )
-        raw_rows = []
-        for line_no, (payload_text, record_id, received_at, source_system) in enumerate(
-            rows, start=1
-        ):
-            raw_rows.append(
-                {
-                    "batch_id": batch_id,
-                    "source_system": str(source_system),
-                    "source_record_id": record_id,
-                    "source_line_no": line_no,
-                    "payload": payload_text,
-                    "payload_sha256": hashlib.sha256(payload_text.encode("utf-8")).hexdigest(),
-                    "received_at": received_at,
-                }
+            rows = list(_read_rows(source.payload_format, text, source.source_system))
+            batch_id = repository.insert_ingest_batch(
+                conn,
+                source_file=document.name,
+                source_system=str(source.source_system),
+                file_sha256=file_sha,
+                record_count=len(rows),
+                # Operational wall-clock, explicitly not a domain date.  It is the one place
+                # the system is allowed to know what time it is, and nothing downstream reads
+                # it.
+                loaded_at="1970-01-01T00:00:00Z",
+                source_id=source.source_id,
             )
-        stats.raw_records += repository.insert_raw_records(conn, raw_rows)
+            raw_rows = []
+            for line_no, (payload_text, record_id, received_at, source_system) in enumerate(
+                rows, start=1
+            ):
+                raw_rows.append(
+                    {
+                        "batch_id": batch_id,
+                        "source_system": str(source_system),
+                        "source_record_id": record_id,
+                        "source_line_no": line_no,
+                        "payload": payload_text,
+                        "payload_sha256": hashlib.sha256(
+                            payload_text.encode("utf-8")
+                        ).hexdigest(),
+                        "received_at": received_at,
+                    }
+                )
+            stats.raw_records += repository.insert_raw_records(conn, raw_rows)
     return stats
 
 
-def _read_rows(feed_file: str, text: str) -> Iterable[tuple[str, str | None, str, SourceSystem]]:
+def load_feeds(conn: sqlite3.Connection, feeds_dir: Path) -> IngestStats:
+    """Read the six generated feed files into ``raw_record``, verbatim.
+
+    Kept as a thin wrapper rather than edited away, so every existing call site — the API's
+    rebuild, ``tests/conftest_pipeline.py``, ``tests/scenario.py`` — is untouched.  The
+    acceptance bar for this refactor is that the existing suite passes **unedited**; if any
+    test had needed changing, the seam was cut in the wrong place.
+
+    ``feeds_dir`` is still the only path this function accepts, and
+    :class:`~recon.connectors.transport.LocalDirectoryTransport` still cannot reach
+    ``truth/`` — it refuses a root inside it, refuses a name that traverses, and refuses a
+    resolved path that lands there.  The guarantee moved; it did not weaken.
+    """
+    from recon.connectors import registry
+
+    return load_from_sources(conn, registry.local_sources(Path(feeds_dir)))
+
+
+def _read_rows(
+    payload_format: str,
+    text: str,
+    default_source_system: SourceSystem,
+) -> Iterable[tuple[str, str | None, str, SourceSystem]]:
     """Yield ``(payload_json, record_id, received_at, source_system)`` per source row.
 
     The bank CSV is re-encoded as JSON so the raw layer holds one uniform payload shape.  The
     original CSV row survives losslessly — every column becomes a key — so lineage back to
     "the synthetic source record" is intact, which is what the assignment actually grades.
+
+    **Both the format and the fallback attribution arrive as arguments rather than being
+    looked up by filename.**  They used to be derived from the name — the CSV branch compared
+    against ``BANK_TRANSACTIONS_FILE`` and the fallback indexed ``FEED_SOURCE_SYSTEMS`` — which
+    meant a source outside the original six raised ``KeyError`` on the first record that did
+    not declare its own ``source_system``.  Requirement A1's acceptance is that a seventh
+    source needs no edit to this module, and while those lookups were here that was simply
+    untrue, in a way only a new vendor would ever have discovered.
     """
     import json
 
-    if feed_file == config.BANK_TRANSACTIONS_FILE:
+    if payload_format == "bank_csv":
         reader = csv.DictReader(io.StringIO(text))
         for row in reader:
             cleaned = adapters.parse_bank_row(row)
@@ -212,9 +254,7 @@ def _read_rows(feed_file: str, text: str) -> Iterable[tuple[str, str | None, str
             continue
         payload = adapters.parse_jsonl_line(line)
         declared = payload.get("source_system")
-        source_system = (
-            SourceSystem(declared) if declared else FEED_SOURCE_SYSTEMS[feed_file]
-        )
+        source_system = SourceSystem(declared) if declared else default_source_system
         yield line, payload.get("record_id"), payload["received_at"], source_system
 
 
@@ -231,9 +271,15 @@ def ingest(conn: sqlite3.Connection, *, stats: IngestStats | None = None) -> Ing
     from recon.db import repository
 
     stats = stats or IngestStats()
+    # ``source_id`` comes along so the schema registry can be asked which contract applies
+    # (requirement B1).  Joined rather than denormalised onto ``raw_record``: the raw layer
+    # stores exactly what arrived, and which registered source fetched it is a fact about the
+    # batch, not about the record.
     rows = conn.execute(
-        "SELECT raw_id, source_system, source_record_id, payload, received_at"
-        "  FROM raw_record ORDER BY received_at, raw_id"
+        "SELECT r.raw_id, r.source_system, r.source_record_id, r.payload, r.received_at,"
+        "       b.source_id"
+        "  FROM raw_record r JOIN ingest_batch b ON b.batch_id = r.batch_id"
+        " ORDER BY r.received_at, r.raw_id"
     ).fetchall()
 
     for row in rows:
@@ -244,9 +290,36 @@ def ingest(conn: sqlite3.Connection, *, stats: IngestStats | None = None) -> Ing
 def _process_raw_record(conn: sqlite3.Connection, row: sqlite3.Row, stats: IngestStats) -> None:
     from recon.db import repository
 
+    from recon.connectors import schema_registry
+
     source_system = SourceSystem(row["source_system"])
     try:
         payload = adapters.parse_jsonl_line(row["payload"])
+
+        # B1: the shape is checked *before* adapt() is allowed to assign meaning to it.
+        # The ordering is the requirement's own wording and it is the whole point — adapting
+        # a wrongly-shaped record does not fail, it succeeds into the nearest-looking slot
+        # and produces a confidently wrong canonical record that nothing downstream can tell
+        # from a right one.
+        #
+        # A source with no registered contract validates vacuously, which is what keeps the
+        # six generated feeds loading exactly as they always have.  ``check`` never raises:
+        # a vendor re-cutting its export and declaring a version we do not hold is a record
+        # to quarantine, not a crash.
+        schema_detail = schema_registry.check(
+            row["source_id"], payload, version=payload.get("schema_version")
+        )
+        if schema_detail is not None:
+            repository.quarantine_record(
+                conn,
+                raw_id=row["raw_id"],
+                received_at=row["received_at"],
+                reason_code=str(schema_registry.QUARANTINE_REASON),
+                detail=schema_detail[:400],
+            )
+            stats.quarantined += 1
+            return
+
         canonical = adapters.adapt(payload, source_system)
     except (AdapterError, ValueError) as exc:
         # Quarantined with lineage intact, never coerced into the nearest-looking slot.  The

@@ -50,7 +50,11 @@ CREATE TABLE ingest_batch (
   source_system TEXT    NOT NULL,
   file_sha256   TEXT    NOT NULL UNIQUE,   -- re-loading the same file is a no-op
   record_count  INTEGER NOT NULL,
-  loaded_at     TEXT    NOT NULL           -- operational wall-clock; NOT a domain date
+  loaded_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  -- Which registered source produced this batch (requirement A1). Nullable, because a
+  -- batch loaded before the connector layer existed genuinely has no source to name, and
+  -- backfilling one would be inventing provenance.
+  source_id     TEXT
 ) STRICT;
 
 -- ═══ RAW -- immutable, exactly as received ═════════════════════════════════
@@ -463,4 +467,45 @@ CREATE TRIGGER trg_work_item_no_update BEFORE UPDATE ON work_item
 CREATE TRIGGER trg_work_item_no_delete BEFORE DELETE ON work_item
   BEGIN SELECT RAISE(ABORT, 'work_item is append-only: no update and no delete'); END;
 
-PRAGMA user_version = 3;
+-- ═══ CONNECTORS -- how the bytes got here, and whether we were allowed ═══════
+--
+-- Requirement group A of docs/connectivity_layer_requirements.md. All additive: no
+-- existing column changes type and no existing table loses a constraint.
+--
+-- Deliberately absent: a connector_fetch table. Per-fetch history is observability,
+-- which Doc 2 puts in step 6, and this build stops at step 5. The checkpoint is the
+-- only fetch state a connector-ready build needs.
+
+-- A registered source. One row per thing we fetch from (A1).
+--
+-- credential_ref is a NAME, never a secret -- it is the key connectors/credentials.py
+-- resolves from the environment or a secrets file. That is what lets this table be
+-- committed, dumped and diffed without leaking anything (A3).
+CREATE TABLE connector_source (
+  source_id       TEXT    PRIMARY KEY,
+  vendor          TEXT    NOT NULL,
+  transport_kind  TEXT    NOT NULL CHECK (transport_kind IN ('LOCAL_DIRECTORY','SFTP','HTTP_API')),
+  source_system   TEXT    NOT NULL,
+  endpoint        TEXT    NOT NULL,
+  credential_ref  TEXT,                     -- a name, never a value
+  -- Per-source, because config.ADAPTER_VERSION is a single global written onto every
+  -- normalized_record. Once several vendors have independently versioned mappings that
+  -- global is not merely incomplete, it is misleading: it claims every record was mapped
+  -- by the same logic at the moment that stopped being true (requirement 4.8).
+  mapping_version TEXT    NOT NULL,
+  enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1))
+) STRICT;
+
+-- A versioned field contract per source (B1). Inbound records are validated against the
+-- registered version BEFORE adaptation, because adaptation is where meaning is assigned
+-- and assigning meaning to a wrongly-shaped record produces a confidently wrong canonical
+-- record instead of a quarantine.
+CREATE TABLE schema_contract (
+  source_id   TEXT    NOT NULL REFERENCES connector_source(source_id),
+  version     TEXT    NOT NULL,
+  fields_json TEXT    NOT NULL,             -- the FieldSpec tuple, as declared
+  is_current  INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)),
+  PRIMARY KEY (source_id, version)
+) STRICT;
+
+PRAGMA user_version = 4;

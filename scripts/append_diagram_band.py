@@ -411,9 +411,96 @@ def band_wave_1(b: Band, y: int) -> None:
     )
 
 
+def band_wave_2(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 2  ·  FRAMEWORK", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="the one genuine refactor  —  load_feeds grows a transport seam, and nothing below it moves",
+        size=13,
+    )
+
+    b.box(
+        "reg",
+        x=LEFT_X,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="registry\nsources as data (A1)",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+    )
+    b.box(
+        "tr",
+        x=LEFT_X + 270,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="Transport protocol\nDocument: name + text only",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+    )
+    b.box(
+        "loc",
+        x=LEFT_X + 540,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="LocalDirectory\ntoday's behaviour, named",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+    )
+    b.box(
+        "cred",
+        x=LEFT_X + 810,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="credentials (A3)\nSecret redacts · env / file",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+    )
+    b.box(
+        "sch",
+        x=LEFT_X + 1080,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="schema registry (B1)\nSCHEMA_VERSION_MISMATCH",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+    )
+    b.box(
+        "con",
+        x=LEFT_X + 1350,
+        y=y + 56,
+        width=270,
+        height=74,
+        label="contracts/ (B2)\nfield table checked vs code",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body="the existing 585 tests pass UNEDITED  —  if one had needed changing, the seam was cut in the wrong place",
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
+    2: ("c2_", band_wave_2),
 }
 
 

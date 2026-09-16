@@ -36,6 +36,7 @@ __all__ = [
     "AllocationBasis",
     "UnitBasis",
     "ContractBasis",
+    "TransportKind",
 ]
 
 
@@ -315,3 +316,25 @@ class ContractBasis(StrEnum):
     """
 
     WAC_MINUS_BPS = "WAC_MINUS_BPS"
+
+
+class TransportKind(StrEnum):
+    """How a connector gets the bytes.
+
+    Doc 2's page-9 design implication names four production patterns, of which two are
+    transports we build (``DOC2-001``): API/SDK, and SFTP/structured files.  The third and
+    fourth — healthcare EDI and banking — are *payload* patterns that arrive over one of
+    these, which is why this enum has three members rather than four.
+
+    ``LOCAL_DIRECTORY`` is the one that already existed without being named: the generated
+    feeds on disk.  Naming it is what turns "the loader reads a directory" into "the loader
+    uses a transport, and one of them happens to be a directory" — and it is the member that
+    keeps every existing test on the path it was written for.
+
+    Deliberately absent: a ``FetchOutcome`` companion.  That would exist to populate a
+    per-fetch history table, and per-fetch history is observability, which is Doc 2 step 6.
+    """
+
+    LOCAL_DIRECTORY = "LOCAL_DIRECTORY"
+    SFTP = "SFTP"
+    HTTP_API = "HTTP_API"
