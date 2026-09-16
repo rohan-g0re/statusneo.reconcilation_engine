@@ -15,6 +15,20 @@ data/generated/
 *.sqlite
 *.sqlite3
 *.db
+# SQLite write-ahead sidecars. They appear beside any open database and are
+# never content -- deleting them mid-session is safe once the server is stopped.
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
+
+# decision_tree intermediates. `build_tree.py` regenerates both byte-identically
+# in under a second, nothing outside decision_tree/ reads them, and together they
+# are 7.4 MB of a repository somebody has to clone. The two artefacts that ARE
+# load-bearing -- leaves_classified.json (read by the generator and the engine's
+# oracle test) and pairs.json (the live verdict-pair oracle) -- stay tracked.
+decision_tree/tree.json
+decision_tree/leaves.json
 
 .DS_Store
 Thumbs.db
@@ -29,6 +43,8 @@ web/dist/
 .playwright-mcp/
 *.png
 ui-review/
+# ...except the screenshots the design note presents from, which are content.
+!docs/images/*.png
 
 # Agent layer: secrets and run journals
 .env
@@ -40,9 +56,24 @@ data/agent_runs/
 # committed inside a curl invocation.
 .claude/settings.local.json
 
-# Scratch output from agent runs: API response dumps, server logs, timing captures.
-# `.agents/skills/` is real project content and stays tracked -- only the loose files
-# at the top level are debris. These got committed once; ignoring the shape rather
-# than the names so the next session's scratch does not repeat it.
+# `.agents/skills/` STAYS TRACKED. It looks like a duplicate of `.claude/skills/` and
+# is not: `.claude/skills/memory-systems` and `.claude/skills/remember` are SYMLINKS
+# pointing here. A `cmp` between the two trees follows the links and reports every file
+# identical, which is exactly the evidence that convinced one session to delete this
+# directory as redundant -- breaking both skills. Check `ls -la` before trusting a
+# byte-comparison across two paths.
+#
+# Only the loose scratch files at the top level are debris: API response dumps, server
+# logs, timing captures. `.agents/specs/` is the build specs the parallel coding agents
+# worked from -- useful locally, noise in a submission, and still cited by docstrings
+# under src/recon/agents/.
 /.agents/*.log
 /.agents/*.json
+/.agents/specs/
+
+# Vendored third-party tooling, not project work. The diagrams it produced are content
+# and live in docs/images/ with their editable .excalidraw sources.
+/.claude/skills/excalidraw-diagram/
+
+# uv lockfile from the vendored diagram tooling, not a project dependency
+/uv.lock

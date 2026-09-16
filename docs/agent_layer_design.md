@@ -303,7 +303,7 @@ Every layer is replaceable in isolation and none of them is a dependency we do n
 
 ## 8.6 The surface
 
-The dashboard does not change. Everything below is a separate screen, reached deliberately, because the agent layer is the acceleration path for open and exception cases — not a replacement for the housekeeping view that already works.
+The dashboard changes in exactly one way: it gains the read-only to-do list panel described below, under "The to-do list". That reverses this section's original claim that the dashboard does not change at all — the reversal is recorded as decision A32 in `docs/decision_ledger.md`, along with the alternatives the user was shown and declined. Everything below is a separate screen, reached deliberately, because the agent layer is the acceleration path for open and exception cases — not a replacement for the housekeeping view that already works.
 
 ### Entry
 
@@ -327,7 +327,11 @@ That button is the human gate. It is the only write path in the entire agent lay
 
 ### The to-do list
 
-Its own section, deliberately not prominent on the dashboard. The dashboard answers "what is the state of the book"; the to-do list answers "what am I doing about it". Different questions, different screens.
+This section originally specified its own screen: "different questions, different screens," on the grounds that the dashboard answers "what is the state of the book" and the to-do list answers "what am I doing about it." That was reversed — recorded as decision A32 in `docs/decision_ledger.md`, which also carries the two alternatives the user was shown and declined.
+
+What was built instead is a read-only panel on the dashboard itself, placed below the operational queues and above the reference-only verdict distribution — a position chosen so it stays deliberately un-prominent even while living on the same screen. It filters to work items whose `at_cursor` is at or before the dashboard's replay cursor, for the same reason every other thing on that screen is a function of the cursor: a work item recorded after the point in time the dashboard is currently replaying has no business appearing yet. It does not silently drop the rest — it counts them, on screen, so "N to-dos recorded after this cursor" is visible rather than a discrepancy the reviewer has to notice on their own.
+
+Read-only is load-bearing, not laziness. `work_item` is append-only at the schema-trigger level — `UPDATE` and `DELETE` both abort (`src/recon/db/schema.sql:461-464`) — so there is no done state to check off and therefore no mutation affordance to build. The per-episode to-do list on `/analyse/{episode_id}` is unchanged: this panel is a second, cross-episode read of the same table, not a replacement for it.
 
 A work item carries **what is needed to act, and nothing else**: the action, a short rationale, the concrete artifacts required (form numbers, document names, identifiers to quote), and a link back to the episode. It does not restate the timeline — anyone who wants the story clicks through to the episode that has it.
 

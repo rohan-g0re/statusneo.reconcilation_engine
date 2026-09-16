@@ -6,6 +6,7 @@ import QueueTable from './components/QueueTable.jsx'
 import EpisodeDossier from './components/EpisodeDossier.jsx'
 import FeedExceptions from './components/FeedExceptions.jsx'
 import Cited from './components/Cited.jsx'
+import TodoListPanel from './components/TodoListPanel.jsx'
 
 // ═══ the Portfolio Analyst panel ═════════════════════════════════════════════════════════════
 // docs/agent_layer_design.md S:opening line: "the Exception Investigator explains, the Portfolio
@@ -439,6 +440,15 @@ export default function App() {
             </p>
             <FeedExceptions data={feeds} />
           </section>
+
+          {/*
+            The cross-episode to-do list answers "what am I doing about it", distinct from the
+            queues above, which answer "what is the state of the book". It sits below the
+            operational queues and above the reference-only verdict distribution so it stays
+            deliberately un-prominent — it was originally specified as its own screen, reversed
+            to a dashboard panel (decision A32, docs/decision_ledger.md).
+          */}
+          <TodoListPanel cursor={cursor} />
 
           {overview ? (
             <section className="panel">

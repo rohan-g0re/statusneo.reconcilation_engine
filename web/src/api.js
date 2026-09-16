@@ -17,7 +17,11 @@ async function get(path, params = {}) {
     } catch {
       /* a non-JSON error body is still worth surfacing as the status text */
     }
-    throw new Error(`${response.status}: ${detail}`)
+    // Attach `.status` the same way `post` does below, so a caller can tell a 503 (the agent
+    // layer is unavailable, a normal state) from a real error without parsing the message text.
+    const err = new Error(`${response.status}: ${detail}`)
+    err.status = response.status
+    throw err
   }
   return response.json()
 }

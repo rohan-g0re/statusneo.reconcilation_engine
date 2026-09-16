@@ -605,3 +605,44 @@ details.evidence pre {
   cursor: help;
   vertical-align: super;
 }
+
+/* ═══ cross-episode to-do list panel ═══════════════════════════════════ */
+/* Reuses `.panel`/`.panel-head-row`/`.hint`/`.table-wrap`/`table`/`th`/`td`/`td.mono`/
+ * `.verdict-code`/`.chip`/`.empty`/`.error`/`.spinner`/`.agent-unavailable`/`button` wholesale —
+ * this panel is an addition to the same design system, not a second one. Only what is genuinely
+ * new here (a rationale column too long to stay on one line, a disclosure row nested under its
+ * parent, and a note that the replay cursor is hiding rows) gets its own rules. */
+
+/* Rationale runs 20-600 characters of free text — `th, td` (line 200) forces `white-space: nowrap`
+ * for the dense tabular columns, which would push this one column far off the right edge of the
+ * table instead of wrapping it. Bounded so the column can neither collapse to an unreadable sliver
+ * on a short rationale nor swallow the rest of the table on a long one. */
+td.todo-rationale {
+  white-space: normal;
+  min-width: 26ch;
+  max-width: 52ch;
+}
+
+/* The artifacts disclosure sits in its own row directly beneath the to-do it belongs to; left
+ * with no background cue it reads as the next record in the table rather than something nested
+ * under the row above it. `--surface-2` is the same nested-content surface `.dossier-money`,
+ * `.agent-log` and `.source-panel` already use to sit a shade off their `--surface-1` panel —
+ * reused here rather than inventing a second convention for the same relationship. */
+td.todo-artifacts {
+  white-space: normal;
+  background: var(--surface-2);
+}
+
+/* The replay cursor can hide to-dos that exist outside the current window, and a reader who
+ * doesn't notice a muted caption will trust an incomplete list as if it were the whole one. Same
+ * shape as `.error` (line 260) so it reads as a real notice rather than helper text, but in
+ * `--status-warning` (line 30) rather than `--status-critical` — nothing here is broken, the list
+ * is just partial. */
+.todo-hidden {
+  border: 1px solid var(--status-warning);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+}
