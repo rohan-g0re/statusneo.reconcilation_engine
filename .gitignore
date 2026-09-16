@@ -91,3 +91,4 @@ data/agent_runs/
 
 # Stray scratch diagram at the repo root, superseded by docs/images/.
 /architecture.excalidraw
+data/generated/*/vendor/

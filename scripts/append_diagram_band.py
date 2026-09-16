@@ -323,8 +323,97 @@ def band_wave_0(b: Band, y: int) -> None:
     )
 
 
+def band_wave_1(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 1  ·  DATA LAYER", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="built first  —  formatters, never generators, so the blind-slice guarantee survives",
+        size=13,
+    )
+
+    b.box(
+        "orch",
+        x=LEFT_X,
+        y=y + 56,
+        width=300,
+        height=74,
+        label="orchestrator mints\nbeacon_id · accumulation_id · invoice_number",
+        stroke="#b45309",
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=13,
+    )
+    b.box(
+        "side",
+        x=LEFT_X + 320,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="vendor/identifiers.jsonl\nsidecar · NOT a seventh feed",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=13,
+    )
+    b.box(
+        "ver",
+        x=LEFT_X + 620,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="verity_export\n5 datasets · CSV",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+    )
+    b.box(
+        "cra",
+        x=LEFT_X + 890,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="craneware_export\n5 reports · CSV",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+    )
+    b.box(
+        "bea",
+        x=LEFT_X + 1160,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="beacon_payloads\n5 kinds · JSONL",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+    )
+    b.box(
+        "cov",
+        x=LEFT_X + 1430,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="coverage report\n15 types · 0 empty",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body="the six feeds stay BYTE-IDENTICAL  —  proven by regenerating from the previous commit and diffing every hash",
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
+    1: ("c1_", band_wave_1),
 }
 
 
