@@ -8,7 +8,8 @@ connectivity layer appends **below all of it**, one band per wave.
 The rule this script exists to enforce is *append, never redraw*.  Every existing element
 keeps its id, its coordinates and its ``versionNonce``; a band is added by writing new
 elements after them, never by regenerating the file.  Hand-editing a 271-element JSON
-document eight times is how that rule gets broken by accident.
+document once per wave is how that rule gets broken by accident, and the count only ever
+goes up — ten bands so far, and the 271 originals have never been touched by any of them.
 
 Re-running a band is safe.  Every element a band creates is prefixed with that band's key
 (``c0_``, ``c1_``, ...), and the script deletes any element carrying its own prefix before
@@ -982,6 +983,196 @@ def band_wave_7(b: Band, y: int) -> None:
     )
 
 
+def band_wave_8(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 8  ·  ADVERSARIAL REVIEW", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="two Fable reviewers, ~20 Opus workers beneath them  —  what four waves of self-verification had missed",
+        size=13,
+    )
+
+    b.box(
+        "fa",
+        x=LEFT_X,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="Fable A  ·  contract\ndoes the code do what E/C/F say?",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "fb",
+        x=LEFT_X + 270,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="Fable B  ·  regression\nwhat used to hold and stopped?",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "hole",
+        x=LEFT_X + 540,
+        y=y + 56,
+        width=300,
+        height=74,
+        label="/truth REFUSED · /TRUTH ALLOWED\nground truth fetched over real SSH",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "fix",
+        x=LEFT_X + 860,
+        y=y + 56,
+        width=270,
+        height=74,
+        label="3 guards → 1 _names_truth()\ncasefolded · second layer restored",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "dead",
+        x=LEFT_X + 1150,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="tests that could not fail\nincl. one I wrote in wave 5",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "unwired",
+        x=LEFT_X + 1430,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="C2 C5 E3 FAIL  —  one cause\nnothing in src/ imports vendors/",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body=(
+            "nothing regressed: episode identity byte-identical to dbb129e, and the only delta is 1666 crosswalk keys = 855 scoped + 811 HCPCS  ·  "
+            "the test meant to catch the bypass enumerated ONE transport while its docstring promised three"
+        ),
+        size=13,
+        colour="#881337",
+    )
+
+
+def band_wave_9(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 9  ·  THE BENCHMARK", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="measuring linear.app instead of measuring our own tokens and calling it fidelity",
+        size=13,
+    )
+
+    b.box(
+        "meas",
+        x=LEFT_X,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="linear.app, 3 scoped passes\nwhole page · dense mockup · nav",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+        size=12,
+    )
+    b.box(
+        "track",
+        x=LEFT_X + 300,
+        y=y + 56,
+        width=290,
+        height=74,
+        label="-0.022em only at ≥32px\nours had it at 19px → -0.014em",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "body",
+        x=LEFT_X + 610,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="their UI text -0.01em\nours was -0.006em → fixed",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "rad",
+        x=LEFT_X + 880,
+        y=y + 56,
+        width=240,
+        height=74,
+        label="dense card radius 12px\nours was 10px → fixed",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "diverge",
+        x=LEFT_X + 1140,
+        y=y + 56,
+        width=290,
+        height=74,
+        label="kept different ON PURPOSE\nlight mode · no shadows · strict scale",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "wrong",
+        x=LEFT_X + 1450,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="“borders not shadows” was WRONG\nthey run 42 shadows : 98 borders",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body=(
+            "verified after: masthead -0.0140em · body -0.0100em · display -0.0220em unchanged · radii 4/6/8/12/999 · zero shadows  ·  "
+            "the 12px corner is the only change a viewer registers; the tracking just stops being wrong"
+        ),
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
@@ -991,6 +1182,8 @@ BANDS = {
     5: ("c5_", band_wave_5),
     6: ("c6_", band_wave_6),
     7: ("c7_", band_wave_7),
+    8: ("c8_", band_wave_8),
+    9: ("c9_", band_wave_9),
 }
 
 
