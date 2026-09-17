@@ -474,6 +474,10 @@ class ShieldsSubmitsDirectly:
             path=SUBMISSION_PATH,
             body=_template_body(claim, template),
             natural_key=natural_key,
+            # Carried through from the claim so the acknowledgement can be filed against the
+            # episode it belongs to. It is deliberately NOT put in the body: Beacon has no
+            # column for our episode id and would have no idea what to do with one.
+            episode_id=claim.episode_id,
             # ``DOC2-002`` step 3 asks the adapter build for idempotency.  The key is the
             # natural 340B key and never a value we mint: two runs of the same mapping over
             # the same claim have to agree, and a minted id would differ per run and defeat
@@ -746,6 +750,33 @@ class TpaQualifiedClaim:
                 "on both the pharmacy and the medical side. A submission built around the "
                 "gap would be accepted and would join to nothing."
             )
+        # Refuse a feed record wearing a canonical record's clothes.
+        #
+        # This method accepts the ``fill_date`` spelling because the 340B feed and the
+        # secure-file vendors use it — but it accepts the *spelling*, not the *format*. A
+        # feed record's dates are ``CCYYMMDD``; a canonical one's are ``YYYY-MM-DD``. Handing
+        # the first to this method used to succeed here and fail two calls later inside
+        # ``_template_body``, with a message naming the field rather than the actual mistake,
+        # which is that a feed-layer record reached a canonical-layer mapper.
+        #
+        # Refused rather than converted, deliberately. ``ingest/adapters.py`` already owns
+        # the wire-to-ISO conversion, and a second parser here would be a second place for
+        # the two to disagree about what a date is — which is the defect this module has
+        # already had once, in the other direction.
+        for field_name, value in (
+            ("date_of_service", date_of_service),
+            ("submission_date", cell("submission_date")),
+        ):
+            text = "" if value is None else str(value)
+            if len(text) == 8 and text.isdigit():
+                raise BeaconMappingError(
+                    f"{field_name}={text!r} is a wire date, so this looks like a feed record "
+                    "rather than a canonical one. This mapper reads a normalized_record, "
+                    "where ingest has already converted dates to YYYY-MM-DD. Pass the "
+                    "normalized row, or convert with keys.wire_date_to_iso first -- this "
+                    "module will not convert it, because ingest owns that conversion and two "
+                    "parsers are two chances to disagree about what a date is."
+                )
         return cls(
             covered_entity_id=str(covered_entity_id),
             manufacturer=cell("manufacturer"),
@@ -998,6 +1029,18 @@ class SubmissionRequest:
     #: ``(KeyType, key_value)`` — the correlation handle until Beacon answers with an ID.
     natural_key: tuple[KeyType, str]
     idempotency_key: str
+    #: The episode this submission is being made against, when the caller knew it.
+    #:
+    #: Carried so that the acknowledgement can name it.  ``DOC2-013``'s hand-off is
+    #: *"persist Beacon ID against Shields Claim Financial Episode"*, and until this field
+    #: existed the Beacon ID arrived at :class:`EpisodeBeaconId` with ``episode_id=None``
+    #: every time — the submission knew which episode it was for and had nowhere to say so,
+    #: so the one thing the receipt exists to be filed under was the one thing it lacked.
+    #:
+    #: ``None`` stays legitimate: a submission built from a canonical record that never
+    #: resolved to an episode has no episode to name, and inventing one would be worse than
+    #: admitting it.  The caller resolves it; this type only carries it.
+    episode_id: str | None = None
     ownership: SubmissionOwnership = SubmissionOwnership.SHIELDS_DIRECT
 
     def __post_init__(self) -> None:
@@ -1191,6 +1234,12 @@ def acknowledged(
         )
     return EpisodeBeaconId(
         beacon_id=beacon_id,
+        # From the REQUEST, never from the payload. Beacon does not know our episode ids and
+        # never echoes one, so the only place this can come from is the submission we sent —
+        # which is exactly why ``SubmissionRequest`` had to start carrying it. Filing a
+        # receipt against an episode named by the responder rather than by us would be the
+        # vendor deciding which claim its own answer belongs to.
+        episode_id=None if request is None else request.episode_id,
         covered_entity_id=_text(payload.get("covered_entity_id")),
         template=_text(payload.get("template")),
         received_at=_text(payload.get("received_at")),
