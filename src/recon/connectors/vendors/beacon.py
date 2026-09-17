@@ -29,13 +29,20 @@ What *is* reused is the part that is genuinely shared:
 every vendor and the refusal it buys — an import-time error when a representation stops
 putting the reversal on the claim's own record — is worth exactly as much here.
 
-═══ We know almost nothing about Beacon, and the code says so ══════════════════════
+═══ The two submission templates are Beacon's.  The rest is still ours ═════════════
 
-``BEACON-001`` through ``BEACON-007`` are the pharmacy template, the medical template, the
-validation code glossary and the back-end validations page.  Every one of them is real,
-public, and returns HTTP 403 to automated retrieval.  We did not read them.  So the field
-names, the endpoint paths, the request envelope and the validation vocabulary below are all
-ours, tagged ``INVENTED`` one by one in ``MOCK_FIELDS.md``.
+``BEACON-001`` (pharmacy) and ``BEACON-002`` (medical) were retrieved on 2026-09-17 through
+the ``r.jina.ai`` text-extraction proxy after a direct fetch returned HTTP 403; the verbatim
+text is in ``docs/vendor_evidence/raw/``.  So the **outbound field names** in
+:func:`_template_body` are Beacon's own, spelled as Beacon spells them, in published order.
+
+Everything else here is still ours.  ``BEACON-003`` (the validation code glossary) and
+``BEACON-004`` (back-end validations) remain HTTP 403, and neither template article says one
+word about transport — no path, no verb, no envelope, no response shape.  So the endpoint
+path, the request envelope, the inbound payload names and the validation vocabulary below
+are ours, tagged ``INVENTED`` one by one in ``MOCK_FIELDS.md``.  The asymmetry is
+load-bearing: a response dressed in published spellings would claim Beacon published a
+response shape it did not.
 
 The consequence that matters most is requirement C3's: **a rejection reason is carried
 across byte for byte.**  Not title-cased, not mapped onto a Beacon-looking code, and — the
@@ -110,6 +117,7 @@ __all__ = [
     "VENDOR",
     "TEMPLATE_PHARMACY",
     "TEMPLATE_MEDICAL",
+    "SUBMISSION_PATH",
     "REVERSAL_REPRESENTATION",
     "REJECTION_REASON_CODE",
     "PARK_REASONS",
@@ -241,20 +249,36 @@ PARK_REASONS: frozenset[str] = frozenset(
     }
 )
 
-#: Where a submission is posted, by template.  **Invented and declared.**  Item 5 of
+#: Where a submission is posted.  **Invented and declared.**  Item 5 of
 #: ``docs/vendor_evidence/beacon.md``'s UNKNOWN list is *"endpoint paths, HTTP verbs, request
-#: and response envelopes"*, and ``DOC2-008`` says plainly they are not public.  Two paths
-#: rather than one because ``BEACON-001`` and ``BEACON-002`` are separate articles, so Beacon
-#: separates the templates and this connector does too.
-_SUBMISSION_PATHS: Mapping[str, str] = {
-    TEMPLATE_PHARMACY: "/v1/claims/pharmacy",
-    TEMPLATE_MEDICAL: "/v1/claims/medical",
-}
+#: and response envelopes"*, and ``DOC2-008`` says plainly they are not public.  Beacon's two
+#: retrieved template articles say nothing about transport either — neither mentions an API,
+#: a path or a verb — so this path is ours and there is no evidence that could make it less
+#: so.
+#:
+#: **One path, corrected.**  This was ``/v1/claims/pharmacy`` and ``/v1/claims/medical``, on
+#: the reasoning that two articles mean two endpoints.  Neither path exists on
+#: :mod:`recon.mocks.beacon_server`, whose router has always spoken ``POST /claims``, so
+#: every submission this connector built fell through to ``404 unknown_endpoint`` — and no
+#: test caught it, because the tests that POST submissions POST the *mock's* own output to
+#: the mock's own path.  Both path sets were equally invented; the mock's is the one with a
+#: working router and a suite behind it, so the connector moved.  The template distinction
+#: stays where it was already carried and where Beacon actually puts it: in the body, as the
+#: field list and the ``template`` envelope field.
+SUBMISSION_PATH = "/claims"
 
-#: Beacon's spelling of the natural-key fields on an acknowledgement, as
-#: ``recon.mocks.beacon_payloads`` writes them.  ``ndc_11`` with the underscore and
-#: ``date_of_service`` for what the file vendors call ``fill_date`` — the same two
-#: reconciliations ``MOCK_FIELDS.md`` exists to record.
+#: The closed set of templates a :class:`SubmissionRequest` may name.  Its own constant now
+#: that the path no longer varies by template — the old membership test rode on the path
+#: mapping's keys, and collapsing the mapping without this would have deleted the check.
+_TEMPLATES: frozenset[str] = frozenset({TEMPLATE_PHARMACY, TEMPLATE_MEDICAL})
+
+#: The natural-key fields on an acknowledgement, as ``recon.mocks.beacon_payloads`` writes
+#: them.  **Still snake_case, deliberately, and this is where the asymmetry shows.**  The
+#: submission above carries Beacon's published names because Beacon published a submission
+#: template; Beacon published no response shape at all, so an acknowledgement's fields are
+#: ours and are spelled as ours.  ``date_of_service`` here is the ``fill_date`` echoed back,
+#: in the ``CCYYMMDD`` the feed wrote it in — see :func:`_acknowledgement_natural_key`, which
+#: parses it to ISO before building a key.
 _ACK_RX = "rx_number"
 _ACK_PHARMACY_NPI = "pharmacy_npi"
 _ACK_PROVIDER_NPI = "provider_npi"
@@ -447,7 +471,7 @@ class ShieldsSubmitsDirectly:
             covered_entity_id=self.covered_entity_id,
             template=template,
             method="POST",
-            path=_SUBMISSION_PATHS[template],
+            path=SUBMISSION_PATH,
             body=_template_body(claim, template),
             natural_key=natural_key,
             # ``DOC2-002`` step 3 asks the adapter build for idempotency.  The key is the
@@ -547,20 +571,33 @@ class TpaQualifiedClaim:
 
     The canonical model's shape rather than any vendor's, which is what makes this module a
     *mapping* instead of a second copy of the domain.  ``ndc11`` and ``date_of_service`` are
-    the ``normalized_record`` column spellings; Beacon writes ``ndc_11`` and, on the medical
-    template, ``date_of_service`` for what the pharmacy template calls ``fill_date``.  Those
-    two reconciliations are the whole reason ``MOCK_FIELDS.md`` has a table.
+    the ``normalized_record`` column spellings; Beacon's published templates write
+    ``NDC-11`` and ``Date of Service``, and the pharmacy template's ``Date of Service`` is
+    the fill date the file vendors call ``fill_date``.  Those reconciliations are the whole
+    reason ``MOCK_FIELDS.md`` has a table.
 
-    **Every value is text, carried verbatim.**  No date is reformatted and no identifier is
-    normalised: the generators inject an identifier-drift defect on purpose, and a connector
-    that repaired a drifted ``rx_number`` on the way out would hand Beacon a join the real
-    feed does not have and delete the crosswalk-miss exception the defect exists to produce.
+    **No identifier is normalised.**  The generators inject an identifier-drift defect on
+    purpose, and a connector that repaired a drifted ``rx_number`` on the way out would hand
+    Beacon a join the real feed does not have and delete the crosswalk-miss exception the
+    defect exists to produce.  So no ``lstrip("0")``, no ``upper()``, no trimming — the same
+    prohibition :mod:`recon.crosswalk.keys` states for key components.
+
+    **Dates are the one exception, and it is a format change rather than a repair.**  An
+    earlier version of this docstring said "no date is reformatted" and that the date of
+    service travels "exactly as the source spelled it".  Both were false the whole time and
+    are retracted here: these fields arrive ``YYYY-MM-DD`` from ``normalized_record`` and
+    :func:`_template_body` renders them ``CCYYMMDD`` for the wire, through
+    :func:`recon.crosswalk.keys.iso_date_to_wire`.  That is lossless and bijective —
+    parsing, not normalisation, in the sense ``keys``'s module docstring draws — and it is
+    *required*: every feed and the Beacon mock speak ``CCYYMMDD``, so the unconverted ISO
+    the old text described joined to nothing.
     """
 
     covered_entity_id: str
     manufacturer: str | None
     ndc11: str
-    #: The dispense or administration date, exactly as the source spelled it.
+    #: The dispense or administration date, ``YYYY-MM-DD`` as ``normalized_record`` stores
+    #: it.  Rendered ``CCYYMMDD`` on the wire; see the class docstring.
     date_of_service: str
     qualification_status: str | None = None
     #: When the rebate was requested.  ``BEACON-009``'s 45-day window is the best-supported
@@ -574,6 +611,13 @@ class TpaQualifiedClaim:
     rx_number: str | None = None
     pharmacy_npi: str | None = None
     prescriber_npi: str | None = None
+    #: ``normalized_record.quantity_milli`` / ``episode.quantity_milli`` — the dispensed
+    #: quantity in thousandths of a unit, which is NCPDP's own three-implied-decimals form
+    #: (field ``442-E7``; ``schema_registry`` records the same convention).  Kept in milli
+    #: here and divided only at the moment it is written, so nothing rounds twice.  It feeds
+    #: Beacon's pharmacy ``Quantity Dispensed`` and **never** the medical ``Quantity`` —
+    #: see :func:`_template_body` for why those are two different decisions.
+    quantity_milli: int | None = None
 
     # -- medical template -------------------------------------------------
     provider_npi: str | None = None
@@ -647,6 +691,12 @@ class TpaQualifiedClaim:
         :func:`recon.connectors.vendors.canonical`: a CSV has no null, so absence arrives as
         an empty cell, and letting the two disagree is how one source reports a field missing
         and another reports it present-and-blank.
+
+        ``quantity_milli`` is the one column read as a number rather than as text, because
+        Beacon's ``Quantity Dispensed`` is a count in whole units and this column is in
+        thousandths.  It goes through :func:`whole_number` below, which refuses rather than
+        defaults: a canonical record that states no quantity must not reach Beacon claiming
+        a quantity of nought.
         """
 
         def cell(*names: str) -> str | None:
@@ -656,6 +706,27 @@ class TpaQualifiedClaim:
                     if value is not None and str(value) != "":
                         return str(value)
             return None
+
+        def whole_number(name: str) -> int | None:
+            """One integer column, or ``None``.  Never a coerced or defaulted zero.
+
+            ``quantity_milli`` is nullable on ``normalized_record``, and a record that does
+            not state a quantity must not arrive at Beacon claiming a quantity of nought —
+            that is a number Beacon would validate against a billing unit and pay against.
+            A value that is not a whole number is refused for the same reason rather than
+            rounded into one.
+            """
+            value = record.get(name)
+            if value is None or value == "":
+                return None
+            try:
+                return int(str(value))
+            except (TypeError, ValueError):
+                raise BeaconMappingError(
+                    f"canonical record carries {name}={value!r}, which is not a whole "
+                    "number. Coercing it would put a quantity on a rebate submission that "
+                    "nobody wrote down."
+                ) from None
 
         ndc11 = cell("ndc11", "ndc_11")
         date_of_service = cell("date_of_service", "fill_date")
@@ -685,6 +756,7 @@ class TpaQualifiedClaim:
             rx_number=cell("rx_number"),
             pharmacy_npi=cell("pharmacy_npi"),
             prescriber_npi=cell("prescriber_npi"),
+            quantity_milli=whole_number("quantity_milli"),
             provider_npi=cell("provider_npi"),
             claim_number=cell("claim_number", "clm01"),
             claim_line_number=cell("claim_line_number"),
@@ -695,14 +767,49 @@ class TpaQualifiedClaim:
 
 
 def _template_body(claim: TpaQualifiedClaim, template: str) -> dict[str, Any]:
-    """One claim in Beacon's pharmacy or medical template shape.
+    """One claim in Beacon's published pharmacy or medical template.
 
-    **The field names are ours and there is no shared constant behind them.**  They match
-    what ``recon.mocks.beacon_payloads.submission`` writes, and the two are kept in step by a
+    **The field names below are Beacon's, and they are still typed out here rather than
+    imported.**  ``BEACON-001`` and ``BEACON-002`` were retrieved on 2026-09-17 through a
+    text-extraction proxy, so the 11 pharmacy names and the 13 medical ones are the
+    vendor's, spelled exactly as the articles spell them — ``"340B ID"`` with its space,
+    ``"NDC-11"`` with its hyphen — in published order.  They match what
+    ``recon.mocks.beacon_payloads.submission`` writes, and the two are kept in step by a
     round-trip test rather than by an import, because importing them would mean handing this
     module a mock *object* — and a connector that reads mock objects is a connector that
-    cannot be pointed at a real endpoint.  When Beacon's real template arrives, both change,
-    and ``MOCK_FIELDS.md`` records that neither was ever a claim about Beacon.
+    cannot be pointed at a real endpoint.  The duplication is the price of that, and the
+    round-trip test is what makes it safe; it was *not* safe before, which is how this copy
+    drifted from the mock's in the first place with nothing going red.
+
+    **Six envelope keys stay snake_case and stay ours.**  ``payload_kind``, ``direction``,
+    ``template``, ``manufacturer``, ``submission_date`` and ``qualification_status`` are
+    named by no Beacon page.  The mixed casing on one object is deliberate: it is the
+    cheapest way to read which half of a submission is the vendor's contract.
+
+    **Dates go out in wire form.**  ``claim.date_of_service`` and ``claim.submission_date``
+    are ``YYYY-MM-DD`` — that is what ``normalized_record`` stores — and every feed, every
+    other adapter and the Beacon mock all speak ``CCYYMMDD``.  They are converted through
+    :func:`recon.crosswalk.keys.iso_date_to_wire`, the same function the generators use.
+    Sending ISO was a real defect: the mock indexes claims on a wire-form date, so a
+    connector-built submission matched nothing and came back ``404 unknown_claim``.
+
+    **A published field this fabric cannot populate goes out as ``None``, never omitted, and
+    never filled from something nearby.**  ``Date Prescribed`` in particular is not fed from
+    ``submission_date`` — Beacon defines it as the day the prescriber wrote the
+    prescription, and ours is the day a rebate was requested.  A near-miss is worse than a
+    gap: the gap is visible and the near-miss validates.
+
+    **Beacon's published sentinels are never written.**  ``999999`` for ``Rx Bin``, and
+    ``CASH``/``NONE`` for ``Rx PCN``, ``Health Plan Name`` and ``Health Plan ID``, each
+    assert that the patient was an uninsured or cash payer.  We hold no payer on a 340B
+    claim at all, which is a different fact, so all four go out null.
+
+    **The two quantity fields are two decisions, not one.**  Pharmacy ``Quantity
+    Dispensed`` is populated: Beacon asks for "the number of units dispensed" and states no
+    unit basis, and on the pharmacy side there is nothing ambiguous to resolve.  Medical
+    ``Quantity`` is null: Beacon makes its meaning conditional on the HCPCS row — CMS
+    billable units or NCPDP standardized billing units — and publishes neither table, so any
+    number we sent would be in a unit Beacon did not ask for.
 
     No ``beacon_id`` on the way out.  Beacon assigns it on receipt (``BEACON-013``), and a
     request that already carried one would make the acknowledgement decorative and delete
@@ -712,37 +819,155 @@ def _template_body(claim: TpaQualifiedClaim, template: str) -> dict[str, Any]:
         "payload_kind": "submission",
         "direction": "OUTBOUND",
         "template": template,
-        "covered_entity_id": claim.covered_entity_id,
         "manufacturer": claim.manufacturer,
-        "submission_date": claim.submission_date,
+        "submission_date": _wire_date(claim.submission_date, "submission_date"),
         # The TPA's own eligibility verdict, carried as the feed's word.  ``DOC2-007`` says
         # the outbound direction is *eligible* claims, so the reason the claim is being sent
         # at all travels with it -- and is never re-decided here.
         "qualification_status": claim.qualification_status,
     }
+    date_of_service = _wire_date(claim.date_of_service, "date_of_service")
     if template == TEMPLATE_PHARMACY:
         body.update(
             {
+                "340b_id": claim.covered_entity_id,
+                # The day the prescriber wrote it.  This fabric holds the fill, not the
+                # writing, so the field is genuinely absent rather than renamed from
+                # something nearby.
+                "date_prescribed": None,
+                "date_of_service": date_of_service,
                 "rx_number": claim.rx_number,
-                "pharmacy_npi": claim.pharmacy_npi,
-                "prescriber_npi": claim.prescriber_npi,
+                # No fill number reaches the 340B side: a rebate is about which drug was
+                # bought, not which refill it was.  ``keys.natural_340b_pharmacy`` records
+                # the same gap from the crosswalk side.
+                "fill_number": None,
                 "ndc_11": claim.ndc11,
-                "fill_date": claim.date_of_service,
+                # **Populated**, unlike its medical namesake.  BEACON-001 asks only for "the
+                # number of units dispensed to the patient" and states no unit basis, and on
+                # the pharmacy side there is no ambiguity to resolve: a dispensed quantity is
+                # a dispensed quantity under NCPDP.  See :func:`_whole_units`.
+                "quantity_dispensed": _whole_units(claim.quantity_milli),
+                "prescriber_id": claim.prescriber_npi,
+                # BEACON-001: "NPI of the pharmacy that filled the prescription."
+                "service_provider_id": claim.pharmacy_npi,
+                # **Beacon's published sentinels are refused.**  BEACON-001 says to mark
+                # "999999" in Rx Bin and "CASH" in Rx PCN for an uninsured or cash payer,
+                # and "NONE" in Rx PCN when there is no PCN.  Writing one would assert a
+                # clinical fact -- that this patient paid cash -- we have no basis for.  This
+                # fabric carries no payer on a 340B claim at all, which is a different state
+                # from "the payer is cash", and null is that difference.
+                "rx_bin": None,
+                "rx_pcn": None,
             }
         )
     else:
         body.update(
             {
+                "340b_id": claim.covered_entity_id,
                 "claim_number": claim.claim_number,
                 "claim_line_number": claim.claim_line_number,
-                "service_provider_npi": claim.provider_npi,
-                "ndc_11": claim.ndc11,
+                "date_of_service": date_of_service,
                 "hcpcs_code": claim.hcpcs,
-                "hcpcs_modifier_code": claim.hcpcs_modifier_code,
-                "date_of_service": claim.date_of_service,
+                # **Four modifier columns, not one.**  BEACON-002's rendered field list shows
+                # a single *HCPCS Code Modifier*; the template file it links to carries four,
+                # ``_1`` through ``_4``.  Ours goes in the first and the rest go out null --
+                # this fabric parses one modifier off SVC01 and has nowhere to get a second.
+                "hcpcs_code_modifier_1": claim.hcpcs_modifier_code,
+                "hcpcs_code_modifier_2": None,
+                "hcpcs_code_modifier_3": None,
+                "hcpcs_code_modifier_4": None,
+                # Same sentinel refusal as rx_bin / rx_pcn above: BEACON-002 publishes CASH
+                # and NONE for both of these, and we hold no payer to mark either way.
+                "health_plan_name": None,
+                "health_plan_id": None,
+                "ndc_11": claim.ndc11,
+                # BEACON-002 asks for two NPIs -- the clinician who rendered the care and
+                # the site where it was administered.  This fabric carries one and cannot
+                # say which; it is the site's, so it goes in Service Provider ID and the
+                # clinician goes out null.  Copying one value into both would manufacture a
+                # second fact out of the first.
+                "rendering_physician_id": None,
+                # **Null even though the pharmacy template's quantity is not**, and the two
+                # are genuinely different decisions rather than one applied twice.
+                # BEACON-002 conditions this number's meaning on the HCPCS row: with a
+                # specific HCPCS code it must be that code's CMS-defined billable units, and
+                # without one it must be NCPDP standardized billing units for the NDC-11.
+                # Beacon publishes neither table.  ``claim.quantity_milli`` is in this
+                # fabric's own units, and ``domain.enums.UnitBasis`` is EACH / ML / MG --
+                # not that vocabulary.  Any number written here would be in a unit Beacon
+                # did not ask for, and a wrong quantity on a rebate submission is worse than
+                # a null: a null is visibly missing, a wrong number is silently paid.
+                "quantity": None,
+                "unit_of_measure": None,
+                # BEACON-002: "the NPI of the healthcare entity where the patient received
+                # the medication administration."
+                "service_provider_id": claim.provider_npi,
             }
         )
     return body
+
+
+def _whole_units(quantity_milli: int | None) -> int | None:
+    """Thousandths of a unit -> units.  ``None`` stays ``None``.
+
+    ``quantity_milli`` is NCPDP's three-implied-decimals quantity in integer form — the
+    convention ``schema_registry`` records for field ``442-E7``, where ``"030000"`` is 30
+    units — and Beacon's ``Quantity Dispensed`` wants *"the number of units dispensed to the
+    patient"*, so the thousandths have to come off.  The same read
+    :func:`recon.api.dossier` already does for the episode dossier, in one place rather than
+    two so the two cannot start disagreeing about one figure.
+
+    **This is the only arithmetic in this module and it is deliberately not on money.**
+    Requirement M2's prohibition is about amounts: every rebate figure here is the vendor's
+    text, copied, because two independent roundings on one amount is how a ledger disagrees
+    with itself.  A quantity is not an amount, and this is a unit re-rendering rather than a
+    derivation — the same class of operation as ``CCYYMMDD`` to ``YYYY-MM-DD``.
+
+    A quantity that is not a whole number of units is refused rather than truncated.  In
+    this fabric it cannot happen — the generator writes ``units * 1000`` — so a remainder
+    means the field arrived from somewhere that does not share the convention, and silently
+    dropping a fraction of a unit off a rebate submission is the kind of wrong number that
+    gets paid.
+    """
+    if quantity_milli is None:
+        return None
+    units, remainder = divmod(quantity_milli, 1000)
+    if remainder:
+        raise BeaconMappingError(
+            f"quantity_milli={quantity_milli} is not a whole number of units "
+            f"({remainder} thousandths left over). NCPDP 442-E7 carries three implied "
+            "decimals and every quantity in this fabric is an exact multiple of 1000, so a "
+            "remainder means this value came from a source with a different convention. "
+            "Truncating would send Beacon a quantity nobody dispensed."
+        )
+    return units
+
+
+def _wire_date(value: str | None, field: str) -> str | None:
+    """``"2025-12-16"`` -> ``"20251216"``.  ``None`` stays ``None``.
+
+    The canonical model stores ``YYYY-MM-DD`` so that lexicographic order is chronological;
+    every feed and every vendor payload in this repository is ``CCYYMMDD``.  The conversion
+    runs through :mod:`recon.crosswalk.keys` rather than a slice here, for the reason that
+    module gives about key values: one construction site, or the write side and the read
+    side come to disagree about a string and nothing says so.
+
+    Re-rendering one value between two formats is **parsing, not normalisation** — the
+    distinction ``keys``'s own module docstring draws.  Nothing is repaired: identifier
+    drift is still carried untouched, and a date that is not ``YYYY-MM-DD`` is refused by
+    name rather than coerced.
+    """
+    if value is None:
+        return None
+    try:
+        return keys.iso_date_to_wire(value)
+    except keys.KeyError_ as exc:
+        raise BeaconMappingError(
+            f"{field}={value!r} is not the YYYY-MM-DD this fabric stores, so it cannot be "
+            "rendered as the CCYYMMDD Beacon's wire carries. Guessing at the format would "
+            "put a date on a submission that joins to nothing, which is a claim silently "
+            "lost rather than an error."
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -784,11 +1009,12 @@ class SubmissionRequest:
                 "than skipped, and a request object that existed but was never sent would be "
                 "one call site away from being sent."
             )
-        if self.template not in _SUBMISSION_PATHS:
+        if self.template not in _TEMPLATES:
             raise BeaconMappingError(
                 f"{self.template!r} is not a Beacon template; known: "
-                f"{', '.join(sorted(_SUBMISSION_PATHS))}. BEACON-001 and BEACON-002 are "
-                "separate articles, so the two templates are separate here too."
+                f"{', '.join(sorted(_TEMPLATES))}. BEACON-001 and BEACON-002 are separate "
+                "articles with different field lists -- 11 fields against 13, overlapping "
+                "on three -- so the two templates are separate here too."
             )
 
 
@@ -984,13 +1210,26 @@ def _acknowledgement_natural_key(payload: Mapping[str, Any]) -> tuple[KeyType, s
     already carries the Beacon ID, which is the join from here on — so a missing echo costs a
     cross-check and never the identifier itself, and throwing the ID away over it would lose
     the one thing the response was for.
+
+    **The echoed date arrives in wire form and is parsed back to ISO before the key is
+    built.**  An acknowledgement carries ``"20251216"``; every ``keys.natural_340b_*`` value
+    in this fabric is built from ``"2025-12-16"``, including the one
+    :meth:`TpaQualifiedClaim.natural_key` puts on the outbound request.  Comparing the two
+    unconverted made :func:`acknowledged`'s cross-check fire on every single submission —
+    two spellings of one date reported as a receipt for a different claim.  An unparseable
+    date returns ``None`` rather than raising, for the same reason a missing one does: the
+    cost is the cross-check, never the identifier.
     """
     rx_number = _text(payload.get(_ACK_RX))
     pharmacy_npi = _text(payload.get(_ACK_PHARMACY_NPI))
     provider_npi = _text(payload.get(_ACK_PROVIDER_NPI))
     ndc11 = _text(payload.get(_ACK_NDC))
-    date_of_service = _text(payload.get(_ACK_DATE))
-    if ndc11 is None or date_of_service is None:
+    wire_date = _text(payload.get(_ACK_DATE))
+    if ndc11 is None or wire_date is None:
+        return None
+    try:
+        date_of_service = keys.wire_date_to_iso(wire_date)
+    except keys.KeyError_:
         return None
     if rx_number and pharmacy_npi:
         return keys.natural_340b_pharmacy(pharmacy_npi, rx_number, ndc11, date_of_service)

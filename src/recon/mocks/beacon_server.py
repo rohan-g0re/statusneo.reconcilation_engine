@@ -26,9 +26,14 @@ about Beacon, and items 5 and 8 of that list are exactly this module's subject m
     8. **The exact token exchange.**  That two tokens exist is ``BEACON-011``; how they are
        presented on a request — header names, scheme, ordering — is unknown.
 
-``BEACON-001`` through ``BEACON-007`` are the Beacon Support Center pages that would settle
-this, and every one of them returns ``HTTP 403`` to automated retrieval.  They are cited
-here only as **context for what we could not read**, never as specification.  So:
+``BEACON-001`` and ``BEACON-002`` — the two data-template articles — were retrieved on
+2026-09-17 through a text-extraction proxy, and they settle the *submission body's field
+names*, which is why :func:`beacon_payloads.submission` now carries Beacon's own spellings
+and :func:`_submission_key` reads them.  They settle nothing about the transport: neither
+page mentions SFTP, API, portal upload, filename convention or cadence, and both say so by
+omission.  ``BEACON-003`` through ``BEACON-007``, including ``BEACON-005`` (the submission
+workflow), still return ``HTTP 403``.  They are cited here only as **context for what we
+could not read**, never as specification.  So:
 
 * every path in :data:`ENDPOINTS` is **INVENTED**;
 * :data:`ACCESS_TOKEN_HEADER` and :data:`PRIVATE_TOKEN_HEADER` are **INVENTED** — that the
@@ -406,17 +411,28 @@ class _IssuedTokens:
 
 
 def _submission_key(body: Mapping[str, Any]) -> tuple[Any, ...]:
-    """The natural 340B key carried by a submission body.
+    """The natural 340B key carried by a submission body, under Beacon's published names.
 
     The exact inverse of :func:`beacon_payloads.submission`, which is why the client can POST
-    that function's output unmodified and be understood.  Pharmacy and medical are different
-    templates, so the same key component is spelled two ways: ``provider_npi`` goes out as
-    ``service_provider_npi`` and ``fill_date`` as ``date_of_service`` on the medical one.
+    that function's output unmodified and be understood.  Every name is read from a constant
+    in that module rather than re-typed here: a copied string is how a rename on the write
+    side turns every ``POST /claims`` into ``404 unknown_claim`` with no test going red.
 
-    A component the template omits comes back ``None``, which is what the dispense holds for
-    it — ``tpa.py`` writes ``provider_npi`` as null on a pharmacy dispense and the pharmacy
-    pair as null on a medical one, so the two never both carry a value and the key round
-    trips.
+    **``Service Provider ID`` means two different things and the template says which.**
+    ``BEACON-001`` defines it as *"NPI of the pharmacy that filled the prescription"*;
+    ``BEACON-002`` defines it as *"the NPI of the healthcare entity where the patient
+    received the medication administration"*.  One published name, a pharmacy on one
+    template and a site on the other — so it lands in the ``pharmacy_npi`` slot of this key
+    on a ``PHARMACY`` body and the ``provider_npi`` slot on a ``MEDICAL`` one.  The
+    discriminator is the ``template`` envelope field, which both producers write.  A body
+    with a template this does not recognise files its NPI in the medical slot, finds
+    nothing, and gets ``404`` — a refusal rather than a wrong match, which is the correct
+    way for this to fail.
+
+    The slot the template does not use comes back ``None``, which is what the dispense holds
+    for it — ``tpa.py`` writes ``provider_npi`` as null on a pharmacy dispense and the
+    pharmacy pair as null on a medical one, so the two never both carry a value and the key
+    round trips.
 
     **The key is not unique, and that is the data telling the truth.**  On the ``full``
     profile 1395 dispenses carry 1375 distinct keys: 19 pairs collide, every one of them
@@ -425,15 +441,18 @@ def _submission_key(body: Mapping[str, Any]) -> tuple[Any, ...]:
     administrations of the same drug at the same site on the same day are genuinely
     indistinguishable on this feed alone.  A connector has to park that as ambiguous rather
     than guess through it."*  So :class:`_BeaconState` indexes a **list** per key and
-    ``POST /claims`` answers ``409 ambiguous_claim_key`` rather than picking one.
+    ``POST /claims`` answers ``409 ambiguous_claim_key`` rather than picking one.  Beacon's
+    real medical template carries a ``Claim Number`` that would have resolved it; ours is
+    null because the 837 feed never reaches the 340B sidecar, which is what that 409 costs.
     """
-    fill_date = body.get("fill_date")
+    service_provider_id = body.get(beacon_payloads.FIELD_SERVICE_PROVIDER_ID)
+    pharmacy = body.get("template") == beacon_payloads.TEMPLATE_PHARMACY
     return (
-        body.get("rx_number"),
-        body.get("pharmacy_npi"),
-        body.get("service_provider_npi"),
-        body.get("ndc_11"),
-        body.get("date_of_service") if fill_date is None else fill_date,
+        body.get(beacon_payloads.FIELD_RX_NUMBER),
+        service_provider_id if pharmacy else None,
+        None if pharmacy else service_provider_id,
+        body.get(beacon_payloads.FIELD_NDC_11),
+        body.get(beacon_payloads.FIELD_DATE_OF_SERVICE),
     )
 
 
@@ -861,9 +880,12 @@ class _BeaconHandler(BaseHTTPRequestHandler):
         nothing is decided — requirement M1, and the reason ``404 unknown_claim`` is the
         right answer for a claim this server has never heard of.
 
-        The permission check runs against the body's own ``covered_entity_id``, before the
-        lookup, so a partner cannot discover whether a claim exists under a 340B ID it has no
-        grant on.
+        The permission check runs against the body's own ``340B ID`` — Beacon's published
+        name for it, field 1 of both templates — before the lookup, so a partner cannot
+        discover whether a claim exists under a 340B ID it has no grant on.  ``BEACON-012``
+        scopes permission by exactly this value, which is a pleasing coincidence rather than
+        a designed one: the field is required on every submission whether or not anyone
+        checks a grant against it.
 
         **Two claims can share one key, and then this refuses.**  The medical key is
         ``{provider_npi, ndc_11, fill_date}`` and two administrations of the same drug at
@@ -874,15 +896,15 @@ class _BeaconHandler(BaseHTTPRequestHandler):
         quietly starts lying."*
 
         It is also the clearest statement of why ``beacon_payloads.submission`` emits
-        ``claim_number`` and ``claim_line_number`` as nulls on the medical template.
-        ``BEACON-008`` puts both in Beacon's own medical key; our 340B sidecar does not
-        carry either, and this 409 is what that gap costs, on the wire, where requirement
-        E2 can be pointed at it.
+        ``Claim Number`` and ``Claim Line Number`` as nulls on the medical template.
+        ``BEACON-002`` requires both and describes the claim number as unique; our 340B
+        sidecar carries neither, because they live on the 837 feed.  This 409 is what that
+        gap costs, on the wire, where requirement E2 can be pointed at it.
         """
         partner = self._authenticate()
         if partner is None:
             return
-        covered_entity_id = body.get("covered_entity_id") or ""
+        covered_entity_id = body.get(beacon_payloads.FIELD_340B_ID) or ""
         if not self._authorise(partner, str(covered_entity_id), write=True):
             return
 
@@ -914,7 +936,7 @@ class _BeaconHandler(BaseHTTPRequestHandler):
             self._fail(
                 HTTPStatus.FORBIDDEN,
                 "no_permission_for_340b_id",
-                "the submitted covered_entity_id does not own that claim",
+                "the submitted '340B ID' does not own that claim",
             )
             return
 

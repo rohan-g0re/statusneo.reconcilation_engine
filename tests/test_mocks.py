@@ -67,8 +67,18 @@ FORBIDDEN_IMPORT_PREFIXES: tuple[str, ...] = (
 #: Names whose presence would mean money was being computed rather than carried.
 FORBIDDEN_MONEY_NAMES = frozenset({"Decimal", "to_cents", "from_cents", "apply_bps", "round_half_up"})
 
+#: A row of ``MOCK_FIELDS.md``: ``| field | TIER | evidence | note |``.
+#:
+#: The field class admits a **space**, which it did not until Beacon's real templates were
+#: retrieved.  ``BEACON-001`` and ``BEACON-002`` spell their fields ``340B ID``, ``Rx
+#: Number``, ``Date of Service`` — with spaces — and those spellings now go out on the wire
+#: verbatim rather than snake_cased, because a name we tidied is a name a real integration
+#: would have to untidy.  Without the space this pattern silently matched nothing on those
+#: rows, so every published field read as *undeclared* no matter what the document said.
+#: Widening it keeps the rule intact; refusing to widen it would have forced the code to
+#: misspell a vendor's field list to satisfy a test's punctuation.
 _FIELD_ROW = re.compile(
-    r"^\|\s*`?(?P<field>[A-Za-z0-9_.\[\]-]+)`?\s*\|\s*(?P<tier>SPEC|STANDARD|INVENTED)\s*\|",
+    r"^\|\s*`?(?P<field>[A-Za-z0-9_. \[\]-]+?)`?\s*\|\s*(?P<tier>SPEC|STANDARD|INVENTED)\s*\|",
     re.MULTILINE,
 )
 

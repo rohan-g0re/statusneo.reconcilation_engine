@@ -14,16 +14,34 @@ build, a `SPEC` row citing an evidence id that is not in the index fails the bui
 `SPEC` row citing one of the seven 403'd Beacon articles fails the build.
 
 **The honest finding, stated before the tables rather than buried in them: the transport and
-the dataset and report names are the vendors'; the fields inside them are overwhelmingly
-ours.** 234 of the 247 rows below are `INVENTED`. That is not a gap to be closed by trying
-harder. Verity publishes marketing prose and a *reference* to a "Split Transaction data
-specification" it does not publish (`VERITY-006`). Craneware's own announcement names all five
-reports and the SFTP folder they land in (`CRANEWARE-001`) and no column of any of them.
-Beacon's pharmacy template, medical template and validation code glossary are real, public,
-and every one of them returns HTTP 403 to automated retrieval (`BEACON-001` … `BEACON-007`).
-Writing those field lists from recollection would produce mocks that are *confidently wrong* —
-indistinguishable from correct ones in any demo, and wrong in precisely the places a real
-integration breaks. So they are written as ours and tagged as ours.
+the dataset and report names are the vendors'; the fields inside them are still mostly ours,
+with one real exception.** 226 of the 255 rows below are `INVENTED`. That is not a gap to be
+closed by trying harder. Verity publishes marketing prose and a *reference* to a "Split
+Transaction data specification" it does not publish (`VERITY-006`). Craneware's own
+announcement names all five reports and the SFTP folder they land in (`CRANEWARE-001`) and no
+column of any of them. Writing those field lists from recollection would produce mocks that
+are *confidently wrong* — indistinguishable from correct ones in any demo, and wrong in
+precisely the places a real integration breaks. So they are written as ours and tagged as
+ours.
+
+**The exception is Beacon's outbound submission, and it is new.** On 2026-09-17 the two
+Beacon data-template articles — `BEACON-001` (pharmacy) and `BEACON-002` (medical) — were
+retrieved through the `r.jina.ai` text-extraction proxy after the direct fetch returned the
+same HTTP 403 it always had. The verbatim text is in `docs/vendor_evidence/raw/`. So the 20
+distinct field names on `beacon.submission` are now Beacon's own, spelled as Beacon spells
+them — `340B ID` with its space, `NDC-11` with its hyphen, `Rx Bin` with the lowercase `in`
+Beacon's own description then contradicts — and tagged `SPEC` against the article that prints
+them. That took the `SPEC` count from 7 to 27 and is the only material change to this
+document's honesty since it was written.
+
+**Beacon's *responses* did not move, and that asymmetry is the point.** Beacon publishes
+submission templates. It publishes no response shape at all: `BEACON-003` (the validation code
+glossary) and `BEACON-004` (back-end validations) are still HTTP 403, and neither template
+article says one word about what comes back, or about transport. So `acknowledgement`,
+`validation_outcome`, `rebate_status` and `payment_reference` keep their snake_case names and
+stay `INVENTED`. Re-spelling them in Beacon's published style would be worse than leaving them
+plainly ours, because it would imply Beacon published a response shape it did not — the same
+confident wrongness this file exists to prevent, only better disguised.
 
 The rule applied for `SPEC`, stated once so the tiering is checkable rather than a matter of
 taste: **a field is `SPEC` only when a retrievable source names that field on that payload.**
@@ -39,12 +57,29 @@ Counted from the tables below.
 |---|---|---|---|---|
 | Verity | 110 | 0 | 0 | 110 |
 | Craneware | 80 | 0 | 0 | 80 |
-| Beacon | 57 | 7 | 6 | 44 |
-| **total** | **247** | **7** | **6** | **234** |
+| Beacon | 65 | 27 | 2 | 36 |
+| **total** | **255** | **27** | **2** | **226** |
 
-Every `SPEC` row cites `DOC2-007` or `BEACON-013`, both `SECOND_HAND` and page-cited. Not one
-field in this repository is tagged `SPEC` against a source we retrieved from a vendor
-first-hand, because no such source exists for any field.
+Beacon's 65 rows break down by payload: `submission` 26 (22 `SPEC`, 4 `INVENTED`),
+`acknowledgement` 12 (2 `SPEC`, 2 `STANDARD`, 8 `INVENTED`), `validation_outcome` 8,
+`rebate_status` 10 and `payment_reference` 9 (1 `SPEC` each, the rest `INVENTED`). The
+submission carries 26 distinct names rather than 24 because four published fields — `340B ID`,
+`Date of Service`, `NDC-11` and `Service Provider ID` — appear on **both** templates, so 11
+pharmacy fields plus 13 medical ones are 20 distinct names, under 6 envelope keys of ours.
+
+**The `STANDARD` count fell from 6 to 2, and nothing was downgraded.** `rx_number` and
+`ndc_11` on the *acknowledgement* are still `STANDARD` — Beacon publishes no acknowledgement,
+so the only source those two have is the public standard the identifier belongs to. Their four
+former siblings on the *submission* moved **up** to `SPEC`: Beacon now demonstrably names
+`Rx Number`, `NDC-11`, `HCPCS Code` and `HCPCS Code Modifier` on those templates, and a field
+the vendor names is `SPEC` by this file's own rule. The standard is still cited beside the
+article in the evidence column, because the identifier underneath is still NCPDP's and X12's;
+what changed is who named the column.
+
+20 of the 27 `SPEC` rows now cite `BEACON-001` or `BEACON-002` — Beacon's own pages,
+retrieved. The other 7 cite `DOC2-007` or `BEACON-013`, both `SECOND_HAND` and page-cited from
+an assessment document *about* Beacon. Not one Verity or Craneware field is `SPEC`, because no
+retrievable source names any of them.
 
 ---
 
@@ -330,55 +365,114 @@ unknown, so both are ours.
 
 ## Beacon
 
-Beacon is the only vendor with any `SPEC` rows, and all seven are carried by `DOC2-007` and
-`BEACON-013` — an assessment document about Beacon, page-cited, not a Beacon page. The Beacon
-pages that would have given a field list are `BEACON-001` through `BEACON-007`, and every one
-of them is a 403. `tests/test_vendor_evidence.py` has a test whose entire job is to fail the
-build if any of those seven ids ever appears in a `SPEC` row here, because citing a page we
-could not read would launder *this page exists* into *this page says what I wrote*.
+Beacon is the only vendor with any `SPEC` rows, and it is now the only vendor with a `SPEC`
+row carried by one of its *own* pages. `BEACON-001` (the pharmacy claims data template, 11
+fields, all marked required) and `BEACON-002` (the medical one, 13 fields, 10 marked required)
+were retrieved on 2026-09-17 via the `r.jina.ai` text-extraction proxy; the direct fetch of the
+same URLs still returns HTTP 403, and the verbatim text plus the failure record are in
+`docs/vendor_evidence/raw/`.
+
+**That is a proxy retrieval and it is ranked as one.** A third party we do not control fetched
+the page, and the proxy flattened Beacon's HTML table into run-together text. It is strong
+enough to cite for field names, required markers and stated data types, which is exactly what
+the `SPEC` rows below claim. It is *not* strong enough to certify the byte-exact header row of
+the downloadable template file, which was never obtained — so nothing here claims the emitted
+JSON keys match that file, only that they match the field list the article prints.
+
+`BEACON-003` through `BEACON-007` are still 403s, and `tests/test_vendor_evidence.py` still
+fails the build on a `SPEC` row citing any source the index marks `UNAVAILABLE` — which is the
+rule working, not a rule that had to be relaxed. What changed is the *index*, because two of
+those pages stopped being unavailable.
 
 What `DOC2-007` genuinely gives is direction, and it gives it field-shaped: *"Direction —
 Outbound eligible pharmacy / medical claims; inbound acknowledgements, validation outcomes,
-Beacon IDs, rebate status and reconciliation data."* That single sentence is the source of five
-of the seven `SPEC` rows. `BEACON-013`'s *"Use Beacon's published pharmacy / medical data
-templates; persist Beacon ID against Shields Claim Financial Episode"* carries the other two.
+Beacon IDs, rebate status and reconciliation data."* That single sentence still carries five
+`SPEC` rows. `BEACON-013`'s *"Use Beacon's published pharmacy / medical data templates; persist
+Beacon ID against Shields Claim Financial Episode"* carries two more.
 
-Six rows are `STANDARD`. `standards.md` is explicit about two of them: the HCPCS J-code and its
-modifier "are not our invention, and tagging them `INVENTED` would be inaccurate in the
-opposite direction." The NDC is the 837's loop-2410 drug identifier and the NCPDP telecom
-claim's, and the prescription reference number is NCPDP's. Everything else on these payloads is
-ours, including the envelope field `payload_kind`, the outcome vocabulary, and the shape of the
-Beacon ID itself.
+Two rows are `STANDARD`, both on the acknowledgement, and both because Beacon publishes no
+acknowledgement at all: the prescription reference number is NCPDP's and the NDC is the 837's
+loop-2410 drug identifier, so the standard is the only source those two have. Everything else
+on the four inbound payloads is ours — the envelope field `payload_kind`, the outcome
+vocabulary, the shape of the Beacon ID itself.
 
-`BEACON-008` — a search engine's summary of the medical template — is used as a design hint and
-nothing more. Every field taken from it is `INVENTED`, and four of the six are emitted as
-`None`, which is the honest state rather than a template that looks complete.
+`BEACON-008` — a search engine's summary of the medical template — is now **superseded** by
+`BEACON-002`, the page. It is retained in the index as a record of what a search summary got
+right and wrong: it named a claim number, a claim line number, a date of service, an NDC, a
+service provider id and a HCPCS modifier, and it never mentioned the health plan name, the
+health plan id, the quantity, the unit of measure or the second NPI that the real template
+requires. No field below cites it any more.
 
 ### `submission`
 
-Outbound. Carries no `beacon_id`: Beacon assigns that on receipt, and a request that already
-knew its own id would make the acknowledgement decorative and delete C2's acceptance test.
+Outbound. 26 distinct keys: 6 envelope keys of ours in snake_case, then Beacon's own field
+names in Beacon's own spelling and published order — 11 on the pharmacy template, 13 on the
+medical one, overlapping on four.
+
+Carries no `beacon_id`: Beacon assigns that on receipt, and a request that already knew its own
+id would make the acknowledgement decorative and delete C2's acceptance test.
+
+**Three rules govern the null columns below, and they are the substance of this table.**
+
+1. *A published field we cannot populate is emitted as `None`, never omitted.* A null in a
+   published field is an honest "we do not have this"; dropping the field hides the gap behind
+   a template that looks complete.
+2. *No near-misses.* `submission_date` is not written into `Date Prescribed` — Beacon defines
+   that as the day the prescriber wrote the prescription and ours is the day a rebate was
+   requested. A near-miss is worse than a gap, because a gap is visible and a near-miss
+   validates.
+3. *Beacon's published sentinels are never written.* `999999` for `Rx Bin`, `CASH`/`NONE` for
+   `Rx PCN`, `Health Plan Name` and `Health Plan ID` each assert the patient was an uninsured
+   or cash payer. We hold no payer on a 340B claim at all, which is a different fact.
+
+#### Envelope — ours, six keys, snake_case
 
 | field | tier | evidence | note |
 |---|---|---|---|
 | `beacon.submission.payload_kind` | INVENTED | — | our envelope field; the five kind names follow DOC2-007's enumeration but Beacon publishes no envelope at all |
 | `beacon.submission.direction` | SPEC | DOC2-007 | "Direction — Outbound eligible pharmacy / medical claims" verbatim |
 | `beacon.submission.template` | SPEC | BEACON-013 | "Use Beacon's published pharmacy / medical data templates" — the two templates are Beacon's; the PHARMACY and MEDICAL spelling is ours |
-| `beacon.submission.covered_entity_id` | INVENTED | — | the 340B ID; BEACON-012 says permission is granted per 340B ID, which is why it is a real field here and never null |
-| `beacon.submission.manufacturer` | INVENTED | — | the labeller the rebate will be claimed from |
-| `beacon.submission.submission_date` | INVENTED | — | the REBATE_REQUEST event's submission_date; the 45-day window is adjudicated upstream and arrives here as a decision, never recomputed |
+| `beacon.submission.manufacturer` | INVENTED | — | the labeller the rebate will be claimed from; named on neither template |
+| `beacon.submission.submission_date` | INVENTED | — | the REBATE_REQUEST event's submission_date. Kept under our own snake_case name precisely so it is not mistaken for Beacon's `Date Prescribed`. The 45-day window is adjudicated upstream and arrives here as a decision, never recomputed |
 | `beacon.submission.qualification_status` | INVENTED | — | rides along because DOC2-007's outbound direction is eligible claims; the vocabulary is our TPA's, carried as the feed's word |
-| `beacon.submission.rx_number` | STANDARD | STD-NCPDP-TELECOM | the prescription reference number; pharmacy template only, and drift is carried across untouched |
-| `beacon.submission.pharmacy_npi` | INVENTED | — | an NPI, which NCPDP carries behind a service-provider id qualifier; the column name and its presence on this template are ours |
-| `beacon.submission.prescriber_npi` | INVENTED | — | read back from the QUALIFICATION_DECISION event; the prescriber id qualifier is NCPDP's, this column is ours |
-| `beacon.submission.ndc_11` | STANDARD | STD-X12-837, STD-NCPDP-TELECOM | the drug identifier the 837's loop 2410 LIN02 and the NCPDP telecom claim both carry; the only field on both templates |
-| `beacon.submission.fill_date` | INVENTED | — | date of service on the pharmacy template, spelled as the TPA feed spells it |
-| `beacon.submission.claim_number` | INVENTED | — | BEACON-008's medical key, emitted as null: the claim number lives on the 837 feed and never reaches the 340B sidecar. Null rather than absent, so the gap is on the wire |
-| `beacon.submission.claim_line_number` | INVENTED | — | BEACON-008's medical key, emitted as null for the same reason |
-| `beacon.submission.service_provider_npi` | INVENTED | — | BEACON-008 names a service provider id and is a search summary, not a source; populated from provider_npi |
-| `beacon.submission.hcpcs_code` | STANDARD | STD-X12-837 | the SVC01 composite procedure identifier's J-code; emitted as null because this sidecar row carries no resolved drug and a formatter may not reach into reference data to derive one. E2 itself landed in wave 5 -- an earlier version of this cell said it had not |
-| `beacon.submission.hcpcs_modifier_code` | STANDARD | STD-X12-837 | the 837's procedure modifier, which is the vocabulary BEACON-008 was reaching for; null for the same reason |
-| `beacon.submission.date_of_service` | INVENTED | — | the medical template's fill date under BEACON-008's spelling; a search summary is not a cited source |
+
+#### Both templates — `BEACON-001` and `BEACON-002` print all four
+
+| field | tier | evidence | note |
+|---|---|---|---|
+| `beacon.submission.340b_id` | SPEC | BEACON-001, BEACON-002 | field 1 of both templates, required on both: "The unique identification number provided by HRSA to the 340B covered entity". Populated from covered_entity_id. This replaced our envelope field `covered_entity_id` — the only key here that changed owner rather than spelling |
+| `beacon.submission.date_of_service` | SPEC | BEACON-001, BEACON-002 | required on both, and it means two different things: "Date on which the pharmacy filled the prescription" (BEACON-001) and "Date on which the medication was administered to the patient" (BEACON-002). Both are our fill_date. Emitted CCYYMMDD as the feed spells it; Beacon says only "Standard date formats" and never enumerates them, so nothing here assumes ISO-8601 |
+| `beacon.submission.ndc_11` | SPEC | BEACON-001, BEACON-002, STD-X12-837, STD-NCPDP-TELECOM | required on both, hyphenated as Beacon hyphenates it, "Numeric - 11 digits". The identifier underneath is the 837's loop-2410 LIN02 and the NCPDP telecom claim's; SPEC rather than STANDARD now because Beacon names the column |
+| `beacon.submission.service_provider_id` | SPEC | BEACON-001, BEACON-002 | required on both, **and it denotes two different parties**: "NPI of the pharmacy that filled the prescription" (BEACON-001) versus "the NPI of the healthcare entity where the patient received the medication administration" (BEACON-002). Populated from pharmacy_npi and provider_npi respectively. beacon_server._submission_key uses the template to decide which |
+
+#### Pharmacy template only — `BEACON-001`, 7 further fields, all required
+
+| field | tier | evidence | note |
+|---|---|---|---|
+| `beacon.submission.date_prescribed` | SPEC | BEACON-001 | required. "Date the prescriber wrote the prescription." **Emitted null.** The 340B feed carries the fill, never the writing. Deliberately NOT fed from submission_date, which is a different fact wearing a plausible name |
+| `beacon.submission.rx_number` | SPEC | BEACON-001, STD-NCPDP-TELECOM | required. "The native (unmodified) prescription number ... as generated by the pharmacy" — and "native (unmodified)" is Beacon's own instruction to carry identifier drift across untouched, which is what defect D-6 depends on. The prescription reference number is NCPDP's; the column is Beacon's |
+| `beacon.submission.fill_number` | SPEC | BEACON-001 | required, "Numeric - 0-99". **Emitted null.** The TPA export has no fill number: a rebate is about which drug was bought, not which refill it was. keys.natural_340b_pharmacy records the same gap from the crosswalk side |
+| `beacon.submission.quantity_dispensed` | SPEC | BEACON-001 | required, "The number of units dispensed to the patient", no unit basis stated. **Null on this mock and populated on the connector**, which is not a contradiction: the connector reads normalized_record.quantity_milli and divides by 1000, and the 340B sidecar this formatter reads carries no quantity at all. The feed's only quantity_dispensed is on DISPENSE_REVERSAL events, where it is negative and describes a return. **The unit basis is unverified against Beacon**, which publishes none for this field |
+| `beacon.submission.prescriber_id` | SPEC | BEACON-001 | required, "Numeric - 10 digits". "National provider identifier (NPI) of the physician that wrote the prescription." Read back from the QUALIFICATION_DECISION event |
+| `beacon.submission.rx_bin` | SPEC | BEACON-001 | required, "Numeric - 6 digits", and spelled `Rx Bin` with the lowercase `in` even though its own description then writes "Include BIN". Beacon's inconsistency, reproduced rather than corrected. **Emitted null: the published sentinel `999999` is refused**, because writing it asserts the patient was uninsured or a cash payer and we hold no payer at all |
+| `beacon.submission.rx_pcn` | SPEC | BEACON-001 | required. **Emitted null, sentinels refused** — Beacon publishes `CASH` for a cash payer and `NONE` for no PCN, and neither is a fact we hold. "No payer data" and "the payer is cash" are different states, and null is the difference |
+
+#### Medical template only — `BEACON-002`, 9 further fields
+
+| field | tier | evidence | note |
+|---|---|---|---|
+| `beacon.submission.claim_number` | SPEC | BEACON-002 | required, described as unique. **Emitted null:** the claim number lives on the 837 feed and never reaches the 340B sidecar. This null is what beacon_server's `409 ambiguous_claim_key` costs — with it, two administrations of one drug at one site on one day would be distinguishable |
+| `beacon.submission.claim_line_number` | SPEC | BEACON-002 | required. **Emitted null**, same reason. "Line numbers distinguish distinct services that are submitted on the same claim" |
+| `beacon.submission.hcpcs_code` | SPEC | BEACON-002, STD-X12-837 | **not marked required** — Beacon says to leave it blank for miscellaneous codes such as A9270 or J3490. **Emitted null on this mock**: the J-code reaches an episode by a reference lookup on the NDC, and this sidecar row carries neither the episode nor a resolved drug, so a formatter would have to reach into reference data to derive it. E2 landed in wave 5; the constraint here is the formatter's, not E2's |
+| `beacon.submission.hcpcs_code_modifier_1` | SPEC | BEACON-014, BEACON-002, STD-X12-837 | **not marked required.** The article says "Up to four modifier codes may be entered for the same claim line" and was read as a delimiting question — it is not one. The downloaded template carries **four columns**, `hcpcs_code_modifier_1` through `_4`, so nothing is delimited and the prior UNKNOWN is closed. Ours goes in `_1`; this fabric parses one modifier off SVC01 and has nowhere to get a second |
+| `beacon.submission.hcpcs_code_modifier_2` | SPEC | BEACON-014 | column 7 of the medical template. Emitted null — we hold one modifier at most |
+| `beacon.submission.hcpcs_code_modifier_3` | SPEC | BEACON-014 | column 8. Emitted null, same reason |
+| `beacon.submission.hcpcs_code_modifier_4` | SPEC | BEACON-014 | column 9. Emitted null, same reason |
+| `beacon.submission.health_plan_name` | SPEC | BEACON-002 | required. **Emitted null, sentinels refused** (`CASH`, `NONE`). Beacon's own examples are "Medicare Part B, MediCal, Aetna POS", given as examples and not as an allowed-value list |
+| `beacon.submission.health_plan_id` | SPEC | BEACON-002 | required. **Emitted null, sentinels refused**, same as above |
+| `beacon.submission.rendering_physician_id` | SPEC | BEACON-002 | required, "Numeric – 10 digits" (an en dash on this page, a plain hyphen on the pharmacy one). "The NPI of the healthcare provider who rendered or supervised the care." **Emitted null.** The medical template asks for two NPIs — a clinician and a facility — and we hold exactly one. It is mapped to Service Provider ID, which is what provider_npi means; copying the one value into both would manufacture a second fact out of the first |
+| `beacon.submission.quantity` | SPEC | BEACON-002 | required. **Emitted null, and this is a different decision from the pharmacy Quantity Dispensed above rather than the same one applied twice.** Beacon conditions the meaning on the HCPCS row: with a specific HCPCS code it must be that code's CMS-defined billable units, without one it must be NCPDP standardized billing units for the NDC-11. Beacon publishes neither table, and domain.enums.UnitBasis is EACH / ML / MG, which is not that vocabulary. Any number here would be in a unit Beacon did not ask for, and a wrong quantity on a rebate submission is worse than a null |
+| `beacon.submission.unit_of_measure` | SPEC | BEACON-002 | **not marked required**, but conditionally so in its own words: "Either HCPCS code or UOM is required." Beacon defers the allowed values to "standardized billing units as defined by NCPDP" and lists none, so the accepted UOM vocabulary is UNKNOWN. Emitted null |
 
 ### `acknowledgement`
 
@@ -516,14 +610,35 @@ quantity and silently destroyed the one property the feed spec insists on.
 Stated in the voice of the evidence files' own UNKNOWN sections, because a provenance table
 that is read as a schema is worse than none:
 
-1. **That any of these column names is a vendor's.** 234 of 247 are ours. Not one Verity
-   column and not one Craneware column has any source, and the thirteen Beacon rows that are
-   not `INVENTED` are carried by a public standard or by an assessment document *about* Beacon,
-   never by Beacon.
+1. **That most of these column names are a vendor's.** 226 of 255 are ours. Not one Verity
+   column and not one Craneware column has any source. The 20 Beacon `submission` fields
+   carrying a `BEACON-001` or `BEACON-002` citation are the single exception in this
+   repository, and the seven remaining Beacon `SPEC` rows are still carried by an assessment
+   document *about* Beacon rather than by Beacon.
 
 2. **That the datasets and reports contain these fields.** The dataset names are `DOC2-009`'s
    and the report names are `CRANEWARE-001`'s, retrieved verbatim. What is inside them is
    unpublished. A `SPEC` row on a field does not make the payload it sits in a vendor payload.
+
+2a. **That the emitted JSON matches Beacon's downloadable template file.** `BEACON-001` and
+   `BEACON-002` each head a section "Download the ... data template here:" followed, in the
+   extracted text, by nothing. The attachment did not survive text extraction and was never
+   obtained. So the byte-exact header row of the real template — its column spelling, its
+   order, and whether it even matches the article's own field list — is **unverified**. What
+   the `SPEC` rows claim is that these names are the names the *article* prints, which is a
+   different artefact and a weaker claim.
+
+2b. **That the submission is in a format Beacon accepts.** Neither template article says
+   anything about CSV versus XLSX, delimiter, encoding, quoting, or whether a header row is
+   expected — and nothing about how to submit: no SFTP, no API, no portal, no filename
+   convention, no cadence. Our JSONL-over-HTTP shape is `INVENTED` in full, and `BEACON-005`,
+   the article that describes the submission workflow, is still a 403. Field names being right
+   says nothing about the envelope around them being right.
+
+2c. **That we know which date formats Beacon takes.** Both templates say "Standard date
+   formats" and neither enumerates them. We emit `CCYYMMDD` because that is what every feed in
+   this repository carries, not because Beacon asked for it. Do not read this file as evidence
+   that ISO-8601 would be refused, or accepted.
 
 3. **That these are all the fields.** `CRANEWARE-001` says "and other commonly requested
    reports," so Craneware's five are explicitly not exhaustive, and the same caution applies
