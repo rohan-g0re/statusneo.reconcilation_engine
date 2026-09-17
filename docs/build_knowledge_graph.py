@@ -1225,11 +1225,201 @@ def wave_14_connectivity():
         "The GitHub remote moved to statusneo.reconcilation_engine, one fewer l. Pushes still succeed through a redirect, but the configured origin URL is stale")
 
 
+def wave_15_building_and_reviewing_the_connector():
+    """What building waves 0-7 and then reviewing them adversarially settled.
+
+    Wave 14 recorded the connectivity layer as a PLAN. This wave records what
+    building it, and then attacking it with two independent reviewers, actually
+    produced -- including four things the build believed about itself that turned
+    out to be false.
+
+    None of these entity names appear in `grounding.py`'s routing tables, so none
+    becomes a Clause and the recorded agent-eval prompts are unmoved.
+    """
+
+    # --- what the build actually is, as opposed to what it was planned to be ---
+
+    E("The vendor adapters are written and unwired", "Status",
+      "src/recon/connectors/vendors/ -- verity.py, craneware.py, beacon.py -- is written, documented, schema-checked and unit-tested, and NOTHING IN src/ IMPORTS IT",
+      "Measured, not read: a full build produces 0 BEACON_ID rows and 0 PAYMENT_REFERENCE rows in crosswalk_key, on both the demo and full profiles",
+      "This single fact is the root cause behind four requirement failures at once -- C2 (outbound submission), C5 (Beacon ID as a key), E3 (payment references) and half of F2 (control totals)",
+      "The proximate reason is documented in registry.py rather than accidental: the delimited reader wants a received_at off every row, and a vendor export carries qualification_received_at / batch_received_at / reversal_received_at, so choosing among them is a mapping decision the seam does not yet make",
+      "F2's consequence is the sharpest: the only two sources in the build that declare a trailer are the two that never reach the reconciling path, so every control-total check that executes is vacuous",
+      "Recorded as FAIL in docs/connectivity_layer_build_plan.md rather than as a caveat under a green wave, because 'committed and green' and 'requirement met' are different claims")
+
+    E("The connector layer changed nothing downstream", "Status",
+      "A full build at HEAD against one at dbb129e, the pre-connector baseline, in a git worktree: episode identity -- id, track, ndc11, date_of_service -- is IDENTICAL on both demo and full",
+      "raw_record, normalized_record, episode, verdict, cash_allocation and parked_record counts all identical",
+      "The only downstream change is crosswalk_key, 11947 -> 13613 on full, and that delta of 1666 is exactly COVERED_ENTITY_340B 855 + HCPCS 811",
+      "Zero orphan raw_record rows, zero quarantines of any reason, zero COVERED_ENTITY_MISMATCH parks on generated data",
+      "So the honest split is: nothing was broken, and some things were never finished. Those are different failures with different fixes, and a review that reports only one of them is misleading")
+
+    # --- the traps, each earned by a real defect this session ------------------
+
+    E("A guard copied three times disagrees three ways", "Trap",
+      "PROVENANCE: agent default, found by an independent reviewer that executed the bypass rather than reading the guard",
+      "The ground-truth refusal existed in three transports -- transport.py, sftp.py, http.py -- as three independent copies of the same idea",
+      "They disagreed: http.py casefolded the comparison, the other two did not. SftpTransport refused /exports/truth and ACCEPTED /exports/TRUTH",
+      "A reviewer fetched ground_truth.json over a real paramiko SSH connection through that hole, end to end -- demonstrated, not theorised",
+      "transport.py's copy was correct only by accident: Path.resolve() canonicalizes an EXISTING path to its on-disk casing on Windows, protection that evaporates for a directory not yet created and that never existed on Linux",
+      "SFTP was also missing the second layer -- the local transport re-checks each document after resolving it, so a bad root is still caught per file; SFTP checked only at construction, making that one check the entire guarantee",
+      "Fixed by one _names_truth() helper all three call. The rule to take from it: a security property copied per call site is a property that holds in the average case and fails in some particular one",
+      "Whether TRUTH and truth are one directory is the SERVER's filesystem's opinion, not ours -- one on Windows and macOS, two on a POSIX host. A guard whose correctness depends on which host a vendor runs is not a guarantee")
+
+    E("A test can promise coverage its filter does not deliver", "Trap",
+      "test_no_transport_implementation_can_resolve_a_path_under_truth promised in its docstring to cover 'every implementation, not just this one'",
+      "It filtered on value.__module__ == transport.__name__, which enumerates exactly LocalDirectoryTransport -- both the wave-3 and wave-4 transports escaped it",
+      "`assert implementations` passed happily on a list of one, so the test was green and the guarantee was untested for two waves",
+      "This is why the SFTP bypass survived four waves of self-verification: the test meant to catch it was structurally incapable of seeing it",
+      "The fix pattern: assert on the SIZE of what a discovery test discovered (`>= 3`), because a discovery that finds too little looks identical to a subject that is clean")
+
+    E("An assertion whose subject is absent passes", "Trap",
+      "PROVENANCE: agent default, and the dead assertion was the agent's own, found by a reviewer reading what the fixture actually selects",
+      "A scoped-key assertion added in wave 5 selected the first EXCEPTION-queue episode, which is medical and carries no COVERED_ENTITY_340B key at all",
+      "The loop body therefore never ran, and an entities_seen that stayed empty satisfied `len(...) <= 1` as `0 <= 1`",
+      "Both assertions were dead the day they were written, inside a comment claiming the test checked 'strictly more' than the one it replaced",
+      "The same shape appeared twice more in the same review: a checkpoint-hash assertion guarded by hasattr(server, 'root') on a class with no public root, reducing to x == x",
+      "Fix pattern: a test that searches for its own subject must FAIL when it finds none. A guard that silently does nothing when its subject is absent is worse than no guard, because the green tick is read as evidence")
+
+    E("A docstring can assert a guarantee the code does not provide", "Trap",
+      "crosswalk/keys.py claimed requirement E1 held 'by construction rather than by a comparison someone has to remember to write' and that there was 'no equality check to forget'",
+      "It holds by exactly such a check -- pipeline._contradicts_covered_entity -- and COVERED_ENTITY_340B is published and never looked up by anything",
+      "Worse than being wrong: the sentence described a guarantee, so a reader would stop looking for the check that actually carries it",
+      "Three more in the same family were found and corrected: dossier.py claiming derived keys 'resolve records normally' when one resolves nothing, sites.py naming a vendor site column that does not exist, and two places still saying HCPCS 'is not built' after E2 landed",
+      "In a repository whose credibility rests on its prose being true, a false docstring is worse than a missing one -- it is a claim a reviewer will spend their scepticism elsewhere because of")
+
+    E("Idempotency that rests on statement order", "Trap",
+      "control_total has no unique constraint and no idempotency key. Re-running a load does not duplicate its rows, and the reason is not a constraint",
+      "It is that reconcile_or_fail sits AFTER the batch_for_file_sha256 early-continue in load_from_sources. Swap the two statements and every run appends a duplicate row into a table whose triggers forbid cleaning it up",
+      "No test pins that ordering: the acceptance is exercised through a test-local reimplementation of the loader's two statements, not through the loader",
+      "cash_allocation is protected the same transitive way -- by _insert_tree returning None on a repeat, not by any constraint of its own",
+      "The rule: when idempotency comes from control flow rather than from a constraint, the control flow is the invariant and something has to pin it")
+
+    E("A wire format agreed in two places and matched in neither", "Trap",
+      "PROVENANCE: agent default, found by a reviewer checking whether a cited test existed, then proven by running both sides",
+      "beacon.py says its submission template and the mock's payload builder are 'kept in step by a round-trip test rather than by an import'. That test does not exist",
+      "Proven empirically rather than inferred: the mock indexes on fill_date '20251216' (CCYYMMDD, straight off the generator sidecar) and a connector-built body would send date_of_service '2025-12-16' (ISO, because adapters.py converts it)",
+      "So the first real end-to-end submission would 404 with unknown_claim, and the acknowledgement check would then raise on the same mismatch",
+      "It survived because both sides were only ever tested against themselves -- the tests that 'submit' POST the mock's own payload builder, so the adapter's mapping never touches the wire",
+      "A claimed test is a load-bearing claim. Citing a test that does not exist is how two halves of a seam drift while both look verified")
+
+    # --- decisions, with provenance -------------------------------------------
+
+    E("A weak inference is worse than a null", "Decision",
+      "PROVENANCE: agent default, overturned by its own measured output rather than by review",
+      "Requirement E1 wanted episodes to carry a 340B covered entity",
+      "The first implementation derived it from the rendering prescriber's affiliation. It filled 22 of 23 medical episodes and then CONTRADICTED the TPA on five of them",
+      "DOC2-004 makes the TPA authoritative for 340B qualification and source transaction context, so the inference was overruling the system of record",
+      "It was worse than no value because it landed in a column everything downstream reads as fact, and then drove the contradiction guard -- so the guess parked five records the TPA had labelled correctly",
+      "Now registration-only: an episode's covered entity comes from the reference table's registered_pharmacy_npis or is NULL. Medical episodes carry NULL and get their entity from the record that states it",
+      "The asymmetry that makes NULL safe: the guard treats absence as 'no opinion' and never fires on it, so a null is inert where a wrong value is actively harmful")
+
+    E("Two independent reviewers beat four waves of self-verification", "Learning",
+      "PROVENANCE: the user specified this structure explicitly and insisted on it after it was skipped for four waves",
+      "Two Fable reviewers, each planning before dispatching, each directing its own fan-out of Opus workers, neither permitted to write code",
+      "Waves 3-6 had been built by single Opus builders that verified their own work and reported green. The review found a working ground-truth bypass, three tests that could not fail, and four false docstrings",
+      "The structural reason it worked: a builder verifies against what it intended to build, and a reviewer verifies against what the requirement says. Those diverge precisely where the builder misunderstood",
+      "The reviewers were also told the findings already recorded, so workers were not spent rediscovering them -- and were asked to state failure criteria BEFORE looking, so a comfortable reading could not be rationalised afterwards",
+      "Cost: roughly twenty Opus workers. It found a demonstrated security hole that four waves of green tests had not")
+
+    E("Measure the benchmark, not your own tokens", "Learning",
+      "PROVENANCE: agent default, prompted by the user rejecting a verification that had never looked at the benchmark",
+      "Every check before this one verified the stylesheet against ITS OWN declared tokens, which answers 'did the CSS apply', not 'does this look like Linear'",
+      "Measuring linear.app directly found three real divergences: display tracking of -0.022em was being applied to a 19px masthead when they reserve it for >=32px, our UI text sat at -0.006em against their measured -0.01em, and our card radius was 10px against their 12px",
+      "It also DISPROVED a claim this build had been repeating: 'Linear's look is borders-not-shadows' is false -- they run 42 shadowed elements to 98 bordered page-wide",
+      "We still use zero shadows, but now as a stated divergence with a reason (a shadow reads as depth on their near-black page and as smudge on a light one at this density) rather than as mistaken fidelity",
+      "Recorded in docs/frontend_linear_benchmark.md, including the three divergences kept deliberately -- colour, shadows and the strict spacing scale")
+
+    E("A changelog drawn as boxes is not a system diagram", "Learning",
+      "PROVENANCE: user decision, stated bluntly after ten such bands had already been committed",
+      "Rows of labelled rectangles summarising what each wave did contain no components, no direction and no arrows",
+      "A system diagram answers what talks to what and in which direction. A changelog answers what happened and when. Only one of those is architecture, and the boxes made the wrong one look like the right one",
+      "The canvas already held the correct model -- 'THE WHOLE PROJECT, END TO END', 99 elements of which 26 are arrows -- and the right move was to extend that language rather than invent a worse one beside it",
+      "Replaced with 97 elements, 20 arrows: vendors into mocks into transports into load_from_sources into raw_record, then the unchanged pipeline, then the surface",
+      "The two things drawn because they are true rather than flattering: the vendor leg ends in a DASHED arrow that stops short of the seam, and the truth store sits crossed out")
+
+    # --- what phase 1's refresh turned up, which is itself graph-worthy --------
+
+    E("A citation by line number rots on the next edit", "Trap",
+      "PROVENANCE: agent default, found by auditing docs/agent_layer_design.md against the code rather than by a test",
+      "The fourth member of the pointer-rot family, and the one the existing three do not cover: the file still exists and its name is still right, only the LINE moved",
+      "agent_layer_design.md cited src/recon/db/schema.sql:461-464 for the work_item triggers. The fact was still true; the triggers had moved to 518-521 because the connectivity layer took the schema from user_version 3 to 7 and shifted everything below it",
+      "It runs in both directions. rubric.py cited agent_layer_design.md:55 and :66, and both had moved -- then moved again when this refresh edited the document",
+      "The fix is not a better line number, it is a different kind of reference: rubric.py now cites the document's SECTION. A section survives an edit above it; a line number is invalidated by every insertion, including the one that corrects it",
+      "The suite cannot see any of this. A comment pointing at the wrong line of a real file is not a failure any runner checks")
+
+    E("The walkthrough narrates an episode that does not exist", "Trap",
+      "PROVENANCE: agent default, found by auditing the walkthroughs against a real run rather than against the code that produces them",
+      "Both walkthroughs -- the documents written for a spoken interview -- are built around claim E-000042 with verdicts A-07/C-09, short $1,367.97 with a $6,864.00 rebate",
+      "On the frozen demo spine, E-000042 is A-02/C-00. The pair A-07/C-09 lands on NO episode at all. Anyone clicking E-000042 during the walkthrough sees a different claim than the one being described",
+      "The first reviewer blamed the connectivity layer's reseeding. That was WRONG and worth recording: checked at dbb129e, before any connector work, the example was already wrong there. Episode identity is byte-identical between the two commits",
+      "So the real cause is older and simpler -- the figures were hand-composed to illustrate the narrative and never re-derived from a run, and nothing checks a document's worked example against the data",
+      "The fix is not better numbers, it is not using a real-looking id a reader will click. The closest true episode is E-000007 (A-04/C-09): reimbursement reconciled at $6,638.63, rebate approved and never paid, $1,929.00 outstanding",
+      "A worked example is the most load-bearing prose in any walkthrough and the only kind no test can see")
+
+    E("A design document can specify a mechanism the build never used", "Learning",
+      "PROVENANCE: agent default, found by auditing the design document against the implementation it preceded",
+      "agent_layer_design.md's schema section rested on `pydantic.BaseModel` preserving declaration order into `model_json_schema()`, with illustrative code writing `class ProposedAction(BaseModel)`",
+      "The build uses no pydantic at all. schemas.py is frozen dataclasses plus a hand-written ordered _FIELD_SCHEMAS dict, because pydantic arrives only with the `api` extra and the agent layer must import on a base install that has neither it nor FastAPI",
+      "The PRINCIPLE the section argued for -- reasoning-first field order, worth ~60pp on hard tasks -- is correctly implemented. Only the named mechanism was wrong, which is the more dangerous shape: the claim reads as verified because its conclusion is true",
+      "Same audit found the document's EvidenceSpan illustration claiming model-supplied offsets, where the code deliberately forbids them and locates quotes with str.find() afterwards -- the code is STRICTER than its own design document",
+      "A document written alongside an implementation drifts hardest where it was most confident, because confident prose is what nobody re-checks")
+
+    # --- corrections to wave 14, which planned what this wave built ------------
+    # None of these entities is routed in grounding.py, so extending them moves
+    # no prompt and invalidates no recorded eval trace.
+
+    OBS("Connector-ready",
+        "Measured out as: 14 declared sources, all CONNECTOR_READY, and zero at working-connection or production-ready",
+        "The readiness report states 'No source in this build has ever reached a vendor system' and that sentence is armed -- a test points a row at a real host, resolves a credential, and asserts the report would say otherwise",
+        "But connector-ready turned out to cover two quite different states: the six generated feeds genuinely ingest, and the eight vendor sources map without ever reaching the database. The report does not yet distinguish them")
+
+    OBS("Vendor claims are cited or tagged INVENTED",
+        "Held under audit: zero citation violations across 247 + 69 provenance rows, every cited id present in index.jsonl, no SPEC row citing an UNAVAILABLE source",
+        "Verified non-vacuously -- the parser matched exactly the row counts both files declare for themselves, so nothing was being silently skipped",
+        "One weakness the audit named: SPEC covers both 'the vendor said it' and 'an assessment document about the vendor said it', and no test enforces the distinction. BEACON-013's url is Assignment_Doc_2.pdf page 3, which reads as first-hand at a glance")
+
+    OBS("A refactor can quietly delete a guarantee",
+        "This trap predicted the exact defect that later happened. The transport seam did generalise a directory into a Transport, and the ground-truth guarantee did survive in two of three implementations and silently fail in the third",
+        "What the original framing missed: the danger was not the refactor losing the check, it was the refactor COPYING the check, so three call sites each had one and only two were right")
+
+    # --- relations -------------------------------------------------------------
+
+    R("The vendor adapters are written and unwired", "blocks", "Connector-ready")
+    R("The vendor adapters are written and unwired", "is a limit of", "Shields connector fabric")
+    R("The connector layer changed nothing downstream", "is evidence for", "load_feeds transport seam")
+    R("The connector layer changed nothing downstream", "measured against", "Test suite")
+
+    R("A guard copied three times disagrees three ways", "is an instance of", "A refactor can quietly delete a guarantee")
+    R("A guard copied three times disagrees three ways", "threatens", "Measure the claim against the generated data")
+    R("A test can promise coverage its filter does not deliver", "is why", "A guard copied three times disagrees three ways")
+    R("An assertion whose subject is absent passes", "is the same family as", "A test can promise coverage its filter does not deliver")
+    R("A docstring can assert a guarantee the code does not provide", "is the same family as", "An instruction file goes stale silently")
+    R("Idempotency that rests on statement order", "threatens", "load_feeds transport seam")
+    R("A wire format agreed in two places and matched in neither", "is a limit of", "The vendor adapters are written and unwired")
+    R("A wire format agreed in two places and matched in neither", "is the same family as", "A docstring can assert a guarantee the code does not provide")
+
+    R("Two independent reviewers beat four waves of self-verification", "found", "A guard copied three times disagrees three ways")
+    R("Two independent reviewers beat four waves of self-verification", "found", "An assertion whose subject is absent passes")
+    R("Two independent reviewers beat four waves of self-verification", "found", "The vendor adapters are written and unwired")
+    R("A weak inference is worse than a null", "corrects", "Connector-ready")
+    R("Measure the benchmark, not your own tokens", "is the same family as", "Measure the claim against the generated data")
+    R("A changelog drawn as boxes is not a system diagram", "constrains", "Connectivity assignment")
+
+    R("The walkthrough narrates an episode that does not exist", "is the same family as", "A citation by line number rots on the next edit")
+    R("The walkthrough narrates an episode that does not exist", "threatens", "Build state")
+    R("A citation by line number rots on the next edit", "is the same family as", "Deleting a document orphans every pointer into it")
+    R("A citation by line number rots on the next edit", "threatens", "Agent layer")
+    R("A design document can specify a mechanism the build never used", "is the same family as", "A docstring can assert a guarantee the code does not provide")
+    R("A design document can specify a mechanism the build never used", "describes", "Agent layer")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
          wave_11_agent_layer_built, wave_12_explaining_the_build,
-         wave_13_trimmed_for_submission, wave_14_connectivity]
+         wave_13_trimmed_for_submission, wave_14_connectivity,
+         wave_15_building_and_reviewing_the_connector]
 
 
 def main():

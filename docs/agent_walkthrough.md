@@ -1,5 +1,21 @@
 # One Request, End to End — The Agent Layer
 
+> **Correction, added by an audit against the running code.** The worked example below —
+> claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00 rebate — **does not
+> match the data this repository generates.** On the frozen demo spine, `E-000042` is `A-02`/`C-00`,
+> and the pair `A-07`/`C-09` lands on no episode at all.
+>
+> **This is not connectivity-layer drift.** It was checked at `dbb129e`, before any of that work:
+> the example was already wrong there. Episode identity is byte-identical between the two commits.
+> The figures are a hand-composed illustration that was never re-derived from a run.
+>
+> The narrative is still a faithful description of *how the system works* — that is what it is for.
+> But **do not click `E-000042` during a walkthrough.** The closest real episode on the frozen demo
+> spine is **`E-000007`** (`A-04`/`C-09`, EXCEPTION): reimbursement fully reconciled at $6,638.63,
+> and a rebate approved and never paid — $1,929.00 expected, $0.00 received. That is a real
+> "approved but unpaid rebate" to point at.
+
+
 *This is the companion to `claim_walkthrough.md`. That one followed a claim through the deterministic side. This one follows a **request** through the agent side — from the moment you click a button to the moment something lands on disk. Same promise: at every stage I say what came in, what happened, what got written, and where it went. Where one program hands off to another, I stop and say so, because that is where the first document lost you. Read it straight through. About 90 minutes.*
 
 ---

@@ -532,7 +532,9 @@ def build_critique(
 
 # ═══ threshold, ceiling, stall, self-bias (S:5) ═════════════════════════════════
 
-THRESHOLD = 80.0  # points on the 0-100 scale (agent_layer_design.md:55). Auditable, not calibrated.
+THRESHOLD = 80.0  # points on the 0-100 scale, from agent_layer_design.md's rubric section.
+                 # Cited by section, not by line: the line moved twice while this comment
+                 # kept pointing at the old number. Auditable, not calibrated.
 STALL_EPSILON = 1.0
 MAX_ITERATIONS = 5
 
@@ -561,7 +563,7 @@ class Round:
 def _stalled(scores: list[float]) -> bool:
     """No score improvement across the last two rounds.
 
-    The design doc's own line (``docs/agent_layer_design.md:66``) reads::
+    The design doc's own pseudocode, in its Coordinator-loop section, reads::
 
         if verdict == history[-2][1] if len(history) > 1 else False:
 

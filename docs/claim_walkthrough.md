@@ -1,5 +1,21 @@
 # One Claim, End to End
 
+> **Correction, added by an audit against the running code.** The worked example below —
+> claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00 rebate — **does not
+> match the data this repository generates.** On the frozen demo spine, `E-000042` is `A-02`/`C-00`,
+> and the pair `A-07`/`C-09` lands on no episode at all.
+>
+> **This is not connectivity-layer drift.** It was checked at `dbb129e`, before any of that work:
+> the example was already wrong there. Episode identity is byte-identical between the two commits.
+> The figures are a hand-composed illustration that was never re-derived from a run.
+>
+> The narrative is still a faithful description of *how the system works* — that is what it is for.
+> But **do not click `E-000042` during a walkthrough.** The closest real episode on the frozen demo
+> spine is **`E-000007`** (`A-04`/`C-09`, EXCEPTION): reimbursement fully reconciled at $6,638.63,
+> and a rebate approved and never paid — $1,929.00 expected, $0.00 received. That is a real
+> "approved but unpaid rebate" to point at.
+
+
 *This is the walkthrough document for the deterministic half of the system — the generators, the connector, the crosswalk, the reconciliation engine and the read layer. The agent layer is deliberately not in here; it gets its own document. Read this straight through: it is about 90 minutes and it is the whole thing. It is written for the interview question you know is coming — "trace one claim end-to-end" — so it follows one real claim from the moment a drug leaves the shelf to the moment a finance analyst sees it in a queue, and stops to explain the domain wherever the machinery depends on it. Where you only need to recognise something, I say so. Where you need to be able to defend it under pushback, I say that too.*
 
 ---
@@ -392,7 +408,7 @@ This is the mechanism the whole architecture is organised around, so it gets the
 
 **What it is:** every record, on arrival, does two things. It **publishes** the keys it makes resolvable, and it **looks up** the keys it needs someone else to have published. Both go through one table, `crosswalk_key`, as a point seek on `(key_type, key_value)`.
 
-There are exactly eight key types, one per bridge:
+There are exactly eight key types under Decision A24, one per bridge. *(The connector layer later added four more — `BEACON_ID`, `COVERED_ENTITY_340B`, `HCPCS`, `PAYMENT_REFERENCE` — additively, leaving all eight below unchanged. Two of them, `COVERED_ENTITY_340B` and `HCPCS`, are published on an ordinary run; the other two need the Beacon connector, which is not wired into ingest.)*
 
 ```mermaid
 flowchart LR
@@ -413,14 +429,20 @@ flowchart LR
 
 **Why one file builds all of them:** because building key strings in two places is exactly how you end up with a crosswalk that works perfectly for pharmacy claims and silently misses every medical one. Every key in the system is constructed by one module, and the 835 side of the pharmacy bridge *reconstructs* the `NCPDP_CLAIM` key by splitting `CLP01` back into Rx and fill — the parsing step from §3, now doing real work.
 
-**What happens when a lookup finds nothing — and this is the interesting half.** There are exactly four outcomes and no tie-breaks anywhere:
+**What happens when a lookup finds nothing — and this is the interesting half.** There are five outcomes and no tie-breaks anywhere:
 
-| Outcome                       | What the connector does                    |
-| ----------------------------- | ------------------------------------------ |
-| Exactly one match             | Attach it                                  |
-| Keys present, nothing matches | **Park** it: `NO_KEY_MATCH`        |
-| More than one match           | **Park** it: `AMBIGUOUS_KEY_MATCH` |
-| No usable keys at all         | **Park** it: `NO_KEYS_PRESENT`     |
+| Outcome                                            | What the connector does                    |
+| -------------------------------------------------- | ------------------------------------------ |
+| Exactly one match                                  | Attach it                                  |
+| Keys present, nothing matches                      | **Park** it: `NO_KEY_MATCH`                |
+| More than one match                                | **Park** it: `AMBIGUOUS_KEY_MATCH`         |
+| No usable keys at all                              | **Park** it: `NO_KEYS_PRESENT`             |
+| One match, but it names a different covered entity | **Park** it: `COVERED_ENTITY_MISMATCH`     |
+
+*The fifth was added by the connector layer (requirement E1) and is the only one where the keys
+resolved perfectly. The record and the episode simply disagree about whose 340B claim it is, and
+attaching would credit one covered entity's savings to another. Silence is never a contradiction:
+the check fires only when both sides name an entity and the two differ.*
 
 A parked record is *held*, not discarded — "the claim is not missing, the mapping failed", which is a different problem with a different owner. And every subsequent arrival does a **backward re-check**: it probes the parked pool for anything that now resolves against the keys it just published. That is what lets an out-of-order bank deposit retroactively clear a park from three weeks earlier, with no window to tune and no sweep job to schedule.
 
@@ -739,7 +761,7 @@ Say these before you are asked. Each one is a scoped decision with a reason, not
 
 **Scale.** SQLite, single file, one process. The query plans are pinned and the access patterns are point seeks, so the shape survives a move to Postgres — but nobody has run it there.
 
-**Test coverage.** 583 tests total; the agent layer accounts for 306 of them, so roughly 277 cover the deterministic side — the engine against all 4,224 oracle configurations, every hot query's plan, the full HTTP surface under concurrency, and end-to-end reproduction of all 372 verdict pairs. There is **no frontend test suite at all.** Say that plainly.
+**Test coverage.** 891 tests collected — 583 when this was written, before the connectivity layer added roughly 250 more. Three buckets now rather than two: the deterministic engine, the agent layer (~368 in `test_agents_*`), and the connectivity layer (`test_connectors` 92, `test_readiness` 44, `test_control_totals` 27, `test_authority` 25, `test_sites` 17, `test_mapping` 16, `test_file_pattern` 14, `test_vendor_evidence` 14, `test_api_pattern` 13). The deterministic side still covers — the engine against all 4,224 oracle configurations, every hot query's plan, the full HTTP surface under concurrency, and end-to-end reproduction of all 372 verdict pairs. There is **no frontend test suite at all.** Say that plainly.
 
 ---
 
