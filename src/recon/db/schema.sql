@@ -87,6 +87,42 @@ CREATE TRIGGER trg_raw_no_update BEFORE UPDATE ON raw_record
 CREATE TRIGGER trg_raw_no_delete BEFORE DELETE ON raw_record
   BEGIN SELECT RAISE(ABORT, 'raw_record is immutable'); END;
 
+-- ═══ CONTROL TOTALS -- F2: what the vendor declared vs what arrived ════════
+-- Doc 2 step 5's second clause.  The failure this exists to catch is the one that parses
+-- cleanly: a truncated file is still valid JSONL, every surviving record is well-formed,
+-- every total is internally consistent, and the only evidence that half the day is missing
+-- is a number in the trailer that nobody compared against the rows.
+--
+-- Immutable, with the same triggers raw_record carries and for a stronger reason: a control
+-- total you can edit is not a control total.  The whole value of the declared figure is that
+-- it was fixed by someone else before the data arrived, so a process that can reconcile a
+-- mismatch by rewriting the declaration has reconciled nothing.
+--
+-- No FK to ingest_batch, deliberately.  A batch that FAILS its control total must still
+-- record why it failed, and the failure path does not produce a batch row to point at.
+CREATE TABLE control_total (
+  control_id     INTEGER PRIMARY KEY,
+  source_id      TEXT    NOT NULL,          -- the registered source (A1)
+  source_file    TEXT    NOT NULL,
+  file_sha256    TEXT    NOT NULL,          -- which exact bytes were being checked
+  declared_count INTEGER,                   -- NULL = the vendor declared none
+  observed_count INTEGER NOT NULL,
+  -- Money is compared in cents, as integers, and only ever compared -- never summed here.
+  -- This column is a figure the file declared, copied across; the observed side is computed
+  -- where amounts already live.
+  declared_cents INTEGER,
+  observed_cents INTEGER,
+  reconciled     INTEGER NOT NULL CHECK (reconciled IN (0,1)),
+  checked_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  detail         TEXT
+) STRICT;
+CREATE INDEX ix_control_total_source ON control_total(source_id, checked_at);
+
+CREATE TRIGGER trg_control_total_no_update BEFORE UPDATE ON control_total
+  BEGIN SELECT RAISE(ABORT, 'control_total is immutable; a total you can edit is not a control total'); END;
+CREATE TRIGGER trg_control_total_no_delete BEFORE DELETE ON control_total
+  BEGIN SELECT RAISE(ABORT, 'control_total is immutable; a total you can edit is not a control total'); END;
+
 -- ═══ QUARANTINE -- D-5 malformed: cannot be normalized, lineage intact ═════
 CREATE TABLE quarantined_record (
   quarantine_id INTEGER PRIMARY KEY,
@@ -545,4 +581,4 @@ CREATE TABLE connector_checkpoint (
   PRIMARY KEY (source_id, document_name)
 ) STRICT;
 
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;

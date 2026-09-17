@@ -67,7 +67,7 @@ DATE_FORMAT = "%Y-%m-%d"
 
 #: Bumped whenever ``db/schema.sql`` changes shape.  A database stamped with an older
 #: value is rebuilt, not migrated (the database is a derived artefact).
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 ADAPTER_VERSION = "1.0.0"
 ENGINE_VERSION = "1.0.0"
 

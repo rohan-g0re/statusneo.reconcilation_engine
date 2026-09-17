@@ -112,6 +112,9 @@ __all__ = [
     "register_connector_source",
     "record_connector_fetch",
     "connector_checkpoints",
+    # control totals (F2) — declared against observed, immutable once written
+    "record_control_total",
+    "control_totals",
 ]
 
 
@@ -1236,4 +1239,108 @@ def connector_checkpoints(
         " ORDER BY document_name",
         (source_id,),
     ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# --- control totals (F2) ---------------------------------------------------
+
+
+#: Every column of ``control_total`` except its surrogate key, in schema order.
+#:
+#: A tuple rather than ten inline names for the reason ``_NORM_COLUMNS`` gives: the INSERT is
+#: built from this, so a column missing here is a column nothing can ever write, and a NULL
+#: that was never offered looks exactly like a NULL that was.
+_CONTROL_TOTAL_COLUMNS = (
+    "source_id",
+    "source_file",
+    "file_sha256",
+    "declared_count",
+    "observed_count",
+    "declared_cents",
+    "observed_cents",
+    "reconciled",
+    "checked_at",
+    "detail",
+)
+
+
+def record_control_total(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    source_file: str,
+    file_sha256: str,
+    declared_count: int | None,
+    observed_count: int,
+    declared_cents: int | None,
+    observed_cents: int | None,
+    reconciled: bool,
+    checked_at: str,
+    detail: str | None,
+) -> int:
+    """Append one declared-against-observed comparison (requirement F2).
+
+    Write-once by construction.  ``control_total`` carries ``BEFORE UPDATE`` and
+    ``BEFORE DELETE`` triggers that ``RAISE(ABORT)``, so there is deliberately no companion
+    function to revise a row: a control total you can edit is not a control total, because
+    the whole value of the declared figure is that somebody else fixed it before the data
+    arrived.
+
+    **The mismatched case is recorded and then the caller fails.**  That ordering is why this
+    is its own statement rather than part of the batch write — the row has no foreign key
+    onto ``ingest_batch`` precisely so a batch that never comes into existence still leaves
+    an explanation behind.  Writing it inside the failing batch's transaction would roll the
+    evidence back along with the batch.
+
+    ``reconciled`` is stored as 0/1 under a SQL ``CHECK``; the boolean is coerced here so no
+    caller has to know that.  ``checked_at`` is an operational wall-clock, the same narrow
+    permission §4.11 grants ``connector_checkpoint.fetched_at``, and it is an argument rather
+    than a clock read here so a replayed run produces the same row.
+    """
+    values = (
+        source_id,
+        source_file,
+        file_sha256,
+        declared_count,
+        observed_count,
+        declared_cents,
+        observed_cents,
+        1 if reconciled else 0,
+        checked_at,
+        detail,
+    )
+    with _atomic(conn) as tx:
+        cursor = tx.execute(
+            f"INSERT INTO control_total ({','.join(_CONTROL_TOTAL_COLUMNS)})"
+            f" VALUES ({_placeholders(len(_CONTROL_TOTAL_COLUMNS))})",
+            values,
+        )
+        return int(cursor.lastrowid)
+
+
+def control_totals(
+    conn: sqlite3.Connection, source_id: str | None = None
+) -> list[dict[str, object]]:
+    """Every control total recorded, or every one for a single source, in write order.
+
+    Plain rows rather than a typed object, for the reason :func:`connector_checkpoints`
+    gives: the type that gives them meaning lives in ``recon.connectors``, and importing it
+    here would make ``db/`` depend on the package that sits above it.
+
+    ``ORDER BY control_id`` is the order the checks happened in, which is the order a reader
+    wants when the question is "what did this source do today".  The index on
+    ``(source_id, checked_at)`` serves the operational filter; this is a small, append-only
+    audit table and a read of it is not on any hot path.
+    """
+    if source_id is None:
+        rows = conn.execute(
+            f"SELECT control_id, {','.join(_CONTROL_TOTAL_COLUMNS)}"
+            "  FROM control_total ORDER BY control_id"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT control_id, {','.join(_CONTROL_TOTAL_COLUMNS)}"
+            "  FROM control_total WHERE source_id = ? ORDER BY control_id",
+            (source_id,),
+        ).fetchall()
     return [dict(row) for row in rows]

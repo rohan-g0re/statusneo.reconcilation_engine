@@ -246,6 +246,14 @@ class QuarantineReason(StrEnum):
     #: The record parsed and adapted perfectly, and then set a field its source system does
     #: not own (requirement E5, DOC2-004's source-of-truth boundary).
     #:
+    #: The file's own declared record count or total did not match what arrived (F2).
+    #:
+    #: The batch fails, rather than every surviving record being ingested successfully.  That
+    #: is the whole point: a truncated feed parses cleanly, so every individual record passes
+    #: every other check here and the shortfall is invisible at record level.  It is only
+    #: visible as a number the vendor wrote down before sending.
+    CONTROL_TOTAL_MISMATCH = "CONTROL_TOTAL_MISMATCH"
+
     #: Its own reason because the other five all mean "we could not read this", and the
     #: operator's next action for those is to go and look at the bytes.  Here the bytes are
     #: fine and the next action is a conversation about which system is the system of record

@@ -121,6 +121,8 @@ def create_app(settings: Settings | None = None):
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
 
+    from recon.db import migrate as migrate_errors
+
     resolved = settings or load_settings(Profile.DEMO)
 
     app = FastAPI(
@@ -139,6 +141,33 @@ def create_app(settings: Settings | None = None):
         allow_headers=["*"],
     )
     app.state.settings = resolved
+
+    @app.exception_handler(migrate_errors.SchemaVersionMismatch)
+    def _stale_database(request, exc):  # noqa: ANN001 - framework signature
+        """Answer a stale database with an instruction instead of a stack trace.
+
+        Found by actually opening the dashboard in a browser, which nothing in the test
+        suite does: the repository ships databases stamped by an older build, so the very
+        first request after any schema change raised here and FastAPI turned it into a bare
+        ``500 Internal Server Error``.  The message naming the one-line fix went to the
+        server log, where the person staring at the blank page was not looking.
+
+        ``503`` rather than ``500`` because the distinction is real and worth making: the
+        service is fine and its data is not ready.  ``Retry-After`` is deliberately absent —
+        waiting does not fix this, and advertising a retry would suggest it might.
+        """
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "stale_database",
+                "detail": str(exc),
+                "found_schema_version": exc.found,
+                "expected_schema_version": exc.expected,
+                "remedy": "POST /api/regenerate?profile=demo",
+            },
+        )
 
     @contextmanager
     def open_conn():

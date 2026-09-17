@@ -4,6 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
+    <!-- Inline SVG data URI rather than a binary .ico: it costs no extra request, cannot
+         404, and stays reviewable in a diff. Without it the browser asks for /favicon.ico
+         on every cold load and logs a 404 into the console, which trains a reader to
+         ignore console errors -- the one habit that hides a real one. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%235e6ad2'/%3E%3Cpath d='M8 20.5h4.2v3H8zM14 13h4.2v10.5H14zM20 8h4.2v15.5H20z' fill='%23fff'/%3E%3C/svg%3E"
+    />
     <title>Post-Claim Pharmacy Reconciliation</title>
   </head>
   <body>

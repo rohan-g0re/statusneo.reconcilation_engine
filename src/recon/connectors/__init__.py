@@ -29,4 +29,4 @@ fine.  Losing it quietly during a refactor is not.
 
 from __future__ import annotations
 
-__all__ = ["authority", "credentials", "registry", "schema_registry", "transport"]
+__all__ = ["authority", "credentials", "readiness", "registry", "schema_registry", "transport"]

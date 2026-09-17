@@ -240,6 +240,7 @@ def load_from_sources(
     the failure costs something.
     """
     from recon.connectors import checkpoint as checkpoint_module
+    from recon.connectors import control_totals
     from recon.connectors import registry
     from recon.db import repository
 
@@ -300,6 +301,32 @@ def load_from_sources(
                     source_id=source.source_id,
                     document=document.name,
                 )
+            )
+            # F2.  Before the batch row exists, not after.  A batch written first and then
+            # abandoned reads downstream as a file that arrived empty, which is the one
+            # reading a truncated delivery must never get — and ``control_total`` carries no
+            # foreign key onto ``ingest_batch`` precisely so the evidence outlives a batch
+            # that never comes into existence.
+            #
+            # Placed after the ``batch_for_file_sha256`` early-continue above, not before it:
+            # a file that already landed was reconciled when it landed, and re-checking would
+            # append a fresh control_total row on every run of a table that cannot be tidied
+            # up afterwards.
+            #
+            # Deliberately not caught.  A short file is not a bad record — there is no raw
+            # row to quarantine and no sensible partial outcome — so this propagates and the
+            # load aborts. Documents already loaded keep their batches, this document lands
+            # nothing, and loading is idempotent on the file hash, so a corrected
+            # re-delivery resumes exactly here.  ``_checkpoint()`` is not reached, which is
+            # also correct: a refused document was never taken.
+            control_totals.reconcile_or_fail(
+                conn,
+                source_id=source.source_id,
+                source_file=document.name,
+                file_sha256=file_sha,
+                text=text,
+                observed_count=len(rows),
+                checked_at=fetched_at,
             )
             batch_id = repository.insert_ingest_batch(
                 conn,

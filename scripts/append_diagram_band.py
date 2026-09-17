@@ -792,6 +792,101 @@ def band_wave_5(b: Band, y: int) -> None:
     )
 
 
+def band_wave_6(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 6  ·  PROOF", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="Doc 2 step 5  —  the wave that makes the build claimable rather than merely built",
+        size=13,
+    )
+
+    b.box(
+        "g1",
+        x=LEFT_X,
+        y=y + 56,
+        width=300,
+        height=74,
+        label="F1  four golden claims\nraw → norm → episode → verdict → ledger",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "arch",
+        x=LEFT_X + 320,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="paid · rejected · reversed · unmatched\nselected by property, never by id",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "ct",
+        x=LEFT_X + 620,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="F2  control totals\ndeclared 500 / 450 arrived ⇒ BATCH FAILS",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "imm",
+        x=LEFT_X + 920,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="written BEFORE the batch exists\nimmutable · no FK to ingest_batch",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "rep",
+        x=LEFT_X + 1200,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="F3  readiness report\nevery cell derived, none typed in",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+        size=12,
+    )
+    b.box(
+        "none",
+        x=LEFT_X + 1500,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="live vendor connections\nNONE — and it is measured",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body=(
+            "each golden claim re-reads its own feed line off disk, so every figure is what the SOURCE says  ·  "
+            "all four were mutation-checked: change one cent and the test goes red"
+        ),
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
@@ -799,6 +894,7 @@ BANDS = {
     3: ("c3_", band_wave_3),
     4: ("c4_", band_wave_4),
     5: ("c5_", band_wave_5),
+    6: ("c6_", band_wave_6),
 }
 
 

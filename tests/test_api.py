@@ -598,3 +598,41 @@ def test_a_timeline_event_leads_to_its_verbatim_source(client):
 
 def test_an_unknown_source_record_is_a_404(client):
     assert client.get("/api/record/99999999").status_code == 404
+
+
+# ═══ a stale database is an instruction, not a stack trace ══════════════════
+
+
+def test_a_stale_database_answers_503_with_the_fix_rather_than_a_bare_500(tmp_path):
+    """The failure a reader meets before they have done anything wrong.
+
+    The repository ships databases stamped by an older build, so the first request after
+    any schema change hits this. It used to surface as ``500 Internal Server Error`` with
+    the remedy written only into the server log — where nobody staring at a blank dashboard
+    is looking. Found by opening the page in a browser; no test in this suite did that.
+
+    Delete this and the next schema bump silently goes back to a 500.
+    """
+    import dataclasses
+    import sqlite3
+
+    from recon.api.app import create_app
+
+    stale = tmp_path / "stale.sqlite"
+    connection = sqlite3.connect(stale)
+    # Any version that is not the current one; 3 is what the shipped databases carry.
+    connection.execute("PRAGMA user_version = 3")
+    connection.commit()
+    connection.close()
+
+    settings = dataclasses.replace(load_settings(config.Profile.DEMO), db_path=str(stale))
+    with TestClient(create_app(settings), raise_server_exceptions=False) as stale_client:
+        response = stale_client.get("/api/meta")
+
+    assert response.status_code == 503, "a ready service with unready data is not a 500"
+    body = response.json()
+    assert body["found_schema_version"] == 3
+    assert body["expected_schema_version"] == config.SCHEMA_VERSION
+    # The remedy must be actionable without reading the source or the server log.
+    assert "regenerate" in body["remedy"]
+    assert str(config.SCHEMA_VERSION) in body["detail"]
