@@ -376,7 +376,7 @@ knew its own id would make the acknowledgement decorative and delete C2's accept
 | `beacon.submission.claim_number` | INVENTED | — | BEACON-008's medical key, emitted as null: the claim number lives on the 837 feed and never reaches the 340B sidecar. Null rather than absent, so the gap is on the wire |
 | `beacon.submission.claim_line_number` | INVENTED | — | BEACON-008's medical key, emitted as null for the same reason |
 | `beacon.submission.service_provider_npi` | INVENTED | — | BEACON-008 names a service provider id and is a search summary, not a source; populated from provider_npi |
-| `beacon.submission.hcpcs_code` | STANDARD | STD-X12-837 | the SVC01 composite procedure identifier's J-code; emitted as null because HCPCS is requirement E2 and is not built |
+| `beacon.submission.hcpcs_code` | STANDARD | STD-X12-837 | the SVC01 composite procedure identifier's J-code; emitted as null because this sidecar row carries no resolved drug and a formatter may not reach into reference data to derive one. E2 itself landed in wave 5 -- an earlier version of this cell said it had not |
 | `beacon.submission.hcpcs_modifier_code` | STANDARD | STD-X12-837 | the 837's procedure modifier, which is the vocabulary BEACON-008 was reaching for; null for the same reason |
 | `beacon.submission.date_of_service` | INVENTED | — | the medical template's fill date under BEACON-008's spelling; a search summary is not a cited source |
 

@@ -180,28 +180,54 @@ def test_the_trace_shows_the_audit_trail_and_the_crosswalk(client):
             f"unexpected key type {key['key_type']!r}"
         )
 
-    # Strictly more than the original check: a scoped 340B key must actually be scoped, and
-    # scoped to *this* episode's covered entity.  A scoped key carrying someone else's entity
-    # would resolve records to the wrong covered entity while looking perfectly well-formed —
-    # which is the exact failure requirement E1 exists to prevent.
-    natural = {
-        key["key_value"]
-        for key in payload["crosswalk_keys"]
-        if key["key_type"] in {"NATURAL_340B_PHARMACY", "NATURAL_340B_MEDICAL"}
-    }
-    entities_seen = set()
-    for key in payload["crosswalk_keys"]:
-        if key["key_type"] != "COVERED_ENTITY_340B":
-            continue
-        entity, separator, scoped = key["key_value"].partition("|")
-        assert separator, f"scoped key {key['key_value']!r} carries no scope separator"
-        assert scoped in natural, (
-            f"scoped key {key['key_value']!r} wraps {scoped!r}, which is not a natural 340B "
-            "key on this episode — it would resolve records that belong somewhere else"
-        )
-        entities_seen.add(entity)
-    assert len(entities_seen) <= 1, (
-        f"one episode is scoped to more than one covered entity: {sorted(entities_seen)}"
+def test_a_scoped_340b_key_wraps_a_natural_key_on_its_own_episode(client):
+    """A scoped key must be scoped, and scoped to *this* episode's covered entity.
+
+    A scoped key carrying someone else's entity would resolve records to the wrong covered
+    entity while looking perfectly well-formed — the exact failure requirement E1 exists to
+    prevent.
+
+    **This began life inside the trace test above and never ran.** That test takes the first
+    ``EXCEPTION`` episode, which is medical and carries no ``COVERED_ENTITY_340B`` key at all,
+    so the loop body was skipped on every run and an ``entities_seen`` that stayed empty
+    passed ``&lt;= 1`` as ``0 &lt;= 1``. Both assertions were dead the day they were written, in a
+    test whose comment claimed it checked "strictly more".
+
+    So this searches for an episode that actually carries a scoped key and **fails if it finds
+    none**. A guard that silently does nothing when its subject is absent is worse than no
+    guard, because the green tick is read as evidence.
+    """
+    scoped_found = 0
+    for disposition in ("EXCEPTION", "PENDING", "CLOSED"):
+        rows = client.get(f"/api/queue/{disposition}?limit=200").json()["episodes"]
+        for row in rows:
+            trace = client.get(f"/api/episode/{row['episode_id']}/trace").json()
+            natural = {
+                key["key_value"]
+                for key in trace["crosswalk_keys"]
+                if key["key_type"] in {"NATURAL_340B_PHARMACY", "NATURAL_340B_MEDICAL"}
+            }
+            entities_seen = set()
+            for key in trace["crosswalk_keys"]:
+                if key["key_type"] != "COVERED_ENTITY_340B":
+                    continue
+                scoped_found += 1
+                entity, separator, scoped = key["key_value"].partition("|")
+                assert separator, f"scoped key {key['key_value']!r} has no scope separator"
+                assert scoped in natural, (
+                    f"scoped key {key['key_value']!r} wraps {scoped!r}, which is not a natural "
+                    "340B key on this episode — it would resolve records belonging elsewhere"
+                )
+                entities_seen.add(entity)
+            assert len(entities_seen) <= 1, (
+                f"{row['episode_id']} is scoped to more than one covered entity: "
+                f"{sorted(entities_seen)}"
+            )
+
+    assert scoped_found > 0, (
+        "no episode in the whole dataset carries a COVERED_ENTITY_340B key, so this test "
+        "asserted nothing. Either E1 stopped publishing scoped keys or the fixture changed; "
+        "both are findings, and neither should look like a pass."
     )
 
 

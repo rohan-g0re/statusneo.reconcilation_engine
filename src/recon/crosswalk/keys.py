@@ -277,11 +277,24 @@ def covered_entity_340b(
     in practice the string half of :func:`natural_340b_pharmacy` or
     :func:`natural_340b_medical`.
 
-    That construction is what makes requirement E1's acceptance — *"a TPA record for the
-    wrong covered entity does not resolve"* — true by construction rather than by a
-    comparison someone has to remember to write.  A TPA record declaring the wrong covered
-    entity builds a *different string*, resolves to nothing, and parks as ``NO_KEY_MATCH``.
-    There is no equality check to forget, and no code path where the check is skipped.
+    **What this key does NOT currently do, corrected after review.**  An earlier version of
+    this docstring claimed the scoping made requirement E1's acceptance true *by
+    construction* — that a wrong-entity record would build a different string, resolve to
+    nothing, and park as ``NO_KEY_MATCH``, with "no equality check to forget".  That was
+    false, and it was the most misleading sentence in this module, because it described a
+    guarantee a reader would then stop looking for.
+
+    What actually happens: this key type is **published and never looked up**.
+    ``_tpa_lookup_keys`` builds only ``NATURAL_340B_PHARMACY``, ``NATURAL_340B_MEDICAL`` or
+    ``HCPCS``, so a wrong-entity record resolves *cleanly* on the bare natural key and is
+    then caught by precisely the comparison the old text said did not exist —
+    ``pipeline._contradicts_covered_entity`` — parking as ``COVERED_ENTITY_MISMATCH``.
+
+    So E1's acceptance does hold, and there is a two-sided test for it.  It holds by an
+    equality check that can be forgotten, on the pharmacy track only, and this key is
+    currently a scoped identity written down for a lookup side that is not built yet.  The
+    construction below is still the right one for that lookup when it arrives; the claim
+    about what it guarantees today was not.
 
     **Why ``scoped_key_value`` does not go through :func:`_component`.**  It is itself a
     ``|``-joined composite, so ``_component`` would refuse it — that function's separator ban

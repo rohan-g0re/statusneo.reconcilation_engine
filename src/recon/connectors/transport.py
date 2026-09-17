@@ -128,6 +128,29 @@ class Transport(Protocol):
         ...
 
 
+def _names_truth(parts: "Iterable[str]") -> bool:
+    """Does any path component name the ground-truth directory, however it is spelled?
+
+    Case-insensitive, and that is the whole reason this exists as a named function rather than
+    an ``in`` test written out three times. All three transports had their own copy of the
+    check and they disagreed: ``http.py`` casefolded, ``sftp.py`` and this module did not. A
+    review turned that disagreement into a working bypass — ``SftpTransport`` refused
+    ``/exports/truth``, accepted ``/exports/TRUTH``, and fetched ground_truth.json over the
+    wire. Three copies of a rule is three chances to get it wrong, and one of them was taken.
+
+    This module's copy was correct only by accident: ``Path.resolve()`` canonicalizes an
+    *existing* path to its on-disk casing on Windows, so ``TRUTH`` collapsed to ``truth``
+    before the comparison. That protection evaporates for a directory that does not exist yet,
+    and it never existed on Linux at all.
+
+    Erring broad is the cheap direction: refusing a real directory named ``TRUTH`` costs a
+    source nobody has, while permitting one costs the guarantee that makes crosswalk accuracy
+    a measurement rather than a claim.
+    """
+    target = config.TRUTH_SUBDIR.casefold()
+    return any(str(part).strip().casefold() == target for part in parts)
+
+
 def _reject_unsafe_name(name: str) -> None:
     """Refuse a document name that is anything other than a bare filename.
 
@@ -161,7 +184,7 @@ class LocalDirectoryTransport:
 
     def __init__(self, root: Path | str) -> None:
         resolved = Path(root).resolve()
-        if config.TRUTH_SUBDIR in resolved.parts:
+        if _names_truth(resolved.parts):
             raise ForbiddenPathError(
                 f"{resolved} is inside the ground-truth directory. Ingestion is forbidden to "
                 "read truth/, and that prohibition is what makes the crosswalk a measurement "
@@ -184,7 +207,7 @@ class LocalDirectoryTransport:
             path = (self._root / name).resolve()
             if self._root not in path.parents and path != self._root:
                 raise ForbiddenPathError(f"{name!r} resolves outside {self._root}")
-            if config.TRUTH_SUBDIR in path.parts:
+            if _names_truth(path.parts):
                 raise ForbiddenPathError(f"{name!r} resolves into the ground-truth directory")
             if not path.exists():
                 # Absent is not an error.  A profile that generated five of six feeds is a

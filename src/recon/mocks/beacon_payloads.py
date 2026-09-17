@@ -316,9 +316,19 @@ def submission(dispense: Dispense) -> dict[str, Any]:
         payload.update(
             {
                 # BEACON-008's medical key, as far as we can populate it.  claim_number and
-                # claim_line_number live on the 837 feed and never reach the 340B sidecar;
-                # HCPCS is requirement E2 and is not built.  Null, not absent, so the gap is
-                # on the wire rather than hidden by a template that looks complete.
+                # claim_line_number live on the 837 feed and never reach the 340B sidecar.
+                #
+                # ``hcpcs_code`` stays null for a different reason than it used to, and the
+                # old comment here — "HCPCS is requirement E2 and is not built" — is now
+                # false: E2 landed in wave 5.  What is missing is narrower.  The J-code
+                # reaches an episode by a reference lookup on the NDC, and this sidecar row
+                # carries neither the episode nor a resolved drug, so the value is not
+                # available *at this point* rather than not existing.  Populating it would
+                # mean a mock reaching into reference data to derive a field, which is the
+                # one thing a formatter may not do.
+                #
+                # Null, not absent, so the gap is on the wire rather than hidden by a
+                # template that looks complete.
                 "claim_number": None,
                 "claim_line_number": None,
                 "service_provider_npi": dispense.provider_npi,

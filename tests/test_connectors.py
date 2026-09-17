@@ -116,25 +116,86 @@ def test_a_transport_refuses_a_document_name_that_traverses(tmp_path, name: str)
 def test_no_transport_implementation_can_resolve_a_path_under_truth(tmp_path):
     """The third route, and the one that generalises: every implementation, not just this one.
 
-    Parametrised over whatever ``connectors`` currently ships rather than over a hardcoded
-    list, so an SFTP or HTTP transport added later is covered the day it lands instead of the
-    day someone remembers to extend this.
+    Walks the whole ``recon.connectors`` package rather than one module, so an SFTP or HTTP
+    transport is covered the day it lands instead of the day someone remembers to extend this.
+
+    **This test used to claim that and not do it.** It filtered on
+    ``value.__module__ == transport.__name__``, which enumerates exactly
+    ``LocalDirectoryTransport`` — so both wave-3 and wave-4 transports escaped the
+    parametrisation while the docstring promised they were covered, and ``assert
+    implementations`` passed happily on a list of one. A review then demonstrated the
+    consequence: ``SftpTransport`` refused ``truth`` and accepted ``TRUTH``, and ground truth
+    was fetched over SFTP end to end.
+
+    So the case variants below are not thoroughness for its own sake. Whether ``TRUTH`` and
+    ``truth`` name one directory is the *server's* filesystem's opinion — one directory on
+    Windows, on macOS's default volume and on this repo's own loopback mock, two on a POSIX
+    vendor host. A guard that holds only on some of those is not a guarantee, and this is the
+    guarantee that makes crosswalk accuracy a measurement rather than a claim.
     """
-    implementations = [
-        value
-        for value in vars(transport).values()
-        if isinstance(value, type)
-        and value.__module__ == transport.__name__
-        and hasattr(value, "fetch")
-        and not getattr(value, "_is_protocol", False)
-    ]
-    assert implementations, "no transport implementations found to check"
+    import importlib
+    import pkgutil
+
+    from recon import connectors as connectors_pkg
+
+    implementations: dict[str, type] = {}
+    for info in pkgutil.iter_modules(connectors_pkg.__path__):
+        module = importlib.import_module(f"{connectors_pkg.__name__}.{info.name}")
+        for value in vars(module).values():
+            if (
+                isinstance(value, type)
+                and value.__module__ == module.__name__
+                and hasattr(value, "fetch")
+                and not getattr(value, "_is_protocol", False)
+            ):
+                implementations[f"{info.name}.{value.__name__}"] = value
+
+    assert len(implementations) >= 3, (
+        "expected at least the local, SFTP and HTTP transports; found "
+        f"{sorted(implementations)} — the walk is enumerating too narrowly again"
+    )
 
     truth = tmp_path / config.TRUTH_SUBDIR
     truth.mkdir()
-    for implementation in implementations:
-        with pytest.raises(ForbiddenPathError):
-            implementation(truth)
+
+    def locations(implementation: type, component: str) -> list[object]:
+        """Somewhere this particular transport would accept as a root, named ``component``.
+
+        Transport-appropriate on purpose. An earlier draft handed every implementation a
+        filesystem path, and ``HttpApiTransport`` raised ``ForbiddenPathError`` because the
+        value was not an http URL — so the refusal assertion passed for a reason that had
+        nothing to do with ground truth, and the HTTP guard was never actually tested.
+        """
+        if getattr(implementation, "kind", "") == "HTTP_API":
+            return [f"https://vendor.example/exports/{component}"]
+        return [tmp_path / component, f"/exports/{component}"]
+
+    for name, implementation in sorted(implementations.items()):
+        for spelling in (
+            config.TRUTH_SUBDIR,
+            config.TRUTH_SUBDIR.upper(),
+            config.TRUTH_SUBDIR.capitalize(),
+        ):
+            for location in locations(implementation, spelling):
+                with pytest.raises(ForbiddenPathError):
+                    implementation(location)
+
+        # And it must not over-block: a directory that merely contains the word is a real
+        # place a vendor might deliver to, and a guard that refuses it is one nobody can
+        # live with — which is how guards get widened into uselessness.
+        #
+        # The assertion is "not refused *as forbidden*", not "constructs successfully".
+        # ``SftpTransport`` requires a host keyword it deliberately gives no default, so a
+        # bare call raises ValueError for an unrelated and correct reason; demanding
+        # construction here would test argument lists rather than the guard.
+        for allowed in ("truthy", "truth_archive", "untruth"):
+            for location in locations(implementation, allowed):
+                try:
+                    implementation(location)
+                except ForbiddenPathError as exc:  # pragma: no cover - the failure we assert
+                    pytest.fail(f"{name} over-blocks {location!r}: {exc}")
+                except (TypeError, ValueError):
+                    pass
 
 
 def test_a_document_carries_no_filesystem_handle():

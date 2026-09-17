@@ -195,6 +195,21 @@ def _reject_unsafe_remote_name(name: str, *, origin: str) -> None:
             f"{origin} name {name!r} contains a path separator; a transport may not traverse "
             "directories, and a remote server may not talk it into one"
         )
+    # The second layer, which SFTP was missing.  ``LocalDirectoryTransport`` re-checks every
+    # document *after* resolving it (``transport.py``), so a root that slipped past the
+    # construction-time check is still caught per file; SFTP checked only at construction, so
+    # one hole in that single check was the whole guarantee.  Defence in depth is the point:
+    # these two checks are supposed to fail independently, and a review found they did not.
+    #
+    # A bare filename cannot contain a separator by the rule above, so this can only fire on a
+    # name that *is* the directory name — which is exactly what a server offering a listing of
+    # a truth directory would send.
+    if name.strip().casefold() == config.TRUTH_SUBDIR.casefold():
+        raise ForbiddenPathError(
+            f"{origin} name {name!r} is the ground-truth directory. Ingestion is forbidden to "
+            "read truth/, and that prohibition is what makes the crosswalk a measurement "
+            "rather than a claim."
+        )
     _reject_unsafe_name(name)
 
 
@@ -210,7 +225,20 @@ def _remote_directory(value: str | Path, *, origin: str) -> PurePosixPath:
     text = str(value)
     candidate = PurePosixPath(text.replace("\\", "/"))
     parts = candidate.parts
-    if config.TRUTH_SUBDIR in parts:
+    # Case-INSENSITIVE, matching ``http.py``'s guard, and this was a demonstrated hole rather
+    # than a hypothetical one: a case-sensitive ``in parts`` refused ``/exports/truth`` and
+    # allowed ``/exports/TRUTH``, and a review fetched ground_truth.json over SFTP through it.
+    #
+    # Whether the two spell the same directory is the *server's* filesystem's opinion, not
+    # ours. On Windows, on macOS's default volume, and on this repo's own loopback mock they
+    # are one directory; on a POSIX vendor host they are two. A guard whose correctness
+    # depends on which host the vendor happens to run is not a guarantee, and this one is
+    # load-bearing: it is the reason crosswalk accuracy is a measurement rather than a claim.
+    #
+    # Erring broad is the cheap direction. Refusing a real directory genuinely named ``TRUTH``
+    # costs a source nobody has; permitting one costs the guarantee.
+    folded = {part.strip().casefold() for part in parts}
+    if config.TRUTH_SUBDIR.casefold() in folded:
         raise ForbiddenPathError(
             f"{origin} {text!r} is inside the ground-truth directory. Ingestion is forbidden "
             "to read truth/, and that prohibition is what makes the crosswalk a measurement "

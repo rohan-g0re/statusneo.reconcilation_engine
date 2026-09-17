@@ -14,8 +14,16 @@ RNG draw, and either one breaks the build.  That is also why this is a new modul
 not a widened :class:`~recon.reference.entities.Pharmacy`: the generators construct and
 iterate ``Pharmacy``, and they do not construct or iterate anything here.
 
-Sites are consumed on the *reading* side only — the ingest layer resolving an
-``episode.site_id``, and the connector mappings that carry a vendor's site column.
+Sites are consumed on the *reading* side only, and today that means exactly one consumer:
+the ingest layer resolving an ``episode.site_id`` via :func:`resolve_site`.
+
+An earlier version of this line also claimed "the connector mappings that carry a vendor's
+site column". **No such column exists.** No vendor mapping reads or writes a site, nothing
+ever sets ``CanonicalRecord.site_id``, and no key builder takes a site argument — so
+``episode.site_id`` is populated only for an NPI that already resolved unambiguously, which
+is precisely the case requirement E4 was *not* about. The honest statement of where this
+stands is in ``ingest/pipeline.py``'s ``_site_for``; a vendor-supplied site is the work that
+would make E4 real, and it is not done.
 
 ═══ Why the NPI cannot be resolved by guessing ═══════════════════════════════════════
 

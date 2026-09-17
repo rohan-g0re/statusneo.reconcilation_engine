@@ -83,10 +83,20 @@ from recon.reference import drugs, entities
 #: list shows eight rows for four claims — and "more keys than claims" is exactly how a
 #: duplicate looks to anything reading this structure, including a careful human.
 #:
-#: **This is a display rule and nothing else.**  It narrows no resolution: every one of these
-#: keys is live in ``crosswalk_key`` and resolves records normally.  And it is scoped to
-#: *published* keys — if one of these is ever the **basis** on which something resolved, that
-#: is a fact about the match rather than a restatement of one, and it belongs in the dossier.
+#: **This is a display rule and nothing else.**  It narrows no resolution: both key types are
+#: written to ``crosswalk_key`` on every run, and hiding a row here cannot stop a lookup.
+#:
+#: Corrected after review: an earlier version of this comment said these keys "resolve records
+#: normally".  ``HCPCS`` does — ``_tpa_lookup_keys`` looks it up for a medical record carrying
+#: a J-code and no NDC.  ``COVERED_ENTITY_340B`` does **not**: nothing looks it up at all, so
+#: it is published identity rather than a working key, and E1's acceptance is enforced instead
+#: by ``pipeline._contradicts_covered_entity``.  The filter is right either way — a restatement
+#: is a restatement whether or not anything resolves by it — but the reason given was wrong for
+#: one of the two, and a false reason is worse than none.
+#:
+#: Scoped to *published* keys: if one of these is ever the **basis** on which something
+#: resolved, that is a fact about the match rather than a restatement of one, and it belongs
+#: in the dossier.
 _DERIVED_KEY_TYPES = frozenset({KeyType.COVERED_ENTITY_340B, KeyType.HCPCS})
 
 __all__ = ["build_dossier", "TimelineEvent", "RECORD_PROJECTIONS"]
