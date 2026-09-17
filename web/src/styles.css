@@ -82,9 +82,18 @@
   --text-display: 28px; /* the one display number: a tile's count */
 
   /* Linear's headings run tight; its body runs comfortable. */
-  --tracking-tight: -0.014em;
-  --tracking-tighter: -0.022em;
-  --tracking-body: -0.006em;
+  /* Tracking is a CURVE, not one value, and the curve below was measured off linear.app
+   * rather than guessed. Their h1 at 64px computes -1.408px and their 72/48/32px headings
+   * compute -1.584/-1.056/-0.704px — every one of them exactly -0.022em, so that is a single
+   * deliberate token they apply to display type only. Their 13-15px UI text computes
+   * -0.13px and -0.15px, exactly -0.01em. Two tokens, a clear threshold near 32px.
+   *
+   * We had -0.022em on a 19px masthead, which is display tracking applied at UI size — the
+   * one place our type visibly diverged from the thing it was imitating. -0.022em is now
+   * reserved for --text-display (28px), the only genuinely display-sized text here. */
+  --tracking-tight: -0.014em; /* 16-19px: between their two tokens, for our in-between sizes */
+  --tracking-tighter: -0.022em; /* display only, >=28px, matching their measured token */
+  --tracking-body: -0.01em; /* was -0.006em; theirs measures -0.01em at 13-15px */
   --tracking-label: 0.045em; /* small uppercase section labels open up instead */
   --leading-tight: 1.25;
   --leading-body: 1.55;
@@ -93,7 +102,10 @@
   --radius-xs: 4px; /* an inline code chip, a focus ring */
   --radius-sm: 6px; /* buttons, inputs, small cards */
   --radius-md: 8px; /* nested blocks inside a panel */
-  --radius-lg: 10px; /* panels, tiles, banners */
+  --radius-lg: 12px; /* panels, tiles, banners — 12px is the card radius measured on
+                      * linear.app's own dashboard mockup, where it is the dominant value in
+                      * the dense section. We were at 10px, which is a hair tighter than the
+                      * thing we are imitating. */
   --radius-pill: 999px;
   --radius: var(--radius-lg); /* kept as the historical alias */
 
@@ -141,7 +153,9 @@ header.masthead {
   font-size: var(--text-xl);
   margin: 0;
   font-weight: 640;
-  letter-spacing: var(--tracking-tighter);
+  /* --tracking-tight, not --tracking-tighter: at 19px this is UI text, not display type, and
+   * linear.app's measured curve puts -0.022em only at >=32px. See the token block. */
+  letter-spacing: var(--tracking-tight);
   line-height: var(--leading-tight);
 }
 .masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
