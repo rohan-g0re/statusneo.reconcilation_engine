@@ -67,6 +67,8 @@ from recon.domain.enums import (
     ReimbursementTrack,
     SourceSystem,
 )
+from recon.connectors.authority import SourceAuthorityError
+from recon.crosswalk import keys
 from recon.ingest import adapters
 from recon.ingest.allocate import (
     correct_allocation,
@@ -527,6 +529,28 @@ def _process_raw_record(conn: sqlite3.Connection, row: sqlite3.Row, stats: Inges
             return
 
         canonical = adapters.adapt(payload, source_system)
+
+        # E5 / DOC2-004.  After adapt(), never inside it: ``adapt`` wraps its dispatch in
+        # ``except (TypeError, ValueError)``, so a named authority error raised in there would
+        # be swallowed and re-reported as a generic AdapterError — the breach would still be
+        # caught and would become unreadable in the same motion.
+        #
+        # The whole tree is checked, not just the parent.  A rebate batch's dispense lines
+        # carry their own kind, source and canonical dict and are written by ``_insert_tree``
+        # exactly like the parent; checking only the parent would leave every line a source
+        # could use to set a field it does not own.
+        _assert_source_authority(canonical)
+    except SourceAuthorityError as exc:
+        # Distinct from the parse failure below on purpose — see QuarantineReason's comment.
+        repository.quarantine_record(
+            conn,
+            raw_id=row["raw_id"],
+            received_at=row["received_at"],
+            reason_code=str(QuarantineReason.SOURCE_AUTHORITY_BREACH),
+            detail=str(exc)[:400],
+        )
+        stats.quarantined += 1
+        return
     except (AdapterError, ValueError) as exc:
         # Quarantined with lineage intact, never coerced into the nearest-looking slot.  The
         # generated dataset contains none of these by design (C16 dropped D-5), so this path
@@ -669,10 +693,20 @@ def _attach(
         return
 
     if canonical.creates_episode:
-        episode_id = _create_episode(conn, canonical, norm_id, stats)
+        episode_id, covered_entity_id = _create_episode(conn, canonical, norm_id, stats)
+        # E1.  The scoped keys are published *alongside* the bare natural keys, never instead
+        # of them.  Replacing them would look tidier and would be wrong: an episode whose NPI
+        # is registered to no covered entity can publish no scoped key at all, so a source
+        # that looked up scoped-only would stop resolving the unregistered-location case —
+        # which is a real state this system exists to surface, not an edge case.  Publishing
+        # both costs one extra crosswalk row per 340B key and keeps every path that resolves
+        # today resolving.
+        publishes = tuple(canonical.publishes) + _scoped_340b_keys(
+            canonical.publishes, covered_entity_id
+        )
         published = [
             {"key_type": str(key_type), "key_value": value, "episode_id": episode_id}
-            for key_type, value in canonical.publishes
+            for key_type, value in publishes
         ]
         stats.keys_published += repository.insert_crosswalk_keys(
             conn,
@@ -681,7 +715,7 @@ def _attach(
                 for entry in published
             ],
         )
-        _recheck_parked(conn, canonical.publishes, norm_id, cursor, stats)
+        _recheck_parked(conn, publishes, norm_id, cursor, stats)
         return
 
     # --- forward resolution ------------------------------------------------
@@ -731,6 +765,21 @@ def _attach(
         # look identical to a correct match in every report.
         _park(
             conn, canonical, norm_id, raw_id, cursor, ParkReason.AMBIGUOUS_KEY_MATCH, stats
+        )
+    elif _contradicts_covered_entity(conn, canonical, episode_ids):
+        # E1's acceptance, and the reason it is a check rather than a key swap.  The keys
+        # resolved cleanly to one episode and the document then named a different covered
+        # entity, so the two disagree about whose 340B claim this is.  Attaching would credit
+        # one covered entity's savings to another, and would look identical to a correct
+        # match in every report — the same failure shape as guessing through an ambiguous key.
+        _park(
+            conn,
+            canonical,
+            norm_id,
+            raw_id,
+            cursor,
+            ParkReason.COVERED_ENTITY_MISMATCH,
+            stats,
         )
     else:
         episode_id = episode_ids[0] if episode_ids else None
@@ -845,9 +894,28 @@ def _allocate_bank_row(
             None,
         )
         key_type = getattr(resolved_via, "key_type", None)
+        # ``PAYMENT_REFERENCE`` sits on this branch with ``ALLOCATION_CODE`` because both
+        # resolve to a REBATE_BATCH.  Left out, a deposit that resolved by payment reference
+        # would be recorded with the TRN02 basis — a manufacturer's rebate settlement filed
+        # as a payer's claim-payment reassociation.
+        #
+        # The money is not at risk, and an earlier version of this comment claimed it was.
+        # The splitter below is chosen from the resolved *target's* ``record_kind``, not from
+        # the basis, so a payment-reference deposit is fanned out across the batch's dispense
+        # lines either way.  What this grouping protects is the audit trail: the basis is the
+        # field that says how a deposit was tied to what it paid, and a wrong answer there is
+        # a reconciliation that cannot be re-derived by anyone checking it later.
+        #
+        # It is recorded AS ``ALLOCATION_CODE`` rather than as a basis of its own, and that
+        # is a deliberate loss of audit precision.  ``AllocationBasis`` is guarded at import
+        # by ``agents/tools.py``'s match-strength table, and every recorded agent-eval trace
+        # is keyed on a digest of the prompt that table feeds; adding a member would
+        # invalidate the fixtures to record a distinction no ledger consumer reads.  Both
+        # references are exact rather than inferred, so the strength the audit trail reports
+        # is honest even though the reference name is not.  Noted in DESIGN_NOTE.md §9.
         basis = (
             AllocationBasis.ALLOCATION_CODE
-            if key_type == KeyType.ALLOCATION_CODE
+            if key_type in (KeyType.ALLOCATION_CODE, KeyType.PAYMENT_REFERENCE)
             else AllocationBasis.TRN02
         )
 
@@ -1134,10 +1202,169 @@ def _park(
         stats.bank_rows_parked += 1
 
 
+def _covered_entity_for(*, pharmacy_npi: str | None) -> str | None:
+    """Which 340B covered entity this episode belongs to, or ``None`` (requirement E1).
+
+    A *lookup*, in the same sense ``_resolve_medical_payer`` is one: 340B registration is a
+    fact the reference table holds, not a judgement this function makes.  A covered entity
+    registers its contract pharmacies, and that registration is exactly what ``DOC2-008``
+    says Beacon grants permission against — per 340B ID.  A column nobody populates cannot
+    carry a permission check, which is why E1 exists.
+
+    **Registration only.  Prescriber affiliation is deliberately not used**, and this was
+    changed after trying it: affiliating on the prescriber assigned a covered entity to 22 of
+    23 medical episodes and then contradicted the TPA on five of them, because a prescriber
+    affiliated with one entity can write a script dispensed under another's 340B contract.
+    Affiliation says who someone practises with; it does not say whose 340B claim this is.
+
+    That made the resulting value worse than nothing.  An entity derived from a weak
+    inference still sits in a column everything downstream reads as fact, and here it would
+    have driven the contradiction guard — so a guess would have parked records that the TPA,
+    which ``DOC2-004`` makes authoritative for 340B qualification and source transaction
+    context, had labelled correctly.  A NULL is honest and a wrong entity is not, and the
+    asymmetry is not close: the guard treats absence as "no opinion" and never fires on it.
+
+    The consequence, stated plainly: a medical episode carries no covered entity at creation,
+    because a 837 names no pharmacy and nothing else on the anchor is registration-backed.
+    Its entity arrives, if at all, from the TPA record that states it outright.
+
+    Two ways this returns ``None``, and both are answers rather than failures:
+
+    * **The NPI is registered nowhere.** The unregistered-location case the reference data
+      deliberately contains — a satellite pharmacy the covered entity never registered — and
+      a finding, not a gap to paper over.
+    * **Two covered entities claim the same NPI.** The entity is then genuinely unknown and
+      guessing would attribute someone else's 340B savings.  The reference data keeps these
+      disjoint today; this does not rely on that staying true.
+    """
+    if not pharmacy_npi:
+        return None
+    from recon.reference import entities
+
+    matched = [
+        entity
+        for entity in entities.covered_entities()
+        if pharmacy_npi in entity.registered_pharmacy_npis
+    ]
+    return matched[0].covered_entity_id if len(matched) == 1 else None
+
+
+#: Identifier columns the authority table governs that do **not** appear in a record's
+#: canonical dict, so ``asserted_fields`` cannot see them.  They are promoted columns, and a
+#: source setting one is making exactly the claim DOC2-004 assigns to somebody.
+_GOVERNED_COLUMNS = ("ach_trace_number", "beacon_id")
+
+
+def _assert_source_authority(canonical: CanonicalRecord) -> None:
+    """Refuse any record in this tree that sets a field its source does not own (E5).
+
+    Raises:
+        SourceAuthorityError: naming the field, the source that tried to set it, and the
+            system DOC2-004 makes authoritative for it.
+    """
+    from recon.connectors import authority
+
+    pending = [canonical]
+    while pending:
+        record = pending.pop()
+        pending.extend(record.children)
+        fields = set(authority.asserted_fields(record.canonical))
+        fields.update(
+            name for name in _GOVERNED_COLUMNS if getattr(record, name, None)
+        )
+        authority.check_authority(record.source_system, record.record_kind, fields)
+
+
+#: The two natural 340B keys a covered entity can scope.  Scoping anything else would be
+#: meaningless: ``TRN02`` and ``ALLOCATION_CODE`` resolve to a remittance rather than to a
+#: claim, and a covered entity does not own a remittance.
+_SCOPEABLE_340B_KEYS = (KeyType.NATURAL_340B_PHARMACY, KeyType.NATURAL_340B_MEDICAL)
+
+
+def _scoped_340b_keys(
+    published: Sequence[tuple[KeyType, str]], covered_entity_id: str | None
+) -> tuple[tuple[KeyType, str], ...]:
+    """The covered-entity-scoped twin of each natural 340B key (requirement E1).
+
+    ``DOC2-008`` has Beacon granting permission per 340B ID, so a source that knows which
+    covered entity it is acting for should be able to ask a question scoped to that entity
+    rather than asking a global question and checking the answer afterwards.  This is what
+    makes that possible.
+
+    Returns empty when the episode has no covered entity, which is not a failure: the NPI is
+    registered to nobody, and a scoped key claiming otherwise would be a fabricated
+    registration.
+    """
+    if not covered_entity_id:
+        return ()
+    return tuple(
+        keys.covered_entity_340b(covered_entity_id, value)
+        for key_type, value in published
+        if key_type in _SCOPEABLE_340B_KEYS
+    )
+
+
+def _contradicts_covered_entity(
+    conn: sqlite3.Connection,
+    canonical: CanonicalRecord,
+    episode_ids: Sequence[str],
+) -> bool:
+    """Does this document name a different covered entity than the episode it resolved to?
+
+    Only ``True`` when both sides state one and they differ.  Silence is never a
+    contradiction, and that asymmetry is the whole design:
+
+    * The **episode** has no covered entity when its NPI is registered to nobody — the
+      unregistered-location case.  A TPA record naming an entity there is not wrong, it is
+      the *only* statement of entity anyone has, and parking it would destroy the one
+      record that could surface the problem.
+    * The **document** has no covered entity on most feeds, because most feeds never carry
+      one.  Treating absence as disagreement would park almost everything.
+
+    So this fires exactly when two systems that both claim to know, disagree.
+    """
+    if not canonical.covered_entity_id or len(episode_ids) != 1:
+        return False
+    row = conn.execute(
+        "SELECT covered_entity_id FROM episode WHERE episode_id = ?", (episode_ids[0],)
+    ).fetchone()
+    if row is None or row["covered_entity_id"] is None:
+        return False
+    return str(row["covered_entity_id"]) != str(canonical.covered_entity_id)
+
+
+def _site_for(pharmacy_npi: str | None) -> str | None:
+    """Which contract-pharmacy site this episode's NPI resolves to, or ``None`` (E4).
+
+    The whole of requirement E4 is that ``pharmacy_npi`` alone collapses a health system's
+    contract-pharmacy network into one identity.  This does not pretend to undo that.  An
+    episode is anchored on a core feed, and a core feed carries an NPI and nothing finer, so
+    when two sites bill under one NPI there is genuinely nothing here to choose between
+    them — and :func:`recon.reference.sites.resolve_site` is built so that choosing is not
+    expressible rather than merely discouraged.
+
+    So this answers only for an NPI that holds exactly one site.  For the shared NPI the
+    column stays NULL and site identity arrives later, on the vendor record that states the
+    site outright — which, per ``DOC2-010``, is exactly what a TPA export carries and what a
+    PBM claim never has.  That is the honest shape of the fix: the identity is recovered
+    where it is known, not invented where it is not.
+    """
+    if not pharmacy_npi:
+        return None
+    from recon.reference import sites
+
+    return sites.resolve_site(pharmacy_npi).site_id
+
+
 def _create_episode(
     conn: sqlite3.Connection, canonical: CanonicalRecord, norm_id: int, stats: IngestStats
-) -> str:
+) -> tuple[str, str | None]:
     """Bring an episode into existence from its anchor record.
+
+    Returns the episode id **and the covered entity it derived**.  The caller needs the
+    second value to publish E1's scoped keys, and handing it back is better than deriving it
+    twice: two derivations can disagree, and the one that wrote the row is the one that is
+    true.
 
     Exactly two record kinds are anchors: an NCPDP claim event and an original medical 837.
     The episode id is the **connector's own**, minted here — it has no way to know what the
@@ -1150,6 +1377,10 @@ def _create_episode(
     episode_id = f"E-{next_row['n'] + 1:06d}"
 
     is_pharmacy = canonical.record_kind is RecordKind.PHARMACY_CLAIM
+    prescriber_npi = canonical.canonical.get("prescriber_id") or canonical.canonical.get(
+        "rendering_provider_npi"
+    )
+    covered_entity_id = _covered_entity_for(pharmacy_npi=canonical.pharmacy_npi)
     repository.insert_episode(
         conn,
         episode_id=episode_id,
@@ -1161,10 +1392,7 @@ def _create_episode(
         ndc11=canonical.ndc11 or "",
         date_of_service=canonical.date_of_service or "",
         quantity_milli=canonical.quantity_milli or 0,
-        prescriber_npi=(
-            canonical.canonical.get("prescriber_id")
-            or canonical.canonical.get("rendering_provider_npi")
-        ),
+        prescriber_npi=prescriber_npi,
         rx_number=canonical.rx_number if is_pharmacy else None,
         fill_number=canonical.fill_number if is_pharmacy else None,
         pbm_id=canonical.payer_id if is_pharmacy else None,
@@ -1176,11 +1404,20 @@ def _create_episode(
         # side there is no such flag, so the 340B track is discovered only when a TPA record
         # resolves against the episode.
         is_340b_flagged=canonical.canonical.get("submission_clarification_code") == "20",
-        covered_entity_id=None,
+        # E1/E2.  Both derived here rather than later because ``trg_episode_no_update``
+        # aborts any UPDATE on this table — episode identity is immutable, so a field that
+        # misses the insert can never be filled in.
+        covered_entity_id=covered_entity_id,
+        hcpcs=canonical.hcpcs,
+        # E4.  NULL whenever the anchor's NPI maps to more than one contract-pharmacy site,
+        # which a core feed carrying only an NPI cannot disambiguate.  Site identity then
+        # arrives on the vendor record that states it outright, which is the only place it
+        # is actually known.  See :func:`_site_for`.
+        site_id=_site_for(canonical.pharmacy_npi),
         created_from_received_at=canonical.received_at,
     )
     stats.episodes_created += 1
-    return episode_id
+    return episode_id, covered_entity_id
 
 
 # ═══ small helpers ══════════════════════════════════════════════════════════
@@ -1226,6 +1463,13 @@ def _norm_fields(
         "ach_trace_number": canonical.ach_trace_number,
         "allocation_code": canonical.allocation_code,
         "authorization_number": canonical.authorization_number,
+        # Connector-layer identifiers (requirement 4.6).  ``covered_entity_id`` is
+        # deliberately absent: it is an ``episode`` column, not a ``normalized_record`` one,
+        # and ``insert_normalized_record`` rejects unknown columns rather than dropping them.
+        "beacon_id": canonical.beacon_id,
+        "hcpcs": canonical.hcpcs,
+        "site_id": canonical.site_id,
+        "payment_reference": canonical.payment_reference,
         "payer_id": canonical.payer_id,
         "amount_cents": canonical.amount_cents,
         "quantity_milli": canonical.quantity_milli,

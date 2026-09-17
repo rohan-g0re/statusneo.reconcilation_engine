@@ -273,6 +273,15 @@ _NORM_COLUMNS = (
     "ach_trace_number",
     "allocation_code",
     "authorization_number",
+    # Connector-layer identifiers (requirement 4.6).  The columns landed with the schema in
+    # wave 4; wave 5 is what makes them reachable.  Until this tuple named them, they were
+    # columns nothing could ever write — ``insert_normalized_record`` builds its INSERT from
+    # this tuple alone, so a column absent here takes SQLite's implicit NULL forever and no
+    # test would notice, because a NULL column and an unwritable column look identical.
+    "beacon_id",
+    "hcpcs",
+    "site_id",
+    "payment_reference",
     "payer_id",
     "amount_cents",
     "quantity_milli",
@@ -351,7 +360,18 @@ _EPISODE_COLUMNS = (
     "medical_payer_id",
     "billing_provider_npi",
     "is_340b_flagged",
+    # The three 340B-identity columns.  All added to this tuple by the connector layer's
+    # requirement E1/E2/E4; ``covered_entity_id`` was already a column and was already in
+    # this list, but ``_create_episode`` passed it ``None`` unconditionally, so the effect
+    # was the same as being absent.
+    #
+    # These must be set HERE, at insert, or never: ``trg_episode_no_update`` aborts any
+    # UPDATE on ``episode``, because episode identity is immutable.  There is no later pass
+    # that can fill them in, which is why the anchor record has to carry enough to derive
+    # them (or correctly leave them NULL).
     "covered_entity_id",
+    "hcpcs",
+    "site_id",
     "created_from_received_at",
 )
 

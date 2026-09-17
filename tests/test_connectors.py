@@ -36,8 +36,10 @@ from recon import config
 from recon.config import load_settings
 from recon.connectors import credentials, registry, schema_registry, transport
 from recon.connectors.transport import Document, ForbiddenPathError, LocalDirectoryTransport
+from recon.connectors.vendors import beacon
+from recon.crosswalk import keys
 from recon.db import connection, migrate, repository
-from recon.domain.enums import QuarantineReason, SourceSystem, TransportKind
+from recon.domain.enums import KeyType, QuarantineReason, SourceSystem, TransportKind
 from recon.generators.orchestrator import generate, write_outputs
 from recon.ingest import pipeline
 
@@ -157,23 +159,53 @@ def test_pipeline_names_no_vendor_and_no_feed_filename():
     """Requirement A1's acceptance, stated as the property that makes it true.
 
     "Adding a seventh source is a config row plus a mapping module, with no edit to
-    ``pipeline.py``" stays true exactly as long as ``pipeline.py`` never names a vendor.  The
-    moment it does, onboarding becomes an edit again.
+    ``pipeline.py``" stays true exactly as long as ``pipeline.py`` never *branches* on a
+    vendor.  The moment it does, onboarding becomes an edit again.
+
+    Two exclusions, and both are the difference between the property and a proxy for it:
+
+    **Docstrings are not code.**  A scan that reads them punishes the module for explaining
+    the rule it obeys, and the cheapest way to go green is then to delete the explanation —
+    which is precisely backwards.  This build has now made that mistake three times, so the
+    exclusion is done by node identity rather than by hoping no prose mentions a vendor.
+
+    **A column name is not a vendor branch.**  ``normalized_record.beacon_id`` is a column
+    every record has and almost every record leaves NULL; writing it is schema plumbing, not
+    a decision about who the source is.  The allowance is drawn from the repository's own
+    column tuples rather than hardcoded, so a future ``verity_status`` column is allowed for
+    the same reason and a bare ``"verity"`` still is not.
     """
+    from recon.db.repository import _EPISODE_COLUMNS, _NORM_COLUMNS
+
     source_text = (REPO_ROOT / "src" / "recon" / "ingest" / "pipeline.py").read_text(
         encoding="utf-8"
     )
     tree = ast.parse(source_text)
+
+    docstrings = set()
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+            docstrings.add(id(body[0].value))
+
+    allowed = set(_NORM_COLUMNS) | set(_EPISODE_COLUMNS)
     literals = {
         node.value
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
     }
     offenders = sorted(
         literal
         for literal in literals
-        if literal in set(config.FEED_FILENAMES)
-        or any(vendor in literal.lower() for vendor in ("beacon", "verity", "craneware"))
+        if literal not in allowed
+        and (
+            literal in set(config.FEED_FILENAMES)
+            or any(vendor in literal.lower() for vendor in ("beacon", "verity", "craneware"))
+        )
     )
     assert not offenders, f"pipeline.py names a source directly: {offenders}"
 
@@ -1084,3 +1116,236 @@ def test_no_http_error_chains_an_exception_that_could_carry_a_token():
         f"http.py chains an exception at line(s) {chained}; an httpx error reached that way "
         "carries request.headers, and both Beacon tokens render in full inside them"
     )
+
+
+# ═══ E1, E2, E3 — the connector key builders, and the one place they are built ═══
+#
+# Every assertion below pins the *rendered string*, not just the key type.  A crosswalk
+# lookup is a point seek on ``(key_type, key_value)``, so a builder that returns the right
+# enum member and a differently-spelled value fails in the quietest way this system has:
+# nothing raises, nothing logs, and every record that used it parks as ``NO_KEY_MATCH``.
+
+
+def test_beacon_id_renders_the_identifier_untouched():
+    """C5's key. Single component, so the canonical form *is* the component."""
+    key_type, key_value = keys.beacon_id("BCN-000000000001")
+    assert key_type is KeyType.BEACON_ID
+    assert key_value == "BCN-000000000001"
+
+
+def test_payment_reference_renders_the_reference_untouched():
+    """E3's key. Same two-hop shape as ``TRN02`` and ``ALLOCATION_CODE``, different issuer."""
+    key_type, key_value = keys.payment_reference("BCN-PAY-000042")
+    assert key_type is KeyType.PAYMENT_REFERENCE
+    assert key_value == "BCN-PAY-000042"
+
+
+def test_payment_reference_is_a_different_key_type_from_the_same_string_as_trn02():
+    """The distinction E3 exists for, asserted rather than described.
+
+    A rebate payment reference and a payer trace number can legitimately be the same
+    characters. If they shared a key type they would resolve to each other's targets — a
+    rebate batch answering a bank deposit's lookup, which reads as a successful match.
+    """
+    shared = "0000012345"
+    assert keys.payment_reference(shared)[1] == keys.trn02(shared)[1]
+    assert keys.payment_reference(shared)[0] is not keys.trn02(shared)[0]
+    assert keys.payment_reference(shared)[0] is not keys.allocation_code(shared)[0]
+
+
+def test_hcpcs_medical_puts_the_jcode_where_the_ndc_goes():
+    """E2's key, rendered ``provider_npi|hcpcs|service_date``.
+
+    The argument order leads with the J-code and the component order does not. Pinned
+    literally because a transposition would build a plausible-looking key that resolves to
+    nothing, and no exception would be raised on the way.
+    """
+    key_type, key_value = keys.hcpcs_medical("J9035", "1730123456", "2026-03-02")
+    assert key_type is KeyType.HCPCS
+    assert key_value == "1730123456|J9035|2026-03-02"
+
+
+def test_hcpcs_medical_is_its_sibling_with_the_jcode_substituted():
+    """E2 is ``natural_340b_medical`` with the J-code standing in for the NDC.
+
+    Asserted structurally so the two cannot drift apart: if someone reorders one builder's
+    components, this fails even though both builders still return a well-formed string.
+    """
+    _, medical = keys.natural_340b_medical("1730123456", "00093721410", "2026-03-02")
+    _, hcpcs = keys.hcpcs_medical("J9035", "1730123456", "2026-03-02")
+    assert medical == "1730123456|00093721410|2026-03-02"
+    assert hcpcs == medical.replace("00093721410", "J9035")
+
+
+def test_covered_entity_340b_scopes_an_already_canonical_key_value():
+    """E1's key: the covered entity joined to a whole key value, not a bare entity id."""
+    _, natural = keys.natural_340b_pharmacy(
+        "1730123456", "7845102", "00093721410", "2026-03-02"
+    )
+    key_type, key_value = keys.covered_entity_340b("DSH123456", natural)
+    assert key_type is KeyType.COVERED_ENTITY_340B
+    assert key_value == "DSH123456|1730123456|7845102|00093721410|2026-03-02"
+    # The failure this design exists to prevent: a bare entity id as the key value, which
+    # every episode of that entity would collide onto.
+    assert key_value != "DSH123456"
+    assert key_value.startswith("DSH123456|")
+
+
+def test_a_tpa_record_for_the_wrong_covered_entity_builds_a_different_string():
+    """Requirement E1's acceptance, in miniature.
+
+    *"A TPA record for the wrong covered entity does not resolve."* Nothing compares the two
+    entity ids anywhere — the wrong one simply builds a different string, seeks nothing and
+    parks as ``NO_KEY_MATCH``. That is the point of scoping rather than checking: there is no
+    comparison for a later caller to forget.
+    """
+    _, natural = keys.natural_340b_pharmacy(
+        "1730123456", "7845102", "00093721410", "2026-03-02"
+    )
+    _, right = keys.covered_entity_340b("DSH123456", natural)
+    _, wrong = keys.covered_entity_340b("DSH999999", natural)
+    assert right != wrong
+    assert wrong == "DSH999999|1730123456|7845102|00093721410|2026-03-02"
+
+
+def test_covered_entity_ids_and_jcodes_are_not_normalised_either():
+    """Decision A23 reaches the new builders too.
+
+    A 340B ID spelled differently in two feeds is identifier drift, which is a defect this
+    system exists to *surface*. Case-folding it here would resolve the record and delete the
+    exception.
+    """
+    _, natural = keys.natural_340b_medical("1730123456", "00093721410", "2026-03-02")
+    assert (
+        keys.covered_entity_340b("DSH123456", natural)[1]
+        != keys.covered_entity_340b("dsh123456", natural)[1]
+    )
+    assert (
+        keys.hcpcs_medical("J9035", "1730123456", "2026-03-02")[1]
+        != keys.hcpcs_medical("j9035", "1730123456", "2026-03-02")[1]
+    )
+
+
+# ── the refusals ────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("absent", [None, ""])
+@pytest.mark.parametrize(
+    ("builder", "rest"),
+    [
+        (keys.beacon_id, ()),
+        (keys.payment_reference, ()),
+        (keys.hcpcs_medical, ("1730123456", "2026-03-02")),
+    ],
+)
+def test_a_missing_leading_component_refuses_to_build_a_key(builder, rest, absent):
+    """A key with a missing component is not a weaker key, it is a *different* key.
+
+    Every builder's first argument, absent and empty. The caller must park the record rather
+    than receive a partial key that collides with some other record's.
+    """
+    with pytest.raises(keys.MalformedKeyComponentError):
+        builder(absent, *rest)
+
+
+@pytest.mark.parametrize("absent", [None, ""])
+def test_hcpcs_medical_refuses_a_missing_npi_or_service_date(absent):
+    """The other two components, so the parametrisation above cannot pass vacuously."""
+    with pytest.raises(keys.MalformedKeyComponentError):
+        keys.hcpcs_medical("J9035", absent, "2026-03-02")
+    with pytest.raises(keys.MalformedKeyComponentError):
+        keys.hcpcs_medical("J9035", "1730123456", absent)
+
+
+@pytest.mark.parametrize("absent", [None, ""])
+def test_covered_entity_340b_refuses_a_missing_entity_or_a_missing_scope(absent):
+    """Both halves must be present, reached by two deliberately different routes.
+
+    The entity id is checked by ``_component``; the scoped half is checked by an explicit
+    branch, because ``_component`` would reject it for containing separators. An unscoped
+    covered-entity key is exactly the collision this builder exists to avoid, so it must
+    raise rather than degrade into a bare entity id.
+    """
+    _, natural = keys.natural_340b_medical("1730123456", "00093721410", "2026-03-02")
+    with pytest.raises(keys.MalformedKeyComponentError):
+        keys.covered_entity_340b(absent, natural)
+    with pytest.raises(keys.MalformedKeyComponentError):
+        keys.covered_entity_340b("DSH123456", absent)
+
+
+@pytest.mark.parametrize(
+    ("builder", "rest"),
+    [
+        (keys.beacon_id, ()),
+        (keys.payment_reference, ()),
+        (keys.hcpcs_medical, ("1730123456", "2026-03-02")),
+    ],
+)
+def test_a_component_carrying_the_separator_refuses_to_build_a_key(builder, rest):
+    """``|`` inside a component would collide two distinct keys onto one string."""
+    with pytest.raises(keys.MalformedKeyComponentError, match="separator"):
+        builder("A|B", *rest)
+
+
+def test_covered_entity_340b_refuses_a_separator_in_the_entity_id():
+    """The entity id is an ordinary component and the ordinary rule applies to it."""
+    _, natural = keys.natural_340b_medical("1730123456", "00093721410", "2026-03-02")
+    with pytest.raises(keys.MalformedKeyComponentError, match="separator"):
+        keys.covered_entity_340b("DSH|123456", natural)
+
+
+def test_the_scoped_half_is_the_one_exemption_from_the_separator_ban():
+    """Pinned so the exemption is visible rather than accidental.
+
+    ``covered_entity_340b`` is the only builder in the module that accepts a value containing
+    ``|``, because the value it scopes is *itself* a canonical composite key value. The ban
+    exists to stop one component smuggling in a separator; here the separators are the
+    deliberate structure of a string another builder in this module produced.
+
+    If this ever starts raising, someone has "tidied up" the scoped half onto ``_component``
+    and every scoped key in the system has silently stopped being buildable.
+    """
+    _, natural = keys.natural_340b_pharmacy(
+        "1730123456", "7845102", "00093721410", "2026-03-02"
+    )
+    assert keys.SEPARATOR in natural
+
+    # The exempt half: accepted, and every separator survives verbatim.
+    _, scoped = keys.covered_entity_340b("DSH123456", natural)
+    assert scoped.count(keys.SEPARATOR) == natural.count(keys.SEPARATOR) + 1
+    assert scoped.endswith(natural)
+
+    # The same string in the *non*-exempt position still raises, which is what makes the
+    # exemption a decision about one argument rather than a hole in the builder.
+    with pytest.raises(keys.MalformedKeyComponentError, match="separator"):
+        keys.covered_entity_340b(natural, natural)
+
+
+# ── the relocation ──────────────────────────────────────────────────────────
+
+
+def test_beacons_key_helpers_are_byte_identical_to_the_crosswalks():
+    """``beacon.py`` no longer builds a ``key_value``; it delegates.
+
+    The regression this catches is otherwise invisible. Two construction sites for one key
+    agree on the day they are written and drift on the day one of them is edited — and the
+    symptom is not an exception, it is a lookup that seeks a string nothing ever published.
+    """
+    for identifier in ("BCN-000000000001", "0000012345", "beacon id with spaces"):
+        assert beacon.beacon_id_key(identifier) == keys.beacon_id(identifier)
+    for reference in ("BCN-PAY-000042", "0000012345", "  padded  "):
+        assert beacon.payment_reference_key(reference) == keys.payment_reference(reference)
+
+
+@pytest.mark.parametrize("bad", [None, "", "A|B"])
+def test_beacons_key_helpers_still_raise_beacon_mapping_error(bad):
+    """The relocation moved where the string is built, and nothing a caller can observe.
+
+    ``BeaconMappingError`` is that module's error contract; the crosswalk raises its own
+    type. The wrappers validate locally first so the contract is unchanged — otherwise the
+    move would be a silent API break dressed up as a refactor.
+    """
+    with pytest.raises(beacon.BeaconMappingError):
+        beacon.beacon_id_key(bad)
+    with pytest.raises(beacon.BeaconMappingError):
+        beacon.payment_reference_key(bad)

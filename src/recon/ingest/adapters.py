@@ -100,6 +100,20 @@ class CanonicalRecord:
     ach_trace_number: str | None = None
     allocation_code: str | None = None
     authorization_number: str | None = None
+
+    #: Connector-layer identifiers (requirement 4.6), all defaulting to ``None`` so every
+    #: existing adapter is unchanged by their arrival.
+    #:
+    #: ``covered_entity_id`` is the odd one out: it is **not** a ``normalized_record`` column
+    #: and is never stored on the row.  It rides here because ``_create_episode`` needs it at
+    #: insert time — ``trg_episode_no_update`` aborts any UPDATE on ``episode``, so a value
+    #: that does not arrive with the anchor can never be added later.
+    beacon_id: str | None = None
+    hcpcs: str | None = None
+    site_id: str | None = None
+    payment_reference: str | None = None
+    covered_entity_id: str | None = None
+
     payer_id: str | None = None
     amount_cents: int | None = None
     quantity_milli: int | None = None
@@ -407,12 +421,25 @@ def _adapt_medical_submission(payload: dict[str, Any]) -> CanonicalRecord:
     frequency = payload.get("clm05_3_frequency_code", "1")
     original_icn = payload.get("ref_f8_original_icn")
 
+    # Requirement E2.  The reference table is asked first and the wire second, which is the
+    # opposite of the usual order and is deliberate: the 837 carries an NDC, and the drug
+    # reference is the authority on what that NDC is billed as.  The wire's own SVC01 is the
+    # fallback for a line that named a J-code without an NDC.
+    hcpcs = _drug_j_code_for_ndc(ndc11) or _first_hcpcs(payload.get("service_lines"))
+
     published: list[tuple[KeyType, str]] = [keys.medical_clm01(clm01)]
     # The medical 340B bridge, and it is the weakest key in the system: a clinic-infused
     # drug has no prescription, so two administrations of the same drug at the same site on
     # the same day are genuinely indistinguishable (Decision C9).
     if provider_npi and ndc11:
         published.append(keys.natural_340b_medical(provider_npi, ndc11, service_date))
+    # E2.  Published whenever the drug has a J-code, not only when the NDC is missing: the
+    # publisher cannot know what the records that come looking will carry, and an unpublished
+    # key resolves nothing no matter how well-formed the lookup is.  Publishing is cheap — one
+    # crosswalk row — and it only ever adds an answer where there was none, because nothing
+    # looks this key up while it holds an NDC.
+    if provider_npi and hcpcs and _is_known_drug_j_code(hcpcs):
+        published.append(keys.hcpcs_medical(hcpcs, provider_npi, service_date))
 
     looks_up: list[tuple[KeyType, str]] = []
     if frequency != "1":
@@ -462,6 +489,7 @@ def _adapt_medical_submission(payload: dict[str, Any]) -> CanonicalRecord:
         ndc11=ndc11,
         date_of_service=service_date,
         clm01=clm01,
+        hcpcs=hcpcs,
         payer_id=payer_id,
         amount_cents=sum(
             _optional_cents(svc.get("svc02_charge_amount")) or 0 for svc in service_lines
@@ -624,7 +652,22 @@ def _adapt_tpa(payload: dict[str, Any]) -> CanonicalRecord:
         raise AdapterError(f"unknown TPA event_type {event_type!r}")
 
     fill_date = keys.wire_date_to_iso(payload["fill_date"])
-    ndc11 = payload["ndc_11"]
+    # Requirement E2.  ``ndc_11`` was required outright until now, which made a record that
+    # identifies its drug by J-code alone unadaptable — it failed on a missing field and was
+    # quarantined as unparseable, when in fact it was perfectly well-formed and simply
+    # described the drug the way the medical benefit describes it.
+    #
+    # Still exactly one of the two, not neither: a 340B record naming no drug at all cannot
+    # be matched to a dispense by any key, and accepting it would trade a loud quarantine for
+    # a silent park.  Every record on the six generated feeds carries ``ndc_11``, so this is
+    # additive for all of them.
+    ndc11 = payload.get("ndc_11")
+    hcpcs = payload.get("hcpcs")
+    if not ndc11 and not hcpcs:
+        raise AdapterError(
+            "340B record identifies no drug: it carries neither 'ndc_11' nor 'hcpcs', so "
+            "there is no key on which it could ever reach a dispense"
+        )
     record = CanonicalRecord(
         record_kind=kind,
         source_system=SourceSystem(payload["source_system"]),
@@ -653,6 +696,13 @@ def _adapt_tpa(payload: dict[str, Any]) -> CanonicalRecord:
         rx_number=payload.get("rx_number"),
         ndc11=ndc11,
         date_of_service=fill_date,
+        # Requirement E1.  Carried out of the payload so the crosswalk can *check* it, not so
+        # it can key on it: the covered entity is what the record claims about whose 340B
+        # claim this is, and `_attach` refuses to attach a claim to an episode that says
+        # otherwise.  Already present in ``canonical`` above for the audit trail; this is the
+        # same value promoted to a column the resolver can read without parsing JSON.
+        covered_entity_id=payload.get("covered_entity_id"),
+        hcpcs=hcpcs,
         status_code=payload.get("qualification_status") or payload.get("manufacturer_status"),
         looks_up=_tpa_lookup_keys(payload, ndc11, fill_date),
     )
@@ -660,7 +710,7 @@ def _adapt_tpa(payload: dict[str, Any]) -> CanonicalRecord:
 
 
 def _tpa_lookup_keys(
-    payload: dict[str, Any], ndc11: str, fill_date: str
+    payload: dict[str, Any], ndc11: str | None, fill_date: str
 ) -> tuple[tuple[KeyType, str], ...]:
     """The natural key, chosen by which shape of dispense this is.
 
@@ -668,14 +718,24 @@ def _tpa_lookup_keys(
     has no prescription at all, so it keys on ``{provider_npi, ndc, service_date}`` — and
     that key cannot distinguish two same-day administrations of the same drug at the same
     site.  The connector parks that ambiguity rather than guessing through it.
+
+    Requirement E2 adds the last branch: a medical dispense that names its drug by J-code and
+    carries no NDC.  It is tried **only when the NDC is absent**, never alongside it.  An NDC
+    identifies one manufacturer's presentation of a drug; a J-code spans every manufacturer's,
+    so it is the coarser key and would resolve a superset.  Offering both would mean a record
+    that already had an exact answer sometimes got a second, vaguer hit and parked as
+    ``AMBIGUOUS_KEY_MATCH`` — trading a correct match for no match at all.
     """
     rx_number = payload.get("rx_number")
     pharmacy_npi = payload.get("pharmacy_npi")
     provider_npi = payload.get("provider_npi")
-    if rx_number and pharmacy_npi:
+    if rx_number and pharmacy_npi and ndc11:
         return (keys.natural_340b_pharmacy(pharmacy_npi, rx_number, ndc11, fill_date),)
-    if provider_npi:
+    if provider_npi and ndc11:
         return (keys.natural_340b_medical(provider_npi, ndc11, fill_date),)
+    hcpcs = payload.get("hcpcs")
+    if provider_npi and hcpcs and _is_known_drug_j_code(hcpcs):
+        return (keys.hcpcs_medical(hcpcs, provider_npi, fill_date),)
     # Neither shape is satisfiable: there is no key at all, so this record can never resolve
     # to anything.  It parks with NO_KEYS_PRESENT and becomes a D-4 unmatched rebate.
     return ()
@@ -726,6 +786,7 @@ def _adapt_rebate_batch(payload: dict[str, Any]) -> CanonicalRecord:
                 date_of_service=fill_date,
                 allocation_code=allocation,
                 amount_cents=to_cents(line["rebate_amount"]),
+                covered_entity_id=line.get("covered_entity_id"),  # E1, as above
                 status_code=line.get("manufacturer_status"),
                 looks_up=_tpa_lookup_keys(line, ndc11, fill_date),
             )
@@ -807,6 +868,105 @@ _DISPATCH = {
     SourceSystem.MANUFACTURER_REBATE: _adapt_tpa,
     SourceSystem.BANK: _adapt_bank,
 }
+
+
+# ═══ HCPCS, requirement E2 ══════════════════════════════════════════════════
+#
+# ``DOC2-002``'s step-4 crosswalk list reads "NDC/HCPCS", and ``BEACON-008`` is a
+# second-hand indication that Beacon's medical matching key is partial without it.  We
+# modelled NDC only, which loses every record that identifies its drug by J-code and carries
+# no NDC at all — and on the medical benefit that is not an edge case, it is how the 835
+# service line is written.
+
+#: X12 ``SVC01-1`` qualifier for a HCPCS/CPT procedure code (``STD-X12-837``).  The composite
+#: is ``<qualifier>:<code>:<modifier>…``, and the qualifier is what decides *what the code
+#: is*.  Reading position two without checking position one would happily lift a revenue code
+#: or a NUBC code out of some other line and call it a drug.
+_SVC01_HCPCS_QUALIFIER = "HC"
+
+_SVC01_SEPARATOR = ":"
+
+
+def _hcpcs_from_svc01(composite: str | None) -> str | None:
+    """Pull the HCPCS code out of an X12 ``SVC01`` composite, or ``None``.
+
+    ``"HC:J9035:JW"`` -> ``"J9035"``.
+
+    Returns ``None`` rather than raising for anything that is not HC-qualified, because this
+    is an enrichment: a service line that carries no HCPCS is not malformed, and quarantining
+    it would delete records the system reconciles correctly today.
+
+    The code is returned **verbatim**, like every other identifier (Decision A23).  No
+    upper-casing, no stripping of the modifier's effect on the code — the modifier is a
+    separate component and is simply not read.
+    """
+    if not composite:
+        return None
+    parts = str(composite).split(_SVC01_SEPARATOR)
+    if len(parts) < 2 or parts[0] != _SVC01_HCPCS_QUALIFIER:
+        return None
+    return parts[1] or None
+
+
+def _first_hcpcs(service_lines: object) -> str | None:
+    """The first HC-qualified code across a claim's service lines, or ``None``.
+
+    Takes ``object`` and checks the shape rather than trusting it: this runs on both the 837
+    and the 835, whose service lines are spelled differently everywhere except ``SVC01``.
+    """
+    if not isinstance(service_lines, list):
+        return None
+    for line in service_lines:
+        if not isinstance(line, dict):
+            continue
+        code = _hcpcs_from_svc01(line.get("svc01_composite"))
+        if code:
+            return code
+    return None
+
+
+def _drug_j_code_for_ndc(ndc11: str | None) -> str | None:
+    """The J-code the drug reference gives for an NDC, or ``None``.
+
+    This is a *lookup*, in the same sense :func:`_resolve_medical_payer` is: the reference
+    table is the authority on what a drug is billed as, and `reference/__init__.py` already
+    validates that every medical-benefit drug carries a J-code and no pharmacy-benefit drug
+    does.  So a pharmacy-benefit NDC correctly yields ``None`` here rather than a guess.
+
+    An NDC the reference has never heard of also yields ``None``.  A vendor feed is entitled
+    to mention a drug we do not stock, and that is not a reason to fail the record.
+    """
+    if not ndc11:
+        return None
+    from recon.reference import drugs
+    from recon.reference.errors import UnknownNdcError
+
+    try:
+        return drugs.by_ndc(ndc11).hcpcs_j_code
+    except UnknownNdcError:
+        return None
+
+
+def _is_known_drug_j_code(hcpcs: str | None) -> bool:
+    """True when the reference knows this code as some drug's J-code.
+
+    The gate on publishing an ``HCPCS`` crosswalk key, and the reason the key is safe.  A CPT
+    administration code — ``96413``, "chemotherapy administration, IV infusion, up to 1 hour"
+    — parses out of ``SVC01`` exactly as cleanly as ``J9035`` does, but it describes the
+    *infusion*, not the drug.  Keying on it would collapse every drug one provider infused on
+    one day onto a single key value, and every one of those records would then resolve
+    ambiguously and park.  The column may hold such a code honestly; the key may not.
+    """
+    if not hcpcs:
+        return False
+    from recon.reference import drugs
+    from recon.reference.errors import UnknownNdcError
+
+    try:
+        drugs.by_j_code(hcpcs)
+    except UnknownNdcError:
+        return False
+    return True
 
 
 # ═══ small helpers ══════════════════════════════════════════════════════════

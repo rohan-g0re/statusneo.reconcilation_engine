@@ -697,12 +697,108 @@ def band_wave_4(b: Band, y: int) -> None:
     )
 
 
+def band_wave_5(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 5  ·  BUSINESS MAPPING", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="the four §4.7 key types stop being enum members and start resolving records",
+        size=13,
+    )
+
+    b.box(
+        "ce",
+        x=LEFT_X,
+        y=y + 56,
+        width=270,
+        height=74,
+        label="E1  covered entity\nregistration only · never inferred",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "hc",
+        x=LEFT_X + 290,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="E2  HCPCS beside NDC\nJ-code only when NDC absent",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "pay",
+        x=LEFT_X + 570,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="E3  payment reference\nrebate-batch basis, not TRN02",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "site",
+        x=LEFT_X + 850,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="E4  site identity\n2 sites, 1 NPI ⇒ site_id NULL",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "auth",
+        x=LEFT_X + 1130,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="E5  DOC2-004 authority\nbreach ⇒ QUARANTINE, not a log line",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "park",
+        x=LEFT_X + 1430,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="wrong entity ⇒ PARK\nCOVERED_ENTITY_MISMATCH",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body=(
+            "episode is immutable, so all three identity columns are derived at INSERT or never  ·  "
+            "a guessed covered entity is worse than a NULL: it drives the guard and parks what the TPA got right"
+        ),
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
     2: ("c2_", band_wave_2),
     3: ("c3_", band_wave_3),
     4: ("c4_", band_wave_4),
+    5: ("c5_", band_wave_5),
 }
 
 

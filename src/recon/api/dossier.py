@@ -64,8 +64,30 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from recon.db import repository
-from recon.domain.enums import RecordKind
+from recon.domain.enums import KeyType, RecordKind
 from recon.reference import drugs, entities
+
+#: Key types held back from the **dossier**, which is the agent's view.  They stay in the
+#: database and stay on the operator's ``/trace``, which is the honest place for them.
+#:
+#: Both are *restatements of an identity already in this list*, not additional matches:
+#:
+#: * ``COVERED_ENTITY_340B`` is the covered entity joined to a natural key that is already
+#:   here (E1), and the covered entity itself is already in the identity block.
+#: * ``HCPCS`` is the same provider, drug and date as the episode's ``NATURAL_340B_MEDICAL``
+#:   key, with the drug named by J-code instead of NDC (E2).  It exists so a record that
+#:   carries only a J-code can resolve, which is a real capability — but on an episode that
+#:   already publishes the NDC form, it is the same claim spelled twice.
+#:
+#: What this prevents is specific.  A medical episode publishes both forms, so an unfiltered
+#: list shows eight rows for four claims — and "more keys than claims" is exactly how a
+#: duplicate looks to anything reading this structure, including a careful human.
+#:
+#: **This is a display rule and nothing else.**  It narrows no resolution: every one of these
+#: keys is live in ``crosswalk_key`` and resolves records normally.  And it is scoped to
+#: *published* keys — if one of these is ever the **basis** on which something resolved, that
+#: is a fact about the match rather than a restatement of one, and it belongs in the dossier.
+_DERIVED_KEY_TYPES = frozenset({KeyType.COVERED_ENTITY_340B, KeyType.HCPCS})
 
 __all__ = ["build_dossier", "TimelineEvent", "RECORD_PROJECTIONS"]
 
@@ -152,7 +174,7 @@ def build_dossier(conn: sqlite3.Connection, episode_id: str, cursor: str) -> dic
                 "first_seen_at": row.first_seen_at,
             }
             for row in repository.crosswalk_for_episode(conn, episode_id)
-            if row.first_seen_at <= cursor
+            if row.first_seen_at <= cursor and row.key_type not in _DERIVED_KEY_TYPES
         ],
         "unresolved": _unresolved(conn, episode, cursor),
     }

@@ -385,7 +385,9 @@ CREATE TABLE parked_record (
   record_kind TEXT    NOT NULL,
   received_at TEXT    NOT NULL,
   park_reason TEXT    NOT NULL CHECK (park_reason IN (
-                'NO_KEY_MATCH','AMBIGUOUS_KEY_MATCH','NO_KEYS_PRESENT'))
+                'NO_KEY_MATCH','AMBIGUOUS_KEY_MATCH','NO_KEYS_PRESENT',
+                -- added by the connector layer for requirement E1; the three above are unchanged
+                'COVERED_ENTITY_MISMATCH'))
 ) STRICT;
 -- Orphan-rebate reporting asks for parked rows by kind, so the kind leads.
 CREATE INDEX ix_parked_kind_received ON parked_record(record_kind, received_at);

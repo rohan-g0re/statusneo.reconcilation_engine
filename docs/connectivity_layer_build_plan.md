@@ -233,7 +233,53 @@ Established by retrieval before planning, not assumed:
 | **E4** site identity | `DOC2-010` ("site / contract pharmacy") | `episode.site_id`, `normalized_record.site_id` | `pharmacy_npi` alone stops collapsing a network into one identity | two contract pharmacies under one NPI-holding entity are distinguishable | a health system's network is visible |
 | **E5** source-of-truth | `DOC2-004` (the page-2 authority table) | per-field authority enforcement | authority enforced **in data**, not by convention | a TPA record attempting to set rebate-payment status is **rejected**, not silently accepted | each system may only set what it owns |
 
-**Regression criterion for the whole wave:** crosswalk accuracy does not fall below the existing 99% floor.
+**Regression criterion for the whole wave:** crosswalk accuracy does not fall below the existing 99% floor. **Held** — the floor is an existing test (`MIN_RESOLVABLE_RATE_FULL`), and it is green.
+
+### The E1 caveat — stated rather than buried
+
+**E1's first clause is met on the pharmacy track and not on the medical track**, and the
+reason is a decision, not an omission.
+
+`episode` is immutable (`trg_episode_no_update`), so all three identity columns are derived
+at INSERT or never. On the full profile: 927 pharmacy episodes carry `DSH310074`, 17 carry
+NULL because their NPI is the satellite the covered entity never registered — that NULL is
+the unregistered-location finding, not a gap — and **556 medical episodes carry NULL**,
+because a 837 names no pharmacy and nothing else on a medical anchor is registration-backed.
+
+The first implementation did fill them, by matching the rendering prescriber against
+`affiliated_prescriber_npis`. It reached 22 of 23 medical episodes and was then **wrong on
+five**: it contradicted the TPA's own covered entity, which `DOC2-004` makes authoritative
+for 340B qualification and source transaction context. Affiliation says who a prescriber
+practises with; it does not say whose 340B claim a dispense is.
+
+That made the inferred value worse than no value. It lands in a column everything downstream
+reads as fact, and here it drove the contradiction guard — so the guess parked five records
+the TPA had labelled correctly. The guard treats absence as "no opinion" and never fires on
+it, so a NULL is inert where a wrong entity is actively harmful. Registration-only it is,
+and a medical episode's entity now arrives from the TPA record that states it outright.
+
+**What would close it properly:** a billing-provider NPI on `CoveredEntity`, which is
+registration-backed and is what a medical 340B claim is actually billed under. That is
+reference-data work with feed-byte-identity implications, so it is named here rather than
+done quietly.
+
+### E3's recorded basis is deliberately imprecise
+
+A bank deposit resolving via `PAYMENT_REFERENCE` now shares the rebate-batch branch with
+`ALLOCATION_CODE`. **An earlier version of this section claimed the omission produced wrong
+money. It does not, and the correction is worth recording because it changes who should
+care.** `_allocate_bank_row` chooses its splitter from the resolved target's `record_kind`,
+not from the basis, so such a deposit is fanned out across the batch's dispense lines either
+way. What the grouping protects is the audit trail: the basis is the field that states how a
+deposit was tied to what it paid, and a manufacturer's rebate settlement filed as a payer's
+claim-payment reassociation is a reconciliation nobody can re-derive later.
+
+The basis is still recorded as `ALLOCATION_CODE` rather than getting a member of its own.
+`AllocationBasis` is guarded at import by `agents/tools.py`'s match-strength table, and every
+recorded agent-eval trace is keyed on a digest of the prompt that table feeds — so a new
+member invalidates the fixtures to record a distinction no ledger consumer reads. Both
+references are exact rather than inferred, so the *strength* the audit trail reports is
+honest even though the reference name is not. Carried to `DESIGN_NOTE.md` §9.
 
 ---
 
@@ -374,20 +420,38 @@ requirement ids closed, what was discovered, and the test delta.
 | 1 Data layer | M1–M6, D2, D3, C1a | ✅ | +29 (628) | `dcafce5` |
 | 2 Framework | A1, **A2 partial**, A3, A5†, B1, B2† | 🔄 | +28 (656) | `9bd79aa` |
 | 3 File pattern | A4, D1, B3, **A2 (SFTP)** | ✅ | +14 (705) | `302b3bd` |
-| 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ✅ | +15 (720) | pending |
-| 5 Mapping | E1–E5 | ⬜ | — | — |
+| 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ✅ | +15 (720) | `4e56eda` |
+| 5 Mapping | E1–E5 | ✅ *(see E1 caveat)* | +85 (805) | pending |
 | 6 Proof | F1–F3 | ⬜ | — | — |
 | 7.1 UI restyle | goal item 5 | ✅ | — | `5eafe36` |
 | 7.2 Connectivity page + browser | goal item 5 | ⬜ | — | — |
 
 Baseline was **585**.
 
-**One pre-existing test has been edited, and only one.** `tests/test_decisions.py`'s
-Decision-A24 enum pin asserted set equality against exactly eight `KeyType` members, which
-no new key type can satisfy — and §4.7 requires four. Ruling 1 above anticipated this. The
-edit is an *addition*: the eight are still pinned exactly, the four connector types are
-pinned exactly in their own constant, and both directions still fail on drift. Strictly more
-is checked than before. Every other pre-existing test remains untouched.
+**Two pre-existing tests have been edited, and only two.** Both for the same underlying
+reason — a set pinned at exactly the eight Decision-A24 key types, which no §4.7 addition
+can satisfy — and both edited as *additions* rather than relaxations. Ruling 1 anticipated
+this; it did not anticipate that the pin appeared in two places.
+
+| Test | Wave | What changed | Why it is not a relaxation |
+|---|---|---|---|
+| `tests/test_decisions.py` | 4 | A24 pin split into `A24_KEY_TYPES` (eight, exact) plus `CONNECTOR_KEY_TYPES` (four, exact) | a ninth A24 member and a fifth connector member each still fail |
+| `tests/test_api.py` | 5 | the `/trace` key-type set gained the two episode-bound connector types | the eight stay a set of their own, and two **new** assertions were added: a scoped key must wrap a natural key present on that same episode, and one episode may be scoped to at most one covered entity |
+
+Every other pre-existing test remains untouched. `tests/test_connectors.py` was also edited
+in wave 5, but it is connector-layer work from wave 2 rather than part of the 585.
+
+**One connector-layer test was corrected, not relaxed.**
+`test_pipeline_names_no_vendor_and_no_feed_filename` walked every string constant in
+`pipeline.py` and rejected any containing a vendor name. That caught two false positives the
+moment wave 5 touched the file: a docstring *explaining* the rule, and `"beacon_id"`, which
+is a `normalized_record` column rather than a vendor branch. Both exclusions are now
+explicit — docstrings by AST node identity, column names by joining against the repository's
+own column tuples — and a genuine `if source == "beacon":` is still caught. **This is the
+third time in this build that a text-or-constant scan has punished a module for documenting
+the prohibition it obeys.** The cheapest way to make such a test pass is to delete the
+explanation, which is exactly backwards, so the exclusion is now structural rather than a
+hope that no prose mentions a vendor.
 
 **Environment note.** The suite runs on Python 3.12 / SQLite 3.50, because the 3.11
 interpreter available on this machine is ARM64 and has no `cryptography` wheel — so paramiko

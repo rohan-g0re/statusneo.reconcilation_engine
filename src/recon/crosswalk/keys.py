@@ -46,6 +46,10 @@ __all__ = [
     "natural_340b_pharmacy",
     "natural_340b_medical",
     "pbm_auth",
+    "beacon_id",
+    "covered_entity_340b",
+    "hcpcs_medical",
+    "payment_reference",
     "parse_clp01_pharmacy",
     "format_clp01_pharmacy",
     "wire_date_to_iso",
@@ -216,6 +220,165 @@ def pbm_auth(authorization_number: str) -> tuple[KeyType, str]:
     own records only: it never reaches the TPA and never reaches the bank.
     """
     return KeyType.PBM_AUTH, _component(authorization_number, "authorization_number")
+
+
+# ═══ the four connector key types (requirement §4.7) ════════════════════════
+#
+# The eight above are Decision A24 and are about what a *claim* joins on.  These four are
+# about what a *connector* joins on, and ``DOC2-002`` step 4 names every one of them:
+# *"Business mapping: Crosswalk 340B IDs, NDC/HCPCS, claim/Rx/fill IDs, provider/site,
+# payer/PBM, manufacturer, transaction and payment references."*
+#
+# They live here for the same reason the eight do.  ``beacon_id`` and ``payment_reference``
+# spent wave 4 in ``connectors/vendors/beacon.py`` — see that module, which said at the time
+# that here was where they belonged.  A second construction site is exactly how the write
+# side and the read side come to disagree about a string, and that disagreement is silent.
+
+
+def beacon_id(identifier: str) -> tuple[KeyType, str]:
+    """``BEACON_ID`` — the identifier Beacon assigns on submission.  Requirement C5.
+
+    A single-component key, so the canonical form *is* the component: there is no separator
+    to place and nothing to order.  What still has to hold is the separator prohibition,
+    which is why this goes through :func:`_component` like everything else rather than
+    returning the string untouched.
+
+    Beacon issues the ID when it accepts a submission and carries it on claim-level
+    submission history afterwards (``BEACON-013``), which makes it the join from our episode
+    to the manufacturer's rebate decision.  The ID's **format** is not known — ``BEACON-013``
+    establishes that the identifier exists, not what it looks like — so nothing here assumes
+    a prefix, a length or a character set.
+
+    Exactly one record may publish this key.  Two publishers of one ``(key_type, key_value)``
+    pair turn every lookup into a multi-hit, which the connector parks as
+    ``AMBIGUOUS_KEY_MATCH`` — so a second publisher does not produce a wrong answer, it
+    produces no answer, for every rebate at once.  That rule is enforced by the connector,
+    not by this function; a key builder cannot see how many records call it.
+    """
+    return KeyType.BEACON_ID, _component(identifier, "beacon_id")
+
+
+def covered_entity_340b(
+    covered_entity_id: str, scoped_key_value: str
+) -> tuple[KeyType, str]:
+    """``COVERED_ENTITY_340B`` — another key scoped to the covered entity that owns it.  E1.
+
+    Doc 2 lists 340B IDs first in its crosswalk list (``DOC2-002`` step 4), Verity's own
+    mapping row opens with *"Map 340B ID, site / contract pharmacy, ..."* (``DOC2-010``), and
+    Beacon grants partner permissions per 340B ID (``BEACON-012``).  The covered entity is
+    therefore a key, not a column nobody populates.
+
+    **This is a scoped key, and the scoping is the whole point.**  A *bare* covered-entity id
+    is useless and actively dangerous as a crosswalk key: every episode of one covered entity
+    would collide onto one string, every lookup would return hundreds of episodes, and
+    ``_attach`` would turn that into ``AMBIGUOUS_KEY_MATCH`` for the entire entity — one
+    defect that silently parks a whole health system.  So what is keyed is the covered entity
+    *joined to an already-canonical key value*: ``covered_entity_id|<some other key value>``,
+    in practice the string half of :func:`natural_340b_pharmacy` or
+    :func:`natural_340b_medical`.
+
+    That construction is what makes requirement E1's acceptance — *"a TPA record for the
+    wrong covered entity does not resolve"* — true by construction rather than by a
+    comparison someone has to remember to write.  A TPA record declaring the wrong covered
+    entity builds a *different string*, resolves to nothing, and parks as ``NO_KEY_MATCH``.
+    There is no equality check to forget, and no code path where the check is skipped.
+
+    **Why ``scoped_key_value`` does not go through :func:`_component`.**  It is itself a
+    ``|``-joined composite, so ``_component`` would refuse it — that function's separator ban
+    exists to stop *one component* smuggling in a separator and colliding two keys, and here
+    the separators are the deliberate structure of a value that was already built by a
+    builder in this module.  It is validated by its own explicit check instead: present and
+    non-empty.  Doing this silently — catching the refusal, or stripping the separators —
+    is the failure mode, which is why the two halves are validated by visibly different
+    means and the test suite pins the asymmetry.
+
+    Scoping does not weaken the inner key.  ``covered_entity_id`` is used exactly as the feed
+    spelled it, like every other component (Decision A23): a 340B ID that drifts between the
+    TPA export and our episode is a real defect and is meant to miss.
+    """
+    entity = _component(covered_entity_id, "covered_entity_id")
+    # Deliberately *not* _component(): a canonical key value is a composite and contains the
+    # separator by design.  Checked on its own terms so the exemption is explicit.
+    if scoped_key_value is None:
+        raise MalformedKeyComponentError(
+            "key component 'scoped_key_value' is None; a covered-entity key with nothing "
+            "to scope is a bare entity id, which collides every episode of that entity "
+            "onto one string. Park the record instead."
+        )
+    scoped = str(scoped_key_value)
+    if scoped == "":
+        raise MalformedKeyComponentError(
+            "key component 'scoped_key_value' is empty; see above — an unscoped "
+            "covered-entity key is not a weaker key, it is a collision"
+        )
+    return KeyType.COVERED_ENTITY_340B, _join(entity, scoped)
+
+
+def hcpcs_medical(
+    hcpcs: str, provider_npi: str, service_date: str
+) -> tuple[KeyType, str]:
+    """``HCPCS`` — the medical 340B bridge for a record that carries no NDC.  E2.
+
+    :func:`natural_340b_medical` with the J-code standing where the ``ndc11`` stands.  Note
+    the argument order leads with ``hcpcs`` — the thing that makes this key different — while
+    the *component* order matches its sibling exactly: ``provider_npi|hcpcs|service_date``.
+    The two orders differ on purpose and the test suite pins the rendered string, because
+    positional arguments that quietly transpose would build a plausible key that resolves to
+    nothing.
+
+    **Why it exists.**  ``natural_340b_medical`` needs an ``ndc11``, and a medical-benefit
+    drug is billed by HCPCS J-code.  ``DOC2-002`` step 4 reads "NDC/HCPCS", not "NDC";
+    Beacon's medical template matches on a combination that includes both NDC and HCPCS
+    (``BEACON-008`` — a search-index summary, not a verbatim field list, so nothing here
+    assumes which of the two Beacon requires).  In our own feeds the gap is concrete: the
+    835 service line writes ``svc01_composite`` as ``"HC:J9035:JW"`` and carries no NDC at
+    all, and the CPT administration line that bills the act of infusing legitimately has no
+    NDC because no drug was dispensed on it.  A J-code-only record can build no key today, so
+    it parks — not because the data is bad but because the model is short a key type.
+
+    **Same weakness as its sibling, and the same stance on it.**  A clinic-infused drug has
+    no prescription, so there is no Rx number to key on, and two administrations of the same
+    drug at the same site on the same day are genuinely indistinguishable.  A J-code is if
+    anything *coarser* than an NDC — one J-code covers every manufacturer's version of the
+    drug — so this key is weaker still.  A multi-hit must be parked as
+    ``AMBIGUOUS_KEY_MATCH``.  Picking one is a coin flip that attributes real money to the
+    wrong episode, and it would look identical to a correct match in every report.
+
+    ``service_date`` is ``YYYY-MM-DD``; use :func:`wire_date_to_iso` on the ``CCYYMMDD`` the
+    wire carries.  The J-code is used exactly as the feed spelled it — no ``upper()``, no
+    modifier stripping (Decision A23).  ``"HC:J9035:JW"`` is a composite the *adapter* takes
+    apart; what reaches here is the J-code alone.
+    """
+    return KeyType.HCPCS, _join(
+        _component(provider_npi, "provider_npi"),
+        _component(hcpcs, "hcpcs"),
+        _component(service_date, "service_date"),
+    )
+
+
+def payment_reference(reference: str) -> tuple[KeyType, str]:
+    """``PAYMENT_REFERENCE`` — the rebate-status source's reference for a settlement.  E3.
+
+    Named in its own right by ``DOC2-002`` step 4 ("... manufacturer, transaction and payment
+    references"), and it resolves to a ``REBATE_BATCH`` — a remittance-side target, never to
+    a claim.  Two hops, exactly like :func:`allocation_code` and :func:`trn02`.
+
+    **What distinguishes it from those two.**  :func:`trn02`'s docstring sets out the "same
+    column, different issuer" idea: the bank column holds *the reference the payer or
+    manufacturer assigned for reassociation*, spelled ``TRN02`` when a PBM or health plan
+    issued it and ``ALLOCATION_CODE`` when a manufacturer issued it.  This is a third fact
+    about the same settlement: the reference **the rebate-status source reports** for it.
+    Beacon is authoritative for rebate status and Beacon-side reconciliation data
+    (``DOC2-004``), so its reference is the one that arrives with the status, and it is not
+    ours to reconcile against the batch reference by assuming they are the same string.
+
+    That is also why a Beacon batch publishes this key and **not** ``ALLOCATION_CODE``, even
+    where the two values happen to agree: the 340B feed's own ``REBATE_PAYMENT_BATCH``
+    already publishes the allocation code, and two records publishing one
+    ``(key_type, key_value)`` pair make every bank deposit that looks it up a multi-hit the
+    crosswalk parks as ``AMBIGUOUS_KEY_MATCH``.
+    """
+    return KeyType.PAYMENT_REFERENCE, _component(reference, "payment_reference")
 
 
 # ═══ the one structural parse the crosswalk owns ════════════════════════════

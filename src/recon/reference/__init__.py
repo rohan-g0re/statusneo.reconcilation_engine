@@ -16,13 +16,19 @@ Sub-modules
 ``pricing``     contract terms and the expected-amount accessors both G2 and G3 import
 ``codes``       wire codes to canonical semantics, and the PLB sign convention
 ``calendar``    banking days over the generation window
+``sites``       contract-pharmacy sites, the identity below the NPI (E4)
 ``fingerprint`` SHA-256 of the whole universe, for drift detection
+
+``sites`` is the one sub-module the generators never see.  It is read on the ingest and
+connector side only, and :mod:`recon.reference.fingerprint` deliberately does not hash
+it: the fingerprint's job is to catch a dataset generated against one universe being
+scored against another, and a table no generator can reach cannot cause that drift.
 """
 
 from __future__ import annotations
 
 from recon.domain.enums import BenefitType
-from recon.reference import calendar, codes, drugs, entities, patients, pricing
+from recon.reference import calendar, codes, drugs, entities, patients, pricing, sites
 from recon.reference.errors import (
     NoContractTermsError,
     ReferenceError,
@@ -38,6 +44,7 @@ __all__ = [
     "pricing",
     "codes",
     "calendar",
+    "sites",
     "fingerprint",
     "validate",
     "ReferenceError",
@@ -200,6 +207,47 @@ def validate() -> None:
         + [m.company_id for m in entities.manufacturers()]
     )
     check(len(set(company_ids)) == len(company_ids), "two originators share a bank company id")
+
+    # --- sites ------------------------------------------------------------
+    all_sites = sites.sites()
+    check(len(all_sites) >= 2, f"expected at least 2 contract-pharmacy sites, found {len(all_sites)}")
+    seen_site_ids: set[str] = set()
+    for site in all_sites:
+        tag = f"site {site.site_id} ({site.name})"
+        check(site.site_id not in seen_site_ids, f"{tag}: duplicate site id")
+        seen_site_ids.add(site.site_id)
+        try:
+            entities.covered_entity_by_id(site.covered_entity_id)
+        except UnknownEntityError:
+            check(False, f"{tag}: covered entity {site.covered_entity_id} does not exist")
+        try:
+            entities.pharmacy_by_npi(site.npi)
+        except UnknownEntityError:
+            check(False, f"{tag}: NPI {site.npi} resolves to no pharmacy")
+
+    npis_with_two_sites = [
+        npi for npi in sorted({s.npi for s in all_sites}) if len(sites.sites_for_npi(npi)) > 1
+    ]
+    check(
+        len(npis_with_two_sites) >= 1,
+        "no NPI carries two sites, so E4's acceptance criterion — two contract pharmacies "
+        "under one NPI-holding entity are distinguishable — is unmeetable",
+    )
+    npis_with_one_site = [
+        npi for npi in sorted({s.npi for s in all_sites}) if len(sites.sites_for_npi(npi)) == 1
+    ]
+    check(
+        len(npis_with_one_site) >= 1,
+        "no NPI carries exactly one site, so the unambiguous branch of resolve_site is untestable",
+    )
+    own_entity_id = entities.own_covered_entity().covered_entity_id
+    satellite_sites = sites.sites_for_npi(entities.satellite_pharmacy().npi)
+    offending = [s.site_id for s in satellite_sites if s.covered_entity_id == own_entity_id]
+    check(
+        not offending,
+        f"site(s) {offending} put the satellite NPI under our own covered entity, which asserts "
+        "the registration UNREGISTERED_LOCATION needs absent",
+    )
 
     # --- patients ---------------------------------------------------------
     everyone = patients.all_patients()

@@ -265,19 +265,19 @@ def _default_credential_ref(vendor: str) -> str:
 _VENDOR_ROWS: dict[str, _VendorRow] = {
     "verity_accumulations": _VendorRow(
         vendor="verity",
-        source_system=SourceSystem.TPA_PORTAL,
+        source_system=SourceSystem.TPA_VERITY,
         filenames=(),
         mapping_version="verity-export-1.0.0",
     ),
     "verity_invoices": _VendorRow(
         vendor="verity",
-        source_system=SourceSystem.TPA_PORTAL,
+        source_system=SourceSystem.TPA_VERITY,
         filenames=(),
         mapping_version="verity-export-1.0.0",
     ),
     "craneware_claims_report": _VendorRow(
         vendor="craneware",
-        source_system=SourceSystem.TPA_PORTAL,
+        source_system=SourceSystem.TPA_CRANEWARE,
         # Stable and undated, unlike Verity's.  Dating it would mean stamping the run date
         # into the bytes, and then the same input produces a different file on two different
         # days.
@@ -413,16 +413,21 @@ def vendor_sources(
 #: acknowledgement arrives on submission, a payment reference arrives when a rebate settles
 #: weeks later.
 #:
-#: ``source_system`` is ``MANUFACTURER_REBATE`` on every row.  Requirement §4.7 names a
-#: ``SourceSystem.BEACON`` member and it does not exist in ``domain.enums`` yet — only the
-#: four ``KeyType`` members landed — so until it does, a Beacon record is attributed to the
-#: system whose decision it carries.  That is exactly how the 340B feed attributes its own
-#: ``MANUFACTURER_DECISION`` and ``REBATE_PAYMENT_BATCH`` records, so the attribution is
-#: consistent rather than merely available.
+#: ``source_system`` is ``BEACON`` on every row.  It was ``MANUFACTURER_REBATE`` until the
+#: §4.7 enum member existed, on the argument that a Beacon record should be attributed to the
+#: system whose decision it carries.  Requirement E5 is what retired that argument: DOC2-004
+#: makes Beacon authoritative for *rebate submission identifiers* specifically, and a
+#: ``beacon_id`` is minted by Beacon rather than relayed from anyone.  Under the old
+#: attribution the connector's own decision records breach that rule — verified, not assumed.
+#:
+#: The distinction the authority table draws, and the reason it is not pedantry: the
+#: manufacturer's *status* is a fact Beacon relays, so ``MANUFACTURER_REBATE`` remains
+#: entitled to set it; the *identifier* is a fact Beacon originates, so nothing else may.  A
+#: fabricated ``beacon_id`` does not fail to resolve — it resolves to the wrong episode.
 _BEACON_ROWS: dict[str, _VendorRow] = {
     "beacon_submissions": _VendorRow(
         vendor="beacon",
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        source_system=SourceSystem.BEACON,
         # Empty, and not an oversight.  There is nothing to *fetch* from the submission
         # endpoint: this row exists to say where Beacon lives and which credential name to
         # resolve, which is what requirement C2's outbound adapter needs and all it needs.
@@ -432,25 +437,25 @@ _BEACON_ROWS: dict[str, _VendorRow] = {
     ),
     "beacon_acknowledgements": _VendorRow(
         vendor="beacon",
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        source_system=SourceSystem.BEACON,
         filenames=("acknowledgement.jsonl",),
         mapping_version="beacon-api-1.0.0",
     ),
     "beacon_validation_outcomes": _VendorRow(
         vendor="beacon",
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        source_system=SourceSystem.BEACON,
         filenames=("validation_outcome.jsonl",),
         mapping_version="beacon-api-1.0.0",
     ),
     "beacon_rebate_status": _VendorRow(
         vendor="beacon",
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        source_system=SourceSystem.BEACON,
         filenames=("rebate_status.jsonl",),
         mapping_version="beacon-api-1.0.0",
     ),
     "beacon_payment_references": _VendorRow(
         vendor="beacon",
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        source_system=SourceSystem.BEACON,
         filenames=("payment_reference.jsonl",),
         mapping_version="beacon-api-1.0.0",
     ),

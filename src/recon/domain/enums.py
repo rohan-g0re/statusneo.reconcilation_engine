@@ -223,6 +223,16 @@ class ParkReason(StrEnum):
     AMBIGUOUS_KEY_MATCH = "AMBIGUOUS_KEY_MATCH"  # keys resolve to more than one target
     NO_KEYS_PRESENT = "NO_KEYS_PRESENT"      # the document carries no usable key at all
 
+    #: The keys resolved cleanly to exactly one episode, and the document then contradicted
+    #: it: it named a different 340B covered entity (requirement E1).
+    #:
+    #: A separate reason from ``NO_KEY_MATCH`` because it is a different fact about the
+    #: world and a different person's problem.  A key miss means the mapping failed and the
+    #: two records are probably the same claim.  This means the mapping *worked* and the two
+    #: records disagree about whose 340B claim it is — which is an entitlement question, and
+    #: attaching anyway would credit one covered entity's savings to another.
+    COVERED_ENTITY_MISMATCH = "COVERED_ENTITY_MISMATCH"
+
 
 class QuarantineReason(StrEnum):
     """Why a raw record could not be normalized at all (D-5, Decision 33 §3)."""
@@ -232,6 +242,16 @@ class QuarantineReason(StrEnum):
     SCHEMA_VERSION_MISMATCH = "SCHEMA_VERSION_MISMATCH"
     UNKNOWN_EVENT_SEMANTICS = "UNKNOWN_EVENT_SEMANTICS"
     UNPARSEABLE = "UNPARSEABLE"
+
+    #: The record parsed and adapted perfectly, and then set a field its source system does
+    #: not own (requirement E5, DOC2-004's source-of-truth boundary).
+    #:
+    #: Its own reason because the other five all mean "we could not read this", and the
+    #: operator's next action for those is to go and look at the bytes.  Here the bytes are
+    #: fine and the next action is a conversation about which system is the system of record
+    #: — a different fix with a different owner.  Folding it into ``UNPARSEABLE`` would send
+    #: someone to read a file that turns out to be perfectly well-formed.
+    SOURCE_AUTHORITY_BREACH = "SOURCE_AUTHORITY_BREACH"
 
 
 class CrossTrackFlag(StrEnum):

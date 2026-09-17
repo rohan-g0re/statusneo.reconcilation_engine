@@ -827,28 +827,29 @@ def submit(request: SubmissionRequest, send: Sender) -> "EpisodeBeaconId":
 def beacon_id_key(beacon_id: str) -> tuple[KeyType, str]:
     """``BEACON_ID`` in its canonical key form.  Requirement C5.
 
-    A single-component key, so the canonical form *is* the component — there is no separator
-    to place and nothing to order.  The one rule that still has to hold is the separator
-    prohibition, and it is imported from :mod:`recon.crosswalk.keys` rather than restated,
-    because a component containing ``|`` would collide two distinct keys onto one string.
+    The canonical construction now lives in :func:`recon.crosswalk.keys.beacon_id`, which is
+    where the wave-4 version of this function already said it belonged.
 
-    The canonical home for this helper is ``crosswalk/keys.py``, beside the other eight, and
-    that is where it should move when the crosswalk half of the connector layer is built.  It
-    is here today because this is the only caller and a key builder with no caller is a
-    builder nobody checks.
+    This wrapper stays because it is the name every caller in this module imports, and it
+    keeps validating through :func:`_single_component` first so that a malformed ID still
+    raises :class:`BeaconMappingError` rather than the crosswalk's own error type — the
+    relocation moves where the string is *built*, and changes nothing a caller can observe.
     """
-    return KeyType.BEACON_ID, _single_component(beacon_id, "beacon_id")
+    return keys.beacon_id(_single_component(beacon_id, "beacon_id"))
 
 
 def payment_reference_key(reference: str) -> tuple[KeyType, str]:
     """``PAYMENT_REFERENCE`` in its canonical key form.  Requirement E3's key, used by C3.
 
-    The manufacturer's own reference for a rebate payment, which is a different fact from
-    ``TRN02`` (the payer's reassociation reference) and from ``ALLOCATION_CODE`` (the batch
-    reference the 340B feed already publishes).  ``DOC2-002`` step 4 names it separately for
-    that reason.
+    The rebate-status source's own reference for a rebate payment, which is a different fact
+    from ``TRN02`` (the payer's reassociation reference) and from ``ALLOCATION_CODE`` (the
+    batch reference the 340B feed already publishes).  ``DOC2-002`` step 4 names it
+    separately for that reason.
+
+    The canonical construction now lives in :func:`recon.crosswalk.keys.payment_reference`;
+    see :func:`beacon_id_key` above for why the local validation stays.
     """
-    return KeyType.PAYMENT_REFERENCE, _single_component(reference, "payment_reference")
+    return keys.payment_reference(_single_component(reference, "payment_reference"))
 
 
 def _single_component(value: object, field: str) -> str:
@@ -1630,12 +1631,13 @@ def _decision_record(
     status_code = collected.get("manufacturer_status") or collected.get("validation_outcome")
     return InboundRecord(
         record_kind=RecordKind.TPA_MANUFACTURER_DECISION,
-        # ``SourceSystem.BEACON`` is named in requirement 4.7 and is not in
-        # ``domain.enums`` yet -- only the four KeyType members landed.  Until it does, a
-        # Beacon decision is attributed to the system whose decision it carries, which is
-        # exactly how the 340B feed attributes its own MANUFACTURER_DECISION records.  When
-        # the member lands this is one line.
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        # The member landed in wave 4, and requirement E5 is what made using it necessary
+        # rather than merely possible.  This record carries a ``beacon_id``, and DOC2-004
+        # gives Beacon sole authority over rebate submission identifiers -- so attributing it
+        # to MANUFACTURER_REBATE now states that a non-Beacon source minted a Beacon ID.
+        # ``connectors/authority.py`` refuses exactly that, and refused this record before
+        # the line changed.
+        source_system=SourceSystem.BEACON,
         received_at=str(received_at),
         # The Beacon ID, so re-pulling the same claim twice is one record and not two.  This
         # is the idempotency ``DOC2-002`` step 3 asks for, and it is available here precisely
@@ -1708,7 +1710,9 @@ def _batch_record(
     }
     return InboundRecord(
         record_kind=RecordKind.REBATE_BATCH,
-        source_system=SourceSystem.MANUFACTURER_REBATE,
+        # Beacon, for the same reason as the decision record above: this batch is identified
+        # by Beacon's own payment reference, which Beacon originates.
+        source_system=SourceSystem.BEACON,
         received_at=str(received_at),
         idempotency_key=reference,
         mapping_version=mapping_version,

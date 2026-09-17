@@ -159,17 +159,50 @@ def test_the_trace_shows_the_audit_trail_and_the_crosswalk(client):
     assert payload["verdict_history"], "the audit trail runs across time"
     assert payload["crosswalk_keys"], "and the crosswalk shows what resolved to this episode"
     assert payload["records"]
+    # The original eight (Decision A24), still pinned exactly as a set of their own.
+    a24 = {
+        "NCPDP_CLAIM",
+        "MEDICAL_CLM01",
+        "PAYER_ICN",
+        "TRN02",
+        "ALLOCATION_CODE",
+        "NATURAL_340B_PHARMACY",
+        "NATURAL_340B_MEDICAL",
+        "PBM_AUTH",
+    }
+    # The connector layer's additions (requirement 4.7).  Listed separately rather than
+    # merged so the eight stay a checkable claim: a ninth A24 key type still fails here.
+    # ``BEACON_ID`` and ``PAYMENT_REFERENCE`` resolve to a remittance rather than to an
+    # episode, so they do not appear on an episode trace and are deliberately absent.
+    connector = {"COVERED_ENTITY_340B", "HCPCS"}
     for key in payload["crosswalk_keys"]:
-        assert key["key_type"] in {
-            "NCPDP_CLAIM",
-            "MEDICAL_CLM01",
-            "PAYER_ICN",
-            "TRN02",
-            "ALLOCATION_CODE",
-            "NATURAL_340B_PHARMACY",
-            "NATURAL_340B_MEDICAL",
-            "PBM_AUTH",
-        }, f"unexpected key type {key['key_type']!r}; there are exactly eight"
+        assert key["key_type"] in a24 | connector, (
+            f"unexpected key type {key['key_type']!r}"
+        )
+
+    # Strictly more than the original check: a scoped 340B key must actually be scoped, and
+    # scoped to *this* episode's covered entity.  A scoped key carrying someone else's entity
+    # would resolve records to the wrong covered entity while looking perfectly well-formed —
+    # which is the exact failure requirement E1 exists to prevent.
+    natural = {
+        key["key_value"]
+        for key in payload["crosswalk_keys"]
+        if key["key_type"] in {"NATURAL_340B_PHARMACY", "NATURAL_340B_MEDICAL"}
+    }
+    entities_seen = set()
+    for key in payload["crosswalk_keys"]:
+        if key["key_type"] != "COVERED_ENTITY_340B":
+            continue
+        entity, separator, scoped = key["key_value"].partition("|")
+        assert separator, f"scoped key {key['key_value']!r} carries no scope separator"
+        assert scoped in natural, (
+            f"scoped key {key['key_value']!r} wraps {scoped!r}, which is not a natural 340B "
+            "key on this episode — it would resolve records that belong somewhere else"
+        )
+        entities_seen.add(entity)
+    assert len(entities_seen) <= 1, (
+        f"one episode is scoped to more than one covered entity: {sorted(entities_seen)}"
+    )
 
 
 def test_an_unknown_episode_is_a_404(client):
