@@ -195,7 +195,24 @@ class IngestStats:
 # ═══ loading: files to immutable raw rows ═══════════════════════════════════
 
 
-def load_from_sources(conn: sqlite3.Connection, sources: Sequence["Source"]) -> IngestStats:
+#: The checkpoint's stand-in for "now".
+#:
+#: Wall-clock is permitted in ``connector_checkpoint`` and in logs and nowhere else
+#: (requirement §4.11), but *permitted* is not the same as *unavoidable*.  Every random
+#: stream in this system is seeded from a canonical string and ``ingest_batch.loaded_at`` is
+#: pinned to the epoch, precisely so that the same seed produces the same bytes.  Reading a
+#: real clock here by default would break that for no gain: nothing downstream may read
+#: ``fetched_at``, so a fixed value costs nothing and keeps a test's database reproducible.
+#: A deployment that wants a real timestamp passes one.
+EPOCH_STAMP = "1970-01-01T00:00:00Z"
+
+
+def load_from_sources(
+    conn: sqlite3.Connection,
+    sources: Sequence["Source"],
+    *,
+    fetched_at: str = EPOCH_STAMP,
+) -> IngestStats:
     """Land every document a registered source currently offers into ``raw_record``.
 
     The transport-agnostic half of loading (requirement A2).  A source knows how to obtain
@@ -208,21 +225,69 @@ def load_from_sources(conn: sqlite3.Connection, sources: Sequence["Source"]) -> 
     SFTP or from an HTTP response.  That is the payoff of the original event-driven decision,
     and it is why a connector layer is additive here rather than a rewrite.
 
-    Re-loading a document already ingested is a no-op, detected by file hash.  That is the
-    file-level half of idempotency; the record-level half is in :func:`ingest`.  The
-    fetch-level half — not re-downloading in the first place — belongs to the transport and
-    its checkpoint, which is requirement A4.
+    **Three layers of idempotency, and they stop different things.**  Record-level lives in
+    :func:`ingest`.  File-level is the content-hash check below, which stops a re-*ingest*.
+    Fetch-level is the checkpoint, which stops the re-*download* — and that is the one
+    requirement A4 actually asks for, because "run twice; the second run downloads zero
+    bytes" is a stronger claim than "ingests zero records" and the weaker one was already
+    true before any of this existed.
+
+    The source is registered before it is fetched, not after.  ``connector_checkpoint``
+    carries a foreign key onto ``connector_source``, so a source that fetched first would
+    fail its checkpoint write *after* the bytes had already moved — the one ordering where
+    the failure costs something.
     """
+    from recon.connectors import checkpoint as checkpoint_module
     from recon.connectors import registry
     from recon.db import repository
 
     stats = IngestStats()
 
     for source in registry.enabled(sources):
-        for document in source.require_transport().fetch(source):
+        repository.register_connector_source(
+            conn,
+            source_id=source.source_id,
+            vendor=source.vendor,
+            transport_kind=str(source.transport_kind),
+            source_system=source.source_system,
+            endpoint=source.endpoint,
+            credential_ref=source.credential_ref,
+            mapping_version=source.mapping_version,
+            enabled=source.enabled,
+        )
+        predicate = checkpoint_module.fetch_predicate(conn, source.source_id)
+
+        for document in source.require_transport().fetch(source, should_fetch=predicate):
             text = document.text
             file_sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+            def _checkpoint() -> None:
+                """Mark this document as successfully taken.
+
+                Called on the two paths that *finish* — landed, or recognised as already
+                landed — and on neither path that raises.  The ordering is the whole point.
+
+                An earlier version recorded the fetch as soon as the bytes arrived, which is
+                wrong in a way that only shows up on a bad day: a document that aborted
+                mid-load was still checkpointed, so correcting the export and re-running
+                skipped it, and the fix appeared to do nothing.  A checkpoint means "we took
+                this", not "we touched it".
+
+                A document found already ingested *is* recorded, because it genuinely was
+                taken — leaving it out would turn A4's "the second run downloads zero bytes"
+                into "zero bytes unless the file was a duplicate".
+                """
+                checkpoint_module.record_fetch(
+                    conn,
+                    source_id=source.source_id,
+                    document_name=document.name,
+                    remote_mtime=document.modified_at,
+                    content_sha256=file_sha,
+                    fetched_at=fetched_at,
+                )
+
             if repository.batch_for_file_sha256(conn, file_sha) is not None:
+                _checkpoint()
                 continue
 
             rows = list(
@@ -264,6 +329,7 @@ def load_from_sources(conn: sqlite3.Connection, sources: Sequence["Source"]) -> 
                     }
                 )
             stats.raw_records += repository.insert_raw_records(conn, raw_rows)
+            _checkpoint()
     return stats
 
 

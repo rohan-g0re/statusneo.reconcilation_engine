@@ -15,6 +15,18 @@ dependencies = []
 [project.optional-dependencies]
 api = ["fastapi", "uvicorn", "pydantic"]
 agent = ["httpx"]
+# The connector fabric's one third-party need. SFTP is a protocol, not a file format:
+# there is no stdlib client, and writing one would be inventing cryptography rather than
+# a connector. Kept as an extra so the base install's zero-dependency claim above stays a
+# fact about this manifest. HttpApiTransport reuses `agent`'s httpx rather than adding a
+# second client, and the Beacon mock server is stdlib http.server.
+#
+# Checked rather than assumed: paramiko 5.0.0 imports clean under `-W error`, so the
+# `filterwarnings = ["error"]` setting below needs no exemption for it. Older paramiko
+# pulled a cryptography that warned on import and would have failed the suite at
+# collection; if that returns, the fix is one narrow ignore for that warning class and
+# never a blanket `ignore::DeprecationWarning`.
+connectors = ["paramiko"]
 dev = ["pytest"]
 
 [project.scripts]
@@ -28,4 +40,21 @@ recon = ["db/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error"]
+# Warnings are errors. That is deliberate and it has caught real defects, so the exceptions
+# below are listed one at a time with a reason rather than softened into a blanket ignore.
+#
+# Both entries are third-party deprecations raised while *importing* starlette's TestClient,
+# on a path this project does not control and does not call: starlette now prefers httpx2 for
+# its test client, and anyio has moved an alias starlette still uses. Neither says anything
+# about this codebase, and neither is fixable here — the agent layer's client is written
+# against httpx v1, so "resolving" it would mean rewriting working production code to satisfy
+# a test helper's preference.
+#
+# They are scoped to the exact message and nothing wider. `ignore::DeprecationWarning` would
+# have silenced these two and also every deprecation this project's own code might earn,
+# which is the trade that makes warnings-as-errors worthless.
+filterwarnings = [
+    "error",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]

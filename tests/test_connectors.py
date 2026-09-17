@@ -143,7 +143,11 @@ def test_a_document_carries_no_filesystem_handle():
     loader takes a feeds directory" to "the loader takes a transport".
     """
     fields = set(Document.__dataclass_fields__)
-    assert fields == {"name", "text"}, f"Document grew {sorted(fields - {'name', 'text'})}"
+    pathlike = sorted(
+        name for name in fields if any(token in name for token in ("path", "dir", "root", "handle", "file"))
+    )
+    assert not pathlike, f"Document grew a filesystem reference: {pathlike}"
+    assert "text" in fields and "name" in fields
 
 
 # ═══ A1 — sources are data, not code ═══
@@ -611,17 +615,49 @@ def test_a_secret_never_renders_its_value(render):
     assert "super-secret-value" not in render(secret)
 
 
+#: The only modules permitted to take a credential out of its wrapper.
+#:
+#: An allow-list rather than a count, because the useful question is not "how many places
+#: reveal a secret" but "is this one of the places that should".  A module joining this list
+#: is a deliberate edit with a reviewer attached; a module revealing a secret without joining
+#: it fails.  ``sftp.py`` is the first entry — before wave 3 the list was empty and the test
+#: said so, which is how the transition stayed visible instead of being absorbed.
+CREDENTIAL_USE_SITES = frozenset({"credentials.py", "sftp.py"})
+
+
 def test_revealing_a_secret_is_a_single_greppable_call():
-    """One escape hatch, named so the audit is a grep rather than a review."""
+    """One escape hatch, named so the audit is a grep rather than a review.
+
+    The value of ``reveal()`` being the only way out is that the complete list of places
+    this process can emit a credential is the list of its call sites.  That is only worth
+    anything while the list is short and every entry is intentional.
+    """
     assert credentials.Secret("abc").reveal() == "abc"
-    offenders = [
+    offenders = sorted(
         path.name
-        for path in sorted(CONNECTORS_DIR.rglob("*.py"))
-        if ".reveal()" in path.read_text(encoding="utf-8") and path.name != "credentials.py"
-    ]
-    # Nothing in wave 2 transports a credential yet; SFTP and HTTP will be the first, and
-    # this list is where that becomes visible rather than a thing someone has to notice.
-    assert offenders == [], f"credential use sites (expected once SFTP/HTTP land): {offenders}"
+        for path in CONNECTORS_DIR.rglob("*.py")
+        if ".reveal()" in path.read_text(encoding="utf-8")
+        and path.name not in CREDENTIAL_USE_SITES
+    )
+    assert not offenders, (
+        f"modules revealing a credential without being declared a use site: {offenders}; "
+        "add it to CREDENTIAL_USE_SITES if that is intended, so the next reviewer sees it"
+    )
+
+
+def test_every_declared_credential_use_site_still_reveals_something():
+    """The allow-list must not outlive its entries.
+
+    A stale entry is worse than a missing one: it grants permission nobody is using, so the
+    day a module starts revealing a secret again it does so with the review already spent.
+    """
+    revealing = {
+        path.name
+        for path in CONNECTORS_DIR.rglob("*.py")
+        if ".reveal()" in path.read_text(encoding="utf-8")
+    }
+    stale = sorted(CREDENTIAL_USE_SITES - revealing - {"credentials.py"})
+    assert not stale, f"declared credential use sites that no longer reveal anything: {stale}"
 
 
 def test_a_missing_credential_is_a_named_failure_naming_what_to_do():

@@ -508,4 +508,24 @@ CREATE TABLE schema_contract (
   PRIMARY KEY (source_id, version)
 ) STRICT;
 
-PRAGMA user_version = 4;
+-- Per-source fetch cursor (A4, A5). The only fetch state a connector-ready build needs.
+--
+-- This is the one table in the schema where a wall-clock timestamp is legitimate, and the
+-- restriction is load-bearing rather than stylistic (requirement 4.11). Every random stream
+-- in this system is seeded from a canonical path string and ingest_batch.loaded_at is pinned
+-- to the epoch, precisely so no wall-clock leaks into the data. Real transport introduces a
+-- real clock; it is contained here.
+--
+-- NOTHING DOWNSTREAM MAY READ fetched_at. received_at remains the only temporal field the
+-- pipeline honours, because the cursor is what makes replay equal reality -- a verdict that
+-- moved because a file was fetched on a Tuesday would not be reproducible.
+CREATE TABLE connector_checkpoint (
+  source_id      TEXT    NOT NULL REFERENCES connector_source(source_id),
+  document_name  TEXT    NOT NULL,
+  remote_mtime   TEXT,                      -- as the remote reported it; NULL if it did not
+  content_sha256 TEXT    NOT NULL,          -- what makes a re-delivery under a new name a no-op
+  fetched_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  PRIMARY KEY (source_id, document_name)
+) STRICT;
+
+PRAGMA user_version = 5;

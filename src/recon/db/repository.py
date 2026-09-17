@@ -9,7 +9,10 @@ Three properties of this surface are deliberate.
 **There is no update and no delete.**  Not "we avoid them": there is no function whose
 name begins with ``update_`` or ``delete_``, and a test asserts it by introspection.
 The raw, normalized, episode and verdict tables have triggers that abort such a
-statement anyway; this is the same rule stated where a caller would look for it.
+statement anyway; this is the same rule stated where a caller would look for it.  Two
+functions here do upsert — ``write_meta`` and ``record_connector_fetch`` — and both
+write a table that holds a current position rather than a history, which is the line the
+rule is actually drawn along; each says so at its own definition.
 
 **The cursor predicate is mandatory on every derived lookup.**  ``resolve_keys`` and
 ``parked_matching`` take ``cursor`` as a required positional argument.  Omitting it
@@ -105,6 +108,10 @@ __all__ = [
     "read_meta",
     "batch_for_file_sha256",
     "QUEUE_ORDERINGS",
+    # connector fetch state (A4, A5) — operational position, not domain history
+    "register_connector_source",
+    "record_connector_fetch",
+    "connector_checkpoints",
 ]
 
 
@@ -596,8 +603,14 @@ def quarantine_record(
     reason = _enum(QuarantineReason, reason_code, "reason_code")
     with _atomic(conn) as tx:
         cursor = tx.execute(
+            # ON CONFLICT DO NOTHING, so re-running ingest() over rows already processed
+            # is a no-op rather than an IntegrityError. Every other write on that path is
+            # already idempotent -- normalized records collapse on their idempotency key --
+            # and quarantine was the one exception, which made replay crash exactly when the
+            # data contained something unparseable. A record quarantined twice for the same
+            # reason is the same fact, not a second one.
             "INSERT INTO quarantined_record(raw_id, received_at, reason_code, detail)"
-            " VALUES (?,?,?,?)",
+            " VALUES (?,?,?,?) ON CONFLICT(raw_id) DO NOTHING",
             (raw_id, received_at, str(reason), detail),
         )
         return int(cursor.lastrowid)
@@ -1079,3 +1092,128 @@ def batch_for_file_sha256(conn: sqlite3.Connection, file_sha256: str):
     from recon.domain.models import IngestBatch
 
     return IngestBatch.from_row(row)
+
+
+# --- connector fetch state (A4, A5) ----------------------------------------
+
+
+def register_connector_source(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    vendor: str,
+    transport_kind: str,
+    source_system: SourceSystem | str,
+    endpoint: str,
+    credential_ref: str | None,
+    mapping_version: str,
+    enabled: bool,
+) -> None:
+    """Record a source as registered, so its fetch state has something to hang from.
+
+    An upsert, for the same reason ``write_meta`` and ``record_connector_fetch`` are: this
+    row is a source's *current* configuration, not a history of what it used to be.  The
+    ban the module docstring describes is on exporting a name beginning ``update_``, and it
+    exists so that rewriting something once believed is greppable — a registry row is not
+    something believed, it is something declared.
+
+    Called on every load rather than at startup, because ``connector_checkpoint.source_id``
+    is a foreign key onto this table: a source that fetched without being registered first
+    would fail its very first checkpoint write, and it would fail it *after* the bytes had
+    already moved.
+
+    ``credential_ref`` is a name and never a value.  That is what makes this table safe to
+    dump, diff and commit (requirement A3).
+    """
+    system = _enum(SourceSystem, source_system, "source_system")
+    with _atomic(conn) as tx:
+        tx.execute(
+            "INSERT INTO connector_source(source_id, vendor, transport_kind, source_system,"
+            " endpoint, credential_ref, mapping_version, enabled)"
+            " VALUES (?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(source_id) DO UPDATE SET"
+            "   vendor=excluded.vendor,"
+            "   transport_kind=excluded.transport_kind,"
+            "   source_system=excluded.source_system,"
+            "   endpoint=excluded.endpoint,"
+            "   credential_ref=excluded.credential_ref,"
+            "   mapping_version=excluded.mapping_version,"
+            "   enabled=excluded.enabled",
+            (
+                source_id,
+                vendor,
+                str(transport_kind),
+                str(system),
+                endpoint,
+                credential_ref,
+                mapping_version,
+                1 if enabled else 0,
+            ),
+        )
+
+
+def record_connector_fetch(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    document_name: str,
+    remote_mtime: str | None,
+    content_sha256: str,
+    fetched_at: str,
+) -> None:
+    """Remember the last successful fetch of one document, replacing any earlier mark.
+
+    **Why an upsert is allowed here, and why the name still does not start with
+    ``update_``.**  The rule at the top of this module bans the exported *name*, not the
+    statement — ``write_meta`` has done the same thing since the beginning.  The reason the
+    ban is worth having is that mutation should be intentional and greppable, and a name is
+    the grep surface.  ``connector_checkpoint`` is not a history: it is exactly one row per
+    ``(source_id, document_name)`` saying where the fetch cursor stands right now, it carries
+    no trigger because there is nothing to protect, and "which file did we last pull" is
+    position rather than evidence.  An ``update_``-prefixed export would advertise the
+    opposite — that something we once believed is being rewritten — which is the operation
+    the raw, normalized, episode and verdict tables forbid outright.  ``record_connector_fetch``
+    says what the caller is doing, and one grep for it finds every write this table can take.
+
+    ``fetched_at`` is a wall-clock, and the only one the schema permits outside logs
+    (§4.11).  It is accepted as an argument rather than read here so that replay stays
+    deterministic; nothing downstream may read it back, because ``received_at`` is the only
+    temporal field the pipeline honours.
+
+    Note the foreign key: a checkpoint cannot exist for a ``source_id`` absent from
+    ``connector_source``, so a caller must register the source before fetching for it.
+    """
+    with _atomic(conn) as tx:
+        tx.execute(
+            "INSERT INTO connector_checkpoint"
+            " (source_id, document_name, remote_mtime, content_sha256, fetched_at)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(source_id, document_name) DO UPDATE SET"
+            "   remote_mtime = excluded.remote_mtime,"
+            "   content_sha256 = excluded.content_sha256,"
+            "   fetched_at = excluded.fetched_at",
+            (source_id, document_name, remote_mtime, content_sha256, fetched_at),
+        )
+
+
+def connector_checkpoints(
+    conn: sqlite3.Connection, source_id: str
+) -> list[dict[str, str | None]]:
+    """Every fetch mark this source holds, in document-name order.
+
+    Plain rows rather than a typed object, because the type that gives them meaning —
+    ``recon.connectors.checkpoint.Checkpoint`` — lives in the connector package, and
+    importing it here would invert the dependency: ``db/`` would need ``connectors/`` in
+    order to load, when the whole point of the connector package is that it sits above
+    persistence.  ``duplicate_deliveries`` returns bare tuples for the same reason.
+
+    Ordered so that a caller iterating the result behaves identically on two runs.
+    """
+    rows = conn.execute(
+        "SELECT source_id, document_name, remote_mtime, content_sha256, fetched_at"
+        "  FROM connector_checkpoint"
+        " WHERE source_id = ?"
+        " ORDER BY document_name",
+        (source_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]

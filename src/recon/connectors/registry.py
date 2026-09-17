@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from recon import config
 from recon.connectors.transport import LocalDirectoryTransport, Transport
@@ -36,6 +36,8 @@ __all__ = [
     "UnknownPayloadFormatError",
     "Source",
     "local_sources",
+    "VENDOR_SOURCE_IDS",
+    "vendor_sources",
     "enabled",
     "by_id",
 ]
@@ -193,6 +195,190 @@ _GENERATED_SOURCE_SYSTEMS: dict[str, SourceSystem] = {
     config.TPA_340B_EVENTS_FILE: SourceSystem.TPA_PORTAL,
     config.BANK_TRANSACTIONS_FILE: SourceSystem.BANK,
 }
+
+
+# ═══ the vendor rows ════════════════════════════════════════════════════════
+#
+# Requirement D1's acceptance is *"Verity and Craneware differ by a config row and a mapping
+# module, nothing else."*  This is the config row half.  The mapping module half is
+# ``connectors/vendors/verity.py`` and ``connectors/vendors/craneware.py``, and the two halves
+# genuinely do not know about each other: nothing below imports a vendor module, and nothing
+# in a vendor module imports this one.  Onboarding a third secure-file vendor is one entry in
+# the table below plus one mapping module, with no edit to ``pipeline.py`` — which is the
+# property requirement A1 is measured on.
+
+
+@dataclass(frozen=True, slots=True)
+class _VendorRow:
+    """The parts of a vendor's registry row that are a property of the vendor, not of us.
+
+    Split out from :class:`Source` because an endpoint and a credential name are per
+    deployment — an SFTP path per covered entity, a secret named per environment — while a
+    vendor name, a payload shape and a mapping version are the same everywhere the connector
+    runs.  Keeping them apart is what lets :func:`vendor_sources` take two arguments instead
+    of nine.
+    """
+
+    vendor: str
+    source_system: SourceSystem
+    #: Blank when the landed name is not knowable in advance.  Verity stamps its exports from
+    #: the data (``DOC2-010`` asks the name to retain vendor, export type and generated
+    #: timestamp), so a listing transport matches the mapping's ``filename_prefix`` instead.
+    filenames: tuple[str, ...]
+    mapping_version: str
+
+
+def _default_credential_ref(vendor: str) -> str:
+    """``<vendor>_<transport>`` — the credential *name* a row resolves at fetch time.
+
+    Derived from a convention rather than written out per row, for two reasons.  The first is
+    that three hand-written strings are three chances to typo one, and a typo here resolves no
+    credential and fails at fetch rather than at declaration.  The second is the rule this
+    whole registry is committed under: ``credential_ref`` is a lookup key and never a secret
+    (requirement A3), and the surest way to keep a field from becoming somewhere to paste a
+    token is for it to have no hand-written value at all.
+
+    ``connectors.credentials`` upper-cases and prefixes this to reach the environment, so
+    ``verity`` becomes ``RECON_CONNECTOR_VERITY_SFTP_*``.
+    """
+    return f"{vendor}_{TransportKind.SFTP.value.lower()}"
+
+
+#: The three registered secure-file datasets, keyed by the source id their schema contract is
+#: registered under.  ``schema_registry.REGISTRY.source_ids()`` is the authority on that list,
+#: and a test in ``tests/test_connectors.py`` already asserts every registered contract has an
+#: interface-contract document, so the three spellings here are checkable against two
+#: independent artefacts rather than against memory.
+#:
+#: **``mapping_version`` is the contract version, deliberately.**  Requirement B2 says the
+#: interface contract is *"versioned with the mapping"*, so they are one string rather than
+#: two that can disagree.  It is written here as a literal rather than imported from
+#: ``schema_registry``, following that module's own argument: a declaration computed from the
+#: thing it is supposed to be auditing can only ever agree with itself.
+#:
+#: Verity's two datasets share an endpoint and a credential — one export product, one SFTP
+#: path — and are still two rows, because a batch is per file and the contracts are per
+#: dataset.
+_VENDOR_ROWS: dict[str, _VendorRow] = {
+    "verity_accumulations": _VendorRow(
+        vendor="verity",
+        source_system=SourceSystem.TPA_PORTAL,
+        filenames=(),
+        mapping_version="verity-export-1.0.0",
+    ),
+    "verity_invoices": _VendorRow(
+        vendor="verity",
+        source_system=SourceSystem.TPA_PORTAL,
+        filenames=(),
+        mapping_version="verity-export-1.0.0",
+    ),
+    "craneware_claims_report": _VendorRow(
+        vendor="craneware",
+        source_system=SourceSystem.TPA_PORTAL,
+        # Stable and undated, unlike Verity's.  Dating it would mean stamping the run date
+        # into the bytes, and then the same input produces a different file on two different
+        # days.
+        filenames=("claims_report.csv",),
+        mapping_version="craneware-sftp-export-1.0.0",
+    ),
+}
+
+#: Every secure-file source this fabric knows how to declare, in onboarding order — Verity
+#: first, Craneware second, which is ``DOC2-013``'s own order.
+VENDOR_SOURCE_IDS: tuple[str, ...] = tuple(_VENDOR_ROWS)
+
+
+def vendor_sources(
+    endpoints: Mapping[str, str],
+    *,
+    credential_refs: Mapping[str, str] | None = None,
+    filenames: Mapping[str, Sequence[str]] | None = None,
+    transport: Transport | None = None,
+    enabled: bool = False,
+) -> tuple[Source, ...]:
+    """Registry rows for the secure-file vendors, one per dataset named in ``endpoints``.
+
+    ``endpoints`` is keyed by source id and does double duty: it says where each source lives
+    *and* which sources this deployment has onboarded at all.  A source id absent from it gets
+    no row, because "we never onboarded this vendor" is a different fact from "we onboarded it
+    and turned it off" — see :func:`enabled`, and requirement F3's readiness report, which has
+    to tell the two apart.  A source id that is not one of :data:`VENDOR_SOURCE_IDS` raises,
+    since a typo in a config key is otherwise a source that silently never arrives.
+
+    **The rows default to disabled, and that is the honest default rather than a cautious
+    one.**  ``DOC2-016`` is Doc 2's own Week 3 access gate: *"Verity / Craneware — SFTP
+    credentials, scheduled export definition and representative files with required
+    claim-level matching keys."*  Until that gate clears there is no credential to resolve and
+    no file to fetch, so a row that declared itself ready would be asserting something nobody
+    has yet been given.  Pass ``enabled=True`` when the gate has cleared for this deployment.
+
+    There is a second, sharper reason.  ``payload_format`` below is honest about the *shape* —
+    a header row, one record per line, an empty cell meaning absent — but the delimited reader
+    in ``ingest/pipeline.py`` reads a ``received_at`` off every row, and a vendor export does
+    not carry one: its timestamps are ``qualification_received_at``, ``batch_received_at``,
+    ``reversal_received_at``, and choosing among them is a mapping decision rather than a
+    parsing one.  So these rows are read today by ``connectors.vendors``, which maps them, and
+    not by ``load_from_sources``.  Turning one on before that seam exists would fail loudly on
+    the first row, which is survivable; leaving the reason undocumented would not be.
+
+    Args:
+        endpoints: source id to the SFTP path that source is delivered to.  An SFTP path per
+            covered entity; it belongs here in the registry row and never in a contract
+            document or a mapping module.
+        credential_refs: source id to the *name* of the credential to resolve at fetch time,
+            overriding the default.  Never a secret — that is requirement A3, and it is what
+            lets this registry be committed to the repository at all.
+        filenames: source id to the documents to fetch, overriding the default.  Verity's
+            default is empty because its export name carries a data-derived stamp, so the
+            landed name is not knowable in advance and a listing transport matches
+            ``SecureFileMapping.filename_prefix``; pass the landed names here when they are
+            already known, which is what reading a local stand-in directory does.
+        transport: bound to every row, or ``None`` to leave them unbound.  A registry row
+            describes a source; binding it to a transport is what makes it fetchable.
+        enabled: whether the access gate has cleared.  Shadows the module-level
+            :func:`enabled` inside this function only, which is not called here.
+
+    Raises:
+        KeyError: an ``endpoints`` key that is not a registered secure-file source.
+    """
+    unknown = sorted(set(endpoints) - set(_VENDOR_ROWS))
+    if unknown:
+        known = ", ".join(VENDOR_SOURCE_IDS)
+        raise KeyError(
+            f"{unknown} are not registered secure-file sources; known sources: {known}. "
+            "A mistyped config key is a source that silently never arrives, which is why "
+            "this raises rather than skipping it."
+        )
+
+    credential_overrides = dict(credential_refs or {})
+    filename_overrides = dict(filenames or {})
+
+    rows: list[Source] = []
+    for source_id, declared in _VENDOR_ROWS.items():
+        if source_id not in endpoints:
+            continue
+        rows.append(
+            Source(
+                source_id=source_id,
+                vendor=declared.vendor,
+                transport_kind=TransportKind.SFTP,
+                source_system=declared.source_system,
+                filenames=tuple(filename_overrides.get(source_id, declared.filenames)),
+                endpoint=endpoints[source_id],
+                # ``BANK_CSV`` names a shape and not the source that first had it — a header
+                # row, one record per line, an empty cell meaning absent — and that is
+                # exactly what both vendors write.  Declaring a new member for "the same
+                # shape, a different vendor" is how a format enum becomes a vendor list.
+                payload_format=PayloadFormat.BANK_CSV,
+                credential_ref=credential_overrides.get(
+                    source_id, _default_credential_ref(declared.vendor)
+                ),
+                mapping_version=declared.mapping_version,
+                enabled=enabled,
+                transport=transport,
+            )
+        )
+    return tuple(rows)
 
 
 def enabled(sources: Sequence[Source]) -> tuple[Source, ...]:

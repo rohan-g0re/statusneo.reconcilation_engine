@@ -513,10 +513,103 @@ def band_wave_2(b: Band, y: int) -> None:
     )
 
 
+def band_wave_3(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 3  ·  FILE PATTERN", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="real SFTP on loopback  —  prove the fabric on the boring transport first",
+        size=13,
+    )
+
+    b.box(
+        "srv",
+        x=LEFT_X,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="loopback SFTP server\nEd25519 · deterministic key",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+        size=13,
+    )
+    b.box(
+        "tr",
+        x=LEFT_X + 280,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="SftpTransport (A2)\nlist · filter · download",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=13,
+    )
+    b.box(
+        "ck",
+        x=LEFT_X + 560,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="checkpoint (A4 · A5)\n2nd run = ZERO BYTES",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=13,
+    )
+    b.box(
+        "ver",
+        x=LEFT_X + 860,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="verity mapping\nSTATUS_FLAG_ROW",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=13,
+    )
+    b.box(
+        "cra",
+        x=LEFT_X + 1130,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="craneware mapping\nFLAG_ON_ORIGINAL_ROW",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "b3",
+        x=LEFT_X + 1400,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="B3: net effect = 1\nnot zero, not two",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=13,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body="tpa.py writes a NEGATIVE ROW upstream; both exports write a FLAG  —  the B3 hazard is live here, not theoretical",
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
     2: ("c2_", band_wave_2),
+    3: ("c3_", band_wave_3),
 }
 
 
