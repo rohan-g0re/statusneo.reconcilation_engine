@@ -422,9 +422,9 @@ requirement ids closed, what was discovered, and the test delta.
 | 3 File pattern | A4, D1, B3, **A2 (SFTP)** | ✅ | +14 (705) | `302b3bd` |
 | 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ✅ | +15 (720) | `4e56eda` |
 | 5 Mapping | E1–E5 | ✅ *(see E1 caveat)* | +85 (805) | `ab9f7d8` |
-| 6 Proof | F1–F3 | ✅ | +76 (881) | pending |
+| 6 Proof | F1–F3 | ✅ | +76 (881) | `e02be93` |
 | 7.1 UI restyle | goal item 5 | ✅ | — | `5eafe36` |
-| 7.2 Connectivity page + browser | goal item 5 | ⬜ | — | — |
+| 7.2 Connectivity page + browser | goal item 5 | ✅ | +6 (887) | pending |
 
 Baseline was **585**.
 

@@ -7,6 +7,7 @@ import EpisodeDossier from './components/EpisodeDossier.jsx'
 import FeedExceptions from './components/FeedExceptions.jsx'
 import Cited from './components/Cited.jsx'
 import TodoListPanel from './components/TodoListPanel.jsx'
+import Connectivity from './components/Connectivity.jsx'
 
 // ═══ the Portfolio Analyst panel ═════════════════════════════════════════════════════════════
 // docs/agent_layer_design.md S:opening line: "the Exception Investigator explains, the Portfolio
@@ -187,6 +188,13 @@ function PortfolioAnalystPanel({ cursor }) {
 // surfacing all the way up to the UI: the front end has no concept of "now" either.
 export default function App() {
   const [meta, setMeta] = useState(null)
+  // Which screen is showing. A piece of state and a pair of buttons, the same `.view-toggle`
+  // pattern the dossier's simple/detailed switch already uses — not a route. The two screens
+  // share the masthead and nothing else, there is no deep link to either, and the queue state
+  // has to survive a look at the connector report and still be there on the way back, which a
+  // router would have had to reconstruct. `/analyse/:episodeId` stays a real navigation because
+  // it genuinely is one: a new tab, opened with `window.open`.
+  const [view, setView] = useState('operations')
   const [cursor, setCursor] = useState(null)
   const [disposition, setDisposition] = useState('EXCEPTION')
   const [orderBy, setOrderBy] = useState('reopened_first')
@@ -350,9 +358,31 @@ export default function App() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="sub" data-testid="totals">
-            {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
-          </span>
+          <div className="view-toggle" role="group" aria-label="Screen">
+            <button
+              type="button"
+              data-testid="screen-operations"
+              aria-pressed={view === 'operations'}
+              onClick={() => setView('operations')}
+              title="The queues, the replay cursor and the episode dossier — what the deterministic engine concluded."
+            >
+              Operations
+            </button>
+            <button
+              type="button"
+              data-testid="screen-connectivity"
+              aria-pressed={view === 'connectivity'}
+              onClick={() => setView('connectivity')}
+              title="Connector readiness per source: transport, auth, schema contract, mock provenance, golden-claim traces, control totals, and what is still vendor-blocked."
+            >
+              Connectivity
+            </button>
+          </div>
+          {view === 'operations' ? (
+            <span className="sub" data-testid="totals">
+              {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
+            </span>
+          ) : null}
           {/*
             Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
             the identical file again" surprised everyone who pressed it. A new seed means
@@ -396,6 +426,17 @@ export default function App() {
         </div>
       ) : null}
 
+      {/*
+        Two screens, one page. The connectivity view answers a different question from every
+        panel below it — "what is actually built, per source" rather than "what did we conclude
+        about this book of claims" — and it takes no cursor, because connector readiness is a
+        property of the build rather than of the moment being replayed. Swapping the body rather
+        than navigating keeps the cursor, the selected queue and the open episode intact
+        underneath it, so coming back lands exactly where you left.
+      */}
+      {view === 'connectivity' ? (
+        <Connectivity />
+      ) : (
       <div className="layout-grid">
         <div className="layout-left">
           <section className="panel">
@@ -511,6 +552,7 @@ export default function App() {
           </section>
         </div>
       </div>
+      )}
     </div>
   )
 }

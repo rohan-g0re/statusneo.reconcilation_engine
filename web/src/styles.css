@@ -804,3 +804,141 @@ td.todo-artifacts {
   margin-bottom: var(--space-6);
   font-size: var(--text-sm);
 }
+
+/* ═══ connectivity view (requirement F3) ═══════════════════════════════ */
+/* Reuses `.layout-grid`/`.panel`/`.hint`/`.table-wrap`/`table`/`th`/`td`/`td.mono`/`td.num`/
+ * `.chip`/`.detail-grid`/`.field`/`.dossier-head`/`.dossier-id`/`.empty`/`.error`/`.spinner`
+ * wholesale, and every value below comes from the token block at the top of this file — this
+ * screen is an addition to the same design system, not a second one. Only what is genuinely new
+ * (the honesty banner, the four-rung ladder, the provenance-tier bar) gets its own rules. */
+
+/* The banner carries the one sentence the whole report exists to be able to say. Shaped like
+ * `.error` and `.todo-hidden` so it reads as a real notice rather than helper text, but in the
+ * accent rather than a status colour: nothing here is broken. Every connector talking to a local
+ * mock is the expected state of this build, and painting it red would say otherwise. The live
+ * case — a source that genuinely reaches a vendor — is the one that goes critical, because that
+ * is the claim a reader must not skim past. */
+.conn-banner {
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.conn-banner-live { border-left-color: var(--status-critical); }
+.conn-banner-head { display: flex; align-items: baseline; gap: var(--space-4); }
+.conn-banner-icon { color: var(--accent); font-size: var(--text-md); line-height: 1; }
+.conn-banner-live .conn-banner-icon { color: var(--status-critical); }
+.conn-banner-statement {
+  font-size: var(--text-lg);
+  font-weight: 640;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.conn-banner-body {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 96ch;
+}
+.conn-note { margin-top: var(--space-3); color: var(--text-muted); }
+
+/* The ladder. Four rungs, one row each, the count in a display number so "14 connector-ready,
+ * 0 with a working connection" is a shape on the page before it is a sentence. An unreached rung
+ * stays legible rather than being greyed out of the way — zero is the finding. */
+.conn-ladder { list-style: none; margin: 0; padding: 0; }
+.conn-rung {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border);
+}
+.conn-rung:first-child { border-top: none; }
+.conn-rung-count {
+  font-size: var(--text-display);
+  font-weight: 620;
+  letter-spacing: var(--tracking-tighter);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-muted);
+}
+.conn-rung-reached .conn-rung-count { color: var(--text-primary); }
+.conn-rung-label {
+  font-size: var(--text-md);
+  font-weight: 640;
+  letter-spacing: var(--tracking-tight);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.conn-rung-none { font-size: var(--text-xs); font-weight: 400; color: var(--text-muted); }
+.conn-rung-meaning {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 92ch;
+  margin-top: var(--space-1);
+}
+.chip.conn-ceiling { border-color: var(--accent); color: var(--accent); }
+
+/* A stage in a table cell. `CONNECTOR_READY` gets the accent border because it is what this
+ * build claims; the two rungs above it get no colour at all, because nothing reaches them and a
+ * coloured chip for an unreached rung is exactly the flattery this screen exists to avoid. */
+.chip.conn-stage { font-family: var(--sans); letter-spacing: var(--tracking-body); }
+.chip.conn-stage-CONNECTOR_READY { border-color: var(--accent); color: var(--text-primary); }
+.chip.conn-stage-DECLARED { border-color: var(--status-warning); color: var(--text-primary); }
+.chip.conn-off { border-color: var(--status-warning); margin-left: var(--space-3); }
+
+/* The provenance split. The bar is a shape and the counts beside it are the fact — SPEC,
+ * STANDARD and INVENTED are always spelled out, so the three colours never carry the meaning on
+ * their own. Two of them sit below 3:1 on this surface by design, exactly as the disposition
+ * tiles do. */
+.fidelity { display: flex; flex-direction: column; gap: var(--space-1); min-width: 16ch; }
+.fidelity-bar {
+  display: flex;
+  height: 4px;
+  width: 100%;
+  min-width: 90px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.fidelity-seg { display: block; height: 100%; }
+.fidelity-counts {
+  font-size: var(--text-xs);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* The per-source document in the right-hand column. */
+.conn-section {
+  font-size: var(--text-sm); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-secondary);
+  margin: var(--space-7) 0 var(--space-4);
+}
+.conn-facts { margin: 0; display: flex; flex-direction: column; gap: var(--space-5); }
+.conn-fact dt {
+  margin: 0; font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
+}
+.conn-fact dd { margin: 0; font-size: var(--text-base); overflow-wrap: anywhere; }
+.conn-sub { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); overflow-wrap: anywhere; }
+.conn-muted { font-size: var(--text-xs); color: var(--text-muted); }
+.conn-code {
+  font-family: var(--mono); font-size: var(--text-xs);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); padding: 0 var(--space-2);
+  margin-right: var(--space-2); overflow-wrap: anywhere;
+}
+.conn-list { margin: 0; padding-left: var(--space-6); font-size: var(--text-base); color: var(--text-secondary); }
+.conn-list li { margin-bottom: var(--space-2); max-width: 82ch; }
+
+/* `th, td` forces `white-space: nowrap` for the dense tabular columns; a blocked item's summary
+ * runs several hundred characters and has to wrap instead of pushing the table off the edge. */
+td.conn-wrap { white-space: normal; min-width: 28ch; max-width: 56ch; }

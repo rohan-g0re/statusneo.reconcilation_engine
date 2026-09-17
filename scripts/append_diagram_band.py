@@ -887,6 +887,101 @@ def band_wave_6(b: Band, y: int) -> None:
     )
 
 
+def band_wave_7(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 7  ·  THE SURFACE", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="the readiness report stops being a file and becomes something a reader can be misled by  —  so it says what it is",
+        size=13,
+    )
+
+    b.box(
+        "ui",
+        x=LEFT_X,
+        y=y + 56,
+        width=270,
+        height=74,
+        label="Linear restyle (7.1)\nspacing + type scales · light mode kept",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "api",
+        x=LEFT_X + 290,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="GET /api/connectivity\nderived per request, never cached",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=12,
+    )
+    b.box(
+        "page",
+        x=LEFT_X + 570,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="Connectivity view (7.2)\n14 sources · gate evidence table",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+        size=12,
+    )
+    b.box(
+        "ladder",
+        x=LEFT_X + 850,
+        y=y + 56,
+        width=280,
+        height=74,
+        label="declared 0 · connector-ready 14\nworking 0 · production 0",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.box(
+        "honest",
+        x=LEFT_X + 1150,
+        y=y + 56,
+        width=290,
+        height=74,
+        label="“no source has ever reached\na vendor system”  —  server-phrased",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "secret",
+        x=LEFT_X + 1460,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="env var NAMES only\nnever a value",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body=(
+            "the browser found two bugs 881 tests could not: a stale DB answering 500 with the fix only in the server log, and a console 404  ·  "
+            "three of four rungs read zero, so connector-ready cannot be misread as connected"
+        ),
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
@@ -895,6 +990,7 @@ BANDS = {
     4: ("c4_", band_wave_4),
     5: ("c5_", band_wave_5),
     6: ("c6_", band_wave_6),
+    7: ("c7_", band_wave_7),
 }
 
 

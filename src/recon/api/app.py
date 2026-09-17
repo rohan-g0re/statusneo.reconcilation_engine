@@ -364,6 +364,36 @@ def create_app(settings: Settings | None = None):
         with open_conn() as conn:
             return service.feed_exceptions(conn, resolve_cursor(cursor))
 
+    @app.get("/api/connectivity")
+    def connectivity() -> dict[str, Any]:
+        """Requirement F3's connector-readiness report, derived at the moment it is asked for.
+
+        Nothing is cached and nothing is read from a generated file, which is the requirement
+        rather than an oversight: the report is produced by inspecting the registry, the
+        transport classes, the schema contracts, the provenance tables and the evidence index
+        *as they are now*, so a connector deleted five minutes ago is missing from the next
+        response. A cached copy would be a hand-maintained table with a timestamp on it.
+
+        The database connection is handed in so the control-total column is read from rows that
+        actually landed rather than reported as "not checked". ``build_report`` queries it
+        defensively and tolerates the table being absent, so a fresh deployment answers this
+        endpoint before its first ingest.
+
+        **What this endpoint must never be read as saying.** Every connector in this build talks
+        to a local mock. ``live_vendor_connections`` is the payload's first key and is expected
+        to be empty; ``live_vendor_connection_statement`` is the sentence that goes with it, and
+        both are computed by :mod:`recon.connectors.readiness` rather than by the client, so no
+        front end can render a connection this build has not made.
+        """
+        from recon.connectors import readiness
+
+        with open_conn() as conn:
+            report = readiness.build_report(
+                control_totals=conn,
+                settings=app.state.settings,
+            )
+        return readiness.as_dict(report)
+
     @app.post("/api/regenerate")
     def regenerate(
         profile: str = Query("demo"),

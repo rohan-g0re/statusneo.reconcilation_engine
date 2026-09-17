@@ -90,6 +90,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from urllib.parse import urlsplit
 
 from recon import config
@@ -128,6 +129,8 @@ __all__ = [
     "render_markdown",
     "render_source",
     "render_documents",
+    "as_dict",
+    "NO_LIVE_CONNECTION",
 ]
 
 #: The timestamp rendered into every generated document.  Pinned, not read from a clock.
@@ -138,6 +141,16 @@ __all__ = [
 #: wants to know *when* should look at the git history of the inputs, which is the honest
 #: answer anyway — this report describes the repository, not the moment it was rendered.
 GENERATED_AT = "1970-01-01T00:00:00Z"
+
+#: The sentence this whole document exists to be able to say, and the one a reader must not
+#: have to reconstruct from a table.
+#:
+#: A constant rather than two literals because it now has two audiences — the rendered markdown
+#: and the JSON the dashboard reads — and a claim about vendor connectivity that could be worded
+#: differently in two places is a claim that can go stale in one of them.  It is emitted only
+#: when :attr:`ReadinessReport.live_vendor_connections` is empty; the non-empty case names the
+#: sources instead, because at that point the interesting fact is *which*.
+NO_LIVE_CONNECTION = "No source in this build has ever reached a vendor system."
 
 #: What :func:`declared_sources` puts in :attr:`Source.endpoint` when a deployment has not
 #: said where a source lives.  One constant for every source rather than a per-vendor string,
@@ -1442,7 +1455,7 @@ def render_markdown(report: ReadinessReport) -> str:
             + (
                 "A source above reaches a vendor endpoint with a resolved credential."
                 if live
-                else "No source in this build has ever reached a vendor system."
+                else NO_LIVE_CONNECTION
             ),
             "",
             "## Gate evidence table",
@@ -1713,3 +1726,186 @@ def render_documents(report: ReadinessReport) -> dict[str, str]:
     }
     documents["index.md"] = render_markdown(report)
     return documents
+
+
+# ═══ serialisation ══════════════════════════════════════════════════════════
+#
+# Every field below is written out by name.  ``dataclasses.asdict`` was the obvious thing to
+# reach for and is wrong here twice over.
+#
+# **It drops the answers.**  ``stage``, ``gaps``, ``is_vendor``, ``talks_to_a_vendor``,
+# ``clean``, ``traced``, ``implemented`` and ``applies`` are *properties*, not fields, and a
+# property is invisible to ``asdict``.  A payload built that way would carry the raw cells and
+# silently lose every conclusion drawn from them — including the one that says whether this
+# source has reached a vendor — and it would do it without raising anything.
+#
+# **It is a deny-list where this needs an allow-list.**  Requirement A3 says no credential value
+# appears in a tracked file, and the same rule has to hold for a value on the wire.  Nothing on
+# :class:`AuthReadiness` holds a secret today — ``env_vars`` are variable *names* and ``detail``
+# is a message ``credentials`` guarantees describes a value's shape and never its content — but
+# ``asdict`` would publish whatever a future field happened to hold.  Naming the seven fields
+# means a new one is invisible here until somebody decides it should be visible, which is the
+# direction that failure should point.
+
+
+def _transport_dict(transport: TransportReadiness) -> dict[str, Any]:
+    return {
+        "kind": transport.kind,
+        "implementations": list(transport.implementations),
+        "bound": transport.bound,
+        "implemented": transport.implemented,
+    }
+
+
+def _auth_dict(auth: AuthReadiness) -> dict[str, Any]:
+    """The three facts that must not collapse into one, plus the variables that would clear it.
+
+    ``configured`` is about *this* environment and is the only one of the three that can change
+    without a commit.  ``env_vars`` carries names so an operator reading this knows what to set;
+    see the section note above for why no value can ride along with them.
+    """
+    return {
+        "required": auth.required,
+        "kind": auth.kind,
+        "resolver": auth.resolver,
+        "implemented": auth.implemented,
+        "configured": auth.configured,
+        "env_vars": list(auth.env_vars),
+        "detail": auth.detail,
+    }
+
+
+def _schema_dict(schema: SchemaReadiness) -> dict[str, Any]:
+    return {
+        "registered": schema.registered,
+        "current_version": schema.current_version,
+        "versions": list(schema.versions),
+        "field_count": schema.field_count,
+        "required_field_count": schema.required_field_count,
+        "mapping_version": schema.mapping_version,
+        "version_matches_mapping": schema.version_matches_mapping,
+    }
+
+
+def _mapping_dict(mapping: MappingReadiness) -> dict[str, Any]:
+    return {
+        "module": mapping.module,
+        "per_source": mapping.per_source,
+        "implemented": mapping.implemented,
+    }
+
+
+def _fidelity_dict(fidelity: MockFidelity) -> dict[str, Any]:
+    return {
+        "table": fidelity.table,
+        "dataset": fidelity.dataset,
+        "spec": fidelity.spec,
+        "standard": fidelity.standard,
+        "invented": fidelity.invented,
+        "rows": fidelity.rows,
+        "applies": fidelity.applies,
+        "evidence_ids": list(fidelity.evidence_ids),
+        # The same sentence the markdown prints, so a reader who sees both cannot be told two
+        # different things about how much of a mock was invented.
+        "summary": _fidelity_cell(fidelity),
+    }
+
+
+def _golden_dict(golden: GoldenClaimReadiness) -> dict[str, Any]:
+    return {
+        "archetype_rows": [
+            {"archetype": name, "rows": count} for name, count in golden.archetype_rows
+        ],
+        "dataset_rows": golden.dataset_rows,
+        "traced_by": list(golden.traced_by),
+        "traced": golden.traced,
+        "test_module": golden.test_module,
+        "empty_archetypes": list(golden.empty_archetypes),
+    }
+
+
+def _control_totals_dict(totals: ControlTotalReadiness) -> dict[str, Any]:
+    return {
+        "storage_declared": totals.storage_declared,
+        "checked": totals.checked,
+        "reconciled": totals.reconciled,
+        "unreconciled": totals.unreconciled,
+        # Three-valued on purpose: ``null`` is "not checked", which is not "clean".
+        "clean": totals.clean,
+    }
+
+
+def _blocked_dict(item: BlockedItem) -> dict[str, Any]:
+    return {
+        "kind": item.kind,
+        "summary": item.summary,
+        "evidence_id": item.evidence_id,
+        "url": item.url,
+        "retrieved": item.retrieved,
+        "detail": item.detail,
+        "env_vars": list(item.env_vars),
+    }
+
+
+def _source_dict(row: SourceReadiness) -> dict[str, Any]:
+    return {
+        "source_id": row.source_id,
+        "vendor": row.vendor,
+        "enabled": row.enabled,
+        "stage": row.stage.value,
+        "reach": row.reach.value,
+        # The rendered phrase rather than a second derivation in the client.  A UI that turned
+        # ``LOCAL_MOCK`` into words itself would be free to choose flattering ones.
+        "reaches": _reach_cell(row),
+        "endpoint": row.endpoint,
+        "is_vendor": row.is_vendor,
+        "talks_to_a_vendor": row.talks_to_a_vendor,
+        "mock_modules": list(row.mock_modules),
+        "transport": _transport_dict(row.transport),
+        "auth": _auth_dict(row.auth),
+        "schema": _schema_dict(row.schema),
+        "mapping": _mapping_dict(row.mapping),
+        "fidelity": _fidelity_dict(row.fidelity),
+        "golden": _golden_dict(row.golden),
+        "control_totals": _control_totals_dict(row.control_totals),
+        # Ours to close, theirs to unblock.  Kept apart here for the reason
+        # :attr:`SourceReadiness.gaps` gives: merging them loses the question of who acts.
+        "gaps": list(row.gaps),
+        "blocked": [_blocked_dict(item) for item in row.blocked],
+    }
+
+
+def as_dict(report: ReadinessReport) -> dict[str, Any]:
+    """The whole report as JSON-safe primitives, conclusions included.
+
+    Written so the HTTP route can stay three lines long, for the same reason every other route
+    in ``recon.api.app`` is three lines long: a payload assembled inside a route is a payload no
+    test can build without starting a web server.
+
+    ``live_vendor_connections`` and ``live_vendor_connection_statement`` are first in the
+    mapping and first on the screen, which is the point.  The statement is computed from the
+    report rather than typed into the client, so a client cannot render "all systems connected"
+    over a report that says the opposite.
+    """
+    live = report.live_vendor_connections
+    return {
+        "generated_at": report.generated_at,
+        "live_vendor_connections": list(live),
+        "live_vendor_connection_statement": (
+            "These sources reach a vendor endpoint with a resolved credential: "
+            + ", ".join(live)
+            if live
+            else NO_LIVE_CONNECTION
+        ),
+        "notes": list(report.notes),
+        "sources": [_source_dict(row) for row in report.sources],
+        "evidence_entries": report.evidence_entries,
+        "unavailable_evidence": list(report.unavailable_evidence),
+        "blocked_evidence_ids": list(report.blocked_evidence_ids),
+        "golden_test_module": report.golden_test_module,
+        "archetype_traces": [
+            {"archetype": name, "traced_by": list(functions)}
+            for name, functions in report.archetype_traces
+        ],
+        "untraced_archetypes": list(report.untraced_archetypes),
+    }
