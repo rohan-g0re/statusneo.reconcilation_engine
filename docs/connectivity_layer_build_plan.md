@@ -428,6 +428,64 @@ requirement ids closed, what was discovered, and the test delta.
 
 Baseline was **585**.
 
+---
+
+## Verdict after the two-Fable adversarial review
+
+Waves 3-6 were reviewed by two independent Fable reviewers, each directing its own fan-out of
+Opus workers, each planning before dispatching. **A wave being committed and green is recorded
+above; it is not the same as its requirements being met, and the two disagree.**
+
+| Req | Status column above | Reviewed verdict | Why |
+|---|---|---|---|
+| A2 (SFTP) | closed | **PARTIAL** | 7 tests of 890, 114 bytes, 2 synthetic JSONL documents over the socket. No vendor export and no six-feed path ever crosses it. |
+| A4 | closed | **PARTIAL** | The zero-bytes acceptance genuinely passes. `content_changed` is dead code and `content_sha256` is write-only, so the documented hash mechanism is not the one running. |
+| B3 / D1 | closed | **PARTIAL** | The ledger half is proven on the PBM path by F1's reversed claim. On the vendor path it is detection only, and `ReversalEffect` reaches no table. |
+| C1 | closed | **PASS** | A real threaded `http.server` on a loopback socket, clock-free, replaying rather than adjudicating. 15 of 17 error codes have no negative test. |
+| C2 | closed | **FAIL** | Mapping is built; submit and persist are not. No `Sender` implementation exists and no Beacon ID reaches any table. |
+| C3 | closed | **PARTIAL** | The verbatim rule is written correctly and never persisted; the only test compares two mock-side reads of the same dict. |
+| C4 | closed | **PARTIAL** | The unreachability mechanism is genuinely strong — four structural locks, no `if`-skip. "As configuration" was never built: ownership exists only as a constructor argument. |
+| C5 | closed | **FAIL** | `keys.beacon_id` has zero callers in `ingest/`. **0 `BEACON_ID` rows** in any database this build produces. |
+| E1 | partial | **PARTIAL, worse than recorded** | `COVERED_ENTITY_340B` is published and never looked up. The acceptance holds by an equality check, not by construction as `keys.py` claimed. |
+| E2 | closed | **PASS** | Enum, publish, lookup and column all wired; the acceptance test carries a J-code and that key's own components, nothing else. |
+| E3 | closed | **FAIL** | **0 `PAYMENT_REFERENCE` rows.** `normalized_record.payment_reference` is never assigned by any adapter. Manufacturer-as-a-key — this table's own stated criterion — was never built and no decision records dropping it. |
+| E4 | closed | **FAIL** | No record carries a `site_id`. The acceptance passes against a hardcoded Python tuple, never against an episode or a key. |
+| E5 | closed | **PASS** | The check sits on the only ingest path, before `_insert_tree`, with a named quarantine reason and lineage intact. |
+| F1 | closed | **PASS** | Four archetypes, five stages, figures re-read from the feed file on disk, mutation-checked. |
+| F2 | closed | **PARTIAL** | The batch genuinely does not land. But the only two trailered sources never reach the check, so every check that executes is vacuous. |
+| F3 | closed | **PASS** | Every cell derived; a worker rebuilt the report independently and diffed it byte-for-byte against the served payload. |
+
+**One root cause explains C2, C5, E3, F2 and half of D1: nothing in `src/` imports the vendor
+connector modules.** Verity, Craneware and Beacon are written, documented and tested in
+isolation, and no path carries a vendor record into the database.
+
+### What the review proved was NOT broken
+
+A full build at HEAD against one at `dbb129e` (pre-connector), both profiles: episode identity
+— id, track, NDC, date — **identical**; `raw_record`, `normalized_record`, `episode`,
+`verdict`, `cash_allocation`, `parked_record` all identical. The only downstream change is
+`crosswalk_key` 11947 -> 13613 on `full`, and that delta of 1666 is exactly
+`COVERED_ENTITY_340B` 855 + `HCPCS` 811. Zero orphan raw rows, zero quarantines, zero
+`COVERED_ENTITY_MISMATCH` parks.
+
+### Defects the review found and that are fixed (`346f9bf`)
+
+1. **A demonstrated ground-truth bypass.** `SftpTransport` refused `/exports/truth` and
+   accepted `/exports/TRUTH`; a worker fetched `ground_truth.json` over real SSH through it.
+   Three transports each carried their own copy of the check and disagreed. Now one helper.
+2. **The test that should have caught it** enumerated one class while its docstring promised
+   all three.
+3. **Assertions that could not fail**, including the scoped-key check added in wave 5, which
+   selected an episode carrying no scoped key so its loop body never ran.
+4. **Three docstrings asserting things the code does not do** — corrected in place.
+
+### Conflict ruling 2 was wrong about its own build
+
+The table above says one narrow ignore for `CryptographyDeprecationWarning`. The build
+actually carries **two**, neither for cryptography: a starlette TestClient httpx deprecation
+and an anyio `BlockingPortal` alias. Both are message-pinned and `"error"` survives as entry
+one, so the discipline holds — but the ruling describes a decision that did not ship.
+
 **Two pre-existing tests have been edited, and only two.** Both for the same underlying
 reason — a set pinned at exactly the eight Decision-A24 key types, which no §4.7 addition
 can satisfy — and both edited as *additions* rather than relaxations. Ruling 1 anticipated
