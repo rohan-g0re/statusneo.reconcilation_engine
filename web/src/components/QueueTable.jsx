@@ -14,8 +14,11 @@ const ORDERINGS = [
 export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelect, busy }) {
   return (
     <>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-        <label htmlFor="order-by" style={{ color: 'var(--text-secondary)', fontSize: 12.5 }}>
+      {/* Class, not inline style. These three values were hardcoded as 10 / 10 / 12.5 px, and a
+          browser measurement caught the 12.5 as the one text size on the screen that sits off
+          the type scale. A scale that anything may opt out of inline is a suggestion. */}
+      <div className="queue-controls">
+        <label htmlFor="order-by" className="queue-controls-label">
           Rank by
         </label>
         <select
@@ -86,7 +89,7 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
                   <td className="num" title="Negative means an overpayment — a refund liability">
                     {formatMoney(row.total_variance_cents)}
                   </td>
-                  <td>
+                  <td className="queue-why">
                     {row.reopened_from ? (
                       <span className="chip reopened">reopened from {row.reopened_from}</span>
                     ) : null}

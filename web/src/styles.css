@@ -547,6 +547,24 @@ details.evidence pre {
  * section reachable and makes the selected row and its dossier visible at the same time. */
 .queue-scroll { max-height: 46vh; overflow-y: auto; }
 
+/* The queue's sort control. Was three inline pixel values in QueueTable.jsx — 10 / 10 / 12.5 —
+ * and the 12.5 was the single off-scale text size a browser measurement found on the whole
+ * screen. Moved here so the scale is the only place sizes are decided. */
+.queue-controls {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+.queue-controls-label { color: var(--text-secondary); font-size: var(--text-sm); }
+
+/* The "Why" column stacks reason-code chips, and at a narrow width they were being clipped
+ * mid-word at the row's right edge rather than wrapping — a truncated reason code reads as a
+ * different code, which is worse than one that wraps. Chips are inline-block, so the cell has
+ * to be told that wrapping is allowed and given a floor to wrap within. */
+.queue-why { white-space: normal; min-width: 11ch; }
+.queue-why .chip { white-space: nowrap; }
+
 /* Focus has to be visible. Nothing here removed the default outline, but nothing reinforced it
  * against the custom tile and row backgrounds either. */
 :focus-visible {
