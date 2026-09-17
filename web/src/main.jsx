@@ -2,6 +2,13 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import Analyse from './pages/Analyse.jsx'
+// Inter, as a local npm dependency rather than a CDN <link>. `@fontsource-variable/inter` ships the
+// variable .woff2 subsets inside node_modules and declares them with relative `url(./files/...)`,
+// so Vite rewrites them into the build's own asset graph: the page makes no request to any external
+// host, and the app looks the same with the network switched off. Imported once, here, ahead of
+// styles.css so the @font-face rules land before the rules that reference the family — the family
+// name the package declares is `Inter Variable`, which is what --sans names first.
+import '@fontsource-variable/inter'
 import './styles.css'
 
 // No router library. The app has exactly two screens and the second one (the agent layer's

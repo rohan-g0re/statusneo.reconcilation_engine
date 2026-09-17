@@ -1,5 +1,10 @@
 /* Tokens first, components second.
  *
+ * Everything below is driven by the token block on :root — a spacing scale, a type scale, a radius
+ * scale, one accent and a fixed status palette. No rule invents its own pixel value; if a number
+ * looks off, it is off in the scale, not in one place. That is the whole reason the scale exists:
+ * spacing that reads as deliberate rather than accumulated.
+ *
  * The three disposition colours are **status** colours, not series colours: they encode a state
  * (nothing to do / waiting / work it), and status colours are reserved — they never double as
  * "series 4". Two of them sit below 3:1 on the light surface by design, so every one of them ships
@@ -10,32 +15,91 @@
  * app. That adaptive behaviour is gone: there is exactly one palette, applied on :root regardless of
  * what the OS prefers, and `color-scheme: light` (here and in index.html's meta tag) tells the
  * browser to render its own chrome — form controls, the range input thumb, scrollbars — light too.
+ * There is deliberately no `@media (prefers-color-scheme: dark)` block anywhere in this file.
+ *
+ * Inter is loaded from the `@fontsource-variable/inter` npm package, imported once in main.jsx.
+ * It is a local dependency and Vite emits the .woff2 files as build assets — nothing here reaches
+ * a CDN or any other host, and the app renders identically with the network switched off.
  */
 
 :root {
   color-scheme: light;
 
-  --surface-0: #f4f4f2;
-  --surface-1: #fcfcfb;
-  --surface-2: #ececea;
-  --border: #d9d9d4;
-  --border-strong: #b9b9b2;
+  /* ═══ surfaces & borders ═══ cool, flat, and separated by borders rather than shadows. */
+  --surface-0: #f7f8fa; /* the page */
+  --surface-1: #ffffff; /* a panel, a tile, a card */
+  --surface-2: #f0f1f4; /* nested content: table heads, chips, logs, code blocks */
+  --border: #e4e5ea;
+  --border-strong: #c6c8d2;
 
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #74736d;
+  /* ═══ ink ═══ */
+  --text-primary: #16161c;
+  --text-secondary: #4c4d5a;
+  /* The muted step has to clear 4.5:1 on --surface-2, not merely on the page background: chips,
+   * table headers, provenance lines and small labels sit on surface-2 constantly. #66677a measures
+   * 4.86:1 there. */
+  --text-muted: #66677a;
 
-  /* Status palette — fixed, never themed. */
+  /* ═══ status palette ═══ fixed, never themed, never reused as a chart series. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
 
-  --accent: #2a78d6;
+  /* A rebate is not a status, so it gets its own token rather than a hardcoded hex in the JSX. */
+  --track-rebate: #4a3aa7;
 
-  --radius: 8px;
+  /* ═══ accent ═══ one accent, indigo. #5e6ad2 carries white at 4.70:1 (primary buttons, the
+   * selected segment of the view toggle) and sits at 4.70:1 as ink on a white panel (links, the
+   * citation marker), so it is legible in both directions. --accent-soft is the selected-row wash
+   * and is deliberately near-white: the inset bar is what marks the row, the wash only supports it. */
+  --accent: #5e6ad2;
+  --accent-hover: #4f5ac0;
+  --accent-soft: #eceefb;
+
+  /* ═══ spacing scale ═══ 2/4/6/8/12/16/24/32/48. Dense at the bottom because this is a dashboard
+   * — table cells and chips live in the 2-8px range — and coarse at the top for panel rhythm. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 48px;
+
+  /* ═══ type scale ═══ eight steps with real gaps between them. The file used to carry 10.5, 11,
+   * 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 16, 18 and 30 — thirteen sizes, most of them
+   * indistinguishable from a neighbour, which reads as drift rather than hierarchy. */
+  --text-xxs: 10px; /* micro uppercase labels inside a timeline event */
+  --text-xs: 11px; /* chips, table headers, provenance */
+  --text-sm: 12px; /* secondary meta, hints, logs */
+  --text-base: 13px; /* tables, controls, dense body */
+  --text-md: 14px; /* body, headlines */
+  --text-lg: 16px; /* the dossier's identity line, an outcome icon */
+  --text-xl: 19px; /* the masthead title */
+  --text-display: 28px; /* the one display number: a tile's count */
+
+  /* Linear's headings run tight; its body runs comfortable. */
+  --tracking-tight: -0.014em;
+  --tracking-tighter: -0.022em;
+  --tracking-body: -0.006em;
+  --tracking-label: 0.045em; /* small uppercase section labels open up instead */
+  --leading-tight: 1.25;
+  --leading-body: 1.55;
+
+  /* ═══ radii ═══ */
+  --radius-xs: 4px; /* an inline code chip, a focus ring */
+  --radius-sm: 6px; /* buttons, inputs, small cards */
+  --radius-md: 8px; /* nested blocks inside a panel */
+  --radius-lg: 10px; /* panels, tiles, banners */
+  --radius-pill: 999px;
+  --radius: var(--radius-lg); /* kept as the historical alias */
+
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --sans: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -43,50 +107,77 @@
 body {
   margin: 0;
   font-family: var(--sans);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--surface-0);
   color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
 }
+
+/* The app renders real links (the masthead's way back to the dashboard, an episode id in the to-do
+ * table). Left unstyled they came out in the browser's default #0000EE, which fights the accent
+ * everywhere else on the page. */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ═══ layout ═══════════════════════════════════════════════════════════ */
 
-.app { max-width: 1400px; margin: 0 auto; padding: 20px 24px 64px; }
+.app { max-width: 1400px; margin: 0 auto; padding: var(--space-7) var(--space-7) var(--space-9); }
 
 header.masthead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-6);
   flex-wrap: wrap;
-  padding-bottom: 14px;
+  padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  margin-bottom: var(--space-7);
 }
-.masthead h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-.masthead .sub { color: var(--text-muted); font-size: 12.5px; }
-.masthead .sub code { font-family: var(--mono); font-size: 12px; }
+.masthead h1 {
+  font-size: var(--text-xl);
+  margin: 0;
+  font-weight: 640;
+  letter-spacing: var(--tracking-tighter);
+  line-height: var(--leading-tight);
+}
+.masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
+.masthead .sub code { font-family: var(--mono); font-size: var(--text-sm); }
 
 .panel {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 18px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
 }
 .panel > h2, .panel-head-row > h2 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 650;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 640;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
-.panel > .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; max-width: 78ch; }
+.panel > .hint {
+  margin: 0 0 var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  max-width: 78ch;
+}
 
 /* A panel's <h2> plus a header-level action (e.g. "Inspect using AI") on the same line,
  * without disturbing `.panel > h2`'s own rule for every panel that has no such action. */
-.panel-head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.panel-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
 .panel-head-row > h2 { margin: 0; }
 
 /* ═══ two-column layout ════════════════════════════════════════════════ */
@@ -99,14 +190,15 @@ header.masthead {
   display: grid;
   grid-template-columns: 3fr 2fr;
   align-items: start;
-  gap: 18px;
+  gap: var(--space-6);
 }
 .layout-left { min-width: 0; }
 .layout-right {
   position: sticky;
-  top: 20px;
+  /* Matches `.app`'s own top padding, so the pinned column sits level with the page edge. */
+  top: var(--space-7);
   min-width: 0;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - var(--space-9));
   overflow-y: auto;
 }
 .layout-right .panel { margin-bottom: 0; }
@@ -119,109 +211,142 @@ header.masthead {
     max-height: none;
     overflow-y: visible;
   }
-  .layout-right .panel { margin-bottom: 18px; }
+  .layout-right .panel { margin-bottom: var(--space-6); }
 }
 
 /* ═══ cursor scrubber ══════════════════════════════════════════════════ */
 
-.scrubber { display: flex; flex-direction: column; gap: 10px; }
-.scrubber .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.scrubber { display: flex; flex-direction: column; gap: var(--space-4); }
+.scrubber .row { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .scrubber input[type='range'] { flex: 1 1 320px; min-width: 220px; accent-color: var(--accent); }
 .scrubber .readout {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   min-width: 11ch;
 }
-.scrubber .ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); }
+.scrubber .ends {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
 .scrubber .step-btn {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1;
-  padding: 6px 10px;
+  padding: var(--space-3) var(--space-4);
   min-width: 34px;
 }
 
+/* Buttons sit on a white panel, so they are white with a real border rather than a grey fill —
+ * the border is the affordance, the fill is the hover. */
 button {
   font: inherit;
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: var(--tracking-body);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
-  background: var(--surface-2);
+  background: var(--surface-1);
   color: var(--text-primary);
   cursor: pointer;
 }
-button:hover:not(:disabled) { border-color: var(--accent); }
+button:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 550; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 select {
-  font: inherit; font-size: 13px; padding: 5px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
-  background: var(--surface-2); color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-base);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-primary);
 }
 
 /* ═══ stat tiles ═══════════════════════════════════════════════════════ */
 /* A stat tile, not a chart: three numbers whose job is to be read, not compared
  * across a continuum. A bar chart of three counts would add ink and no meaning. */
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-5); }
 
 .tile {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-left: 3px solid var(--tile-color, var(--border-strong));
-  border-radius: var(--radius);
-  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6);
   cursor: pointer;
   text-align: left;
   display: block;
   width: 100%;
 }
-.tile:hover { border-color: var(--border-strong); border-left-color: var(--tile-color); }
+/* `:not(:disabled)` is here for specificity, not for state: a tile is a <button>, so the generic
+ * `button:hover:not(:disabled)` rule above would otherwise outrank a bare `.tile:hover` and repaint
+ * the status-coloured left border in the accent. */
+.tile:hover:not(:disabled) { background: var(--surface-1); border-color: var(--border-strong); border-left-color: var(--tile-color); }
 .tile[aria-pressed='true'] { background: var(--surface-2); border-color: var(--tile-color); }
 
 .tile .label {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 12px; font-weight: 650; letter-spacing: 0.04em;
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-sm); font-weight: 640; letter-spacing: var(--tracking-label);
   text-transform: uppercase; color: var(--text-secondary);
 }
 /* The icon is the non-colour channel. Removing it would make the tile colour-only. */
-.tile .icon { color: var(--tile-color); font-size: 13px; line-height: 1; }
-.tile .count { font-size: 30px; font-weight: 640; letter-spacing: -0.02em; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
-.tile .money { font-family: var(--mono); font-size: 12.5px; color: var(--text-secondary); }
+.tile .icon { color: var(--tile-color); font-size: var(--text-base); line-height: 1; }
+.tile .count {
+  font-size: var(--text-display);
+  font-weight: 620;
+  letter-spacing: var(--tracking-tighter);
+  line-height: var(--leading-tight);
+  margin: var(--space-3) 0 var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+.tile .money { font-family: var(--mono); font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 .tile .money .reopened { color: var(--status-critical); font-weight: 600; }
 
 /* ═══ tables ═══════════════════════════════════════════════════════════ */
 
-.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+table { border-collapse: collapse; width: 100%; font-size: var(--text-base); }
+th, td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
 th {
   position: sticky; top: 0;
   background: var(--surface-2);
-  font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: var(--text-xs); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
-tbody tr[aria-selected='true'] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr[aria-selected='true'] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 td.mono, th.num { font-family: var(--mono); }
 th.num { text-align: right; }
 
 .verdict-code {
-  font-family: var(--mono); font-size: 12px; font-weight: 600;
-  padding: 1px 5px; border-radius: 4px;
+  font-family: var(--mono); font-size: var(--text-sm); font-weight: 600;
+  padding: 1px var(--space-2); border-radius: var(--radius-xs);
   background: var(--surface-2); border: 1px solid var(--border);
 }
 
 .chip {
   display: inline-block;
-  font-size: 11px; font-family: var(--mono);
-  padding: 1px 6px; margin: 1px 3px 1px 0;
-  border-radius: 10px;
+  font-size: var(--text-xs); font-family: var(--mono);
+  padding: 1px var(--space-3); margin: 1px var(--space-1) 1px 0;
+  border-radius: var(--radius-pill);
   background: var(--surface-2); border: 1px solid var(--border);
   color: var(--text-secondary);
 }
@@ -230,45 +355,63 @@ th.num { text-align: right; }
 
 /* ═══ episode detail ═══════════════════════════════════════════════════ */
 
-.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; margin-bottom: 16px; }
-.field .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.field .v { font-family: var(--mono); font-size: 13px; }
+.detail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-4) var(--space-7); margin-bottom: var(--space-6);
+}
+.field .k { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-muted); }
+.field .v { font-family: var(--mono); font-size: var(--text-base); font-variant-numeric: tabular-nums; }
 
 .money-table td.num { font-variant-numeric: tabular-nums; }
 .money-table .variance-bad { color: var(--status-critical); font-weight: 600; }
 .money-table .variance-ok { color: var(--text-muted); }
 
-details.evidence { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; background: var(--surface-1); }
-details.evidence > summary { cursor: pointer; padding: 7px 10px; font-size: 12.5px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+details.evidence {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+  background: var(--surface-1);
+}
+details.evidence > summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center;
+}
 details.evidence pre {
-  margin: 0; padding: 10px; overflow-x: auto;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
+  margin: 0; padding: var(--space-4); overflow-x: auto;
+  font-family: var(--mono); font-size: var(--text-xs); line-height: 1.45;
   background: var(--surface-2); border-top: 1px solid var(--border);
   white-space: pre-wrap; word-break: break-all;
 }
 
 .timeline { list-style: none; margin: 0; padding: 0; }
-.timeline li { border-left: 2px solid var(--border-strong); padding: 0 0 12px 14px; margin-left: 5px; position: relative; }
+.timeline li {
+  border-left: 2px solid var(--border-strong);
+  padding: 0 0 var(--space-5) var(--space-5);
+  margin-left: var(--space-2);
+  position: relative;
+}
 .timeline li::before {
-  content: ''; position: absolute; left: -6px; top: 4px;
+  content: ''; position: absolute; left: -6px; top: var(--space-2);
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
 }
-.timeline .when { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.timeline .when { font-family: var(--mono); font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
-.empty { color: var(--text-muted); font-size: 13px; padding: 14px 2px; }
+.empty { color: var(--text-muted); font-size: var(--text-base); padding: var(--space-5) var(--space-1); }
 .error {
   border: 1px solid var(--status-critical);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 10px 14px; margin-bottom: 16px;
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5); margin-bottom: var(--space-6);
+  font-size: var(--text-base);
 }
 .banner {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: var(--space-4);
+  font-size: var(--text-sm); color: var(--text-secondary);
 }
-.spinner { color: var(--text-muted); font-size: 12.5px; }
+.spinner { color: var(--text-muted); font-size: var(--text-sm); }
 
 /* ═══ episode dossier ══════════════════════════════════════════════════ */
 /* The narrative view. Deliberately the most prominent thing on the page once an
@@ -276,58 +419,86 @@ details.evidence pre {
 
 .dossier-head {
   display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 20px; flex-wrap: wrap;
-  padding-bottom: 14px; margin-bottom: 14px;
+  gap: var(--space-7); flex-wrap: wrap;
+  padding-bottom: var(--space-5); margin-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
 }
-.dossier-id { font-family: var(--mono); font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
-.dossier-drug { font-size: 14px; color: var(--text-primary); margin-top: 2px; }
-.dossier-keys { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.dossier-id {
+  font-family: var(--mono); font-size: var(--text-lg); font-weight: 650;
+  letter-spacing: var(--tracking-tight); line-height: var(--leading-tight);
+}
+.dossier-drug { font-size: var(--text-md); color: var(--text-primary); margin-top: var(--space-1); }
+.dossier-keys { font-family: var(--mono); font-size: var(--text-sm); color: var(--text-muted); margin-top: var(--space-2); }
 
-.dossier-verdict { text-align: right; border-right: 3px solid var(--d, var(--border-strong)); padding-right: 12px; }
-.dossier-disposition { font-size: 15px; font-weight: 650; color: var(--d, var(--text-primary)); letter-spacing: 0.02em; }
+.dossier-verdict {
+  text-align: right;
+  border-right: 3px solid var(--d, var(--border-strong));
+  padding-right: var(--space-5);
+}
+.dossier-disposition {
+  font-size: var(--text-md); font-weight: 650;
+  color: var(--d, var(--text-primary)); letter-spacing: 0.02em;
+}
 
-.dossier-reasons { margin: 0 0 14px; }
-.dossier-note { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+.dossier-reasons { margin: 0 0 var(--space-5); }
+.dossier-note { color: var(--text-muted); font-size: var(--text-sm); font-weight: 400; margin-left: var(--space-4); }
 
 .dossier-money {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 8px 24px; padding: 12px 14px; margin-bottom: 18px;
-  background: var(--surface-2); border-radius: var(--radius);
+  display: grid;
+  /* 280px of minimum column does not fit a 360px phone once the app and panel padding are out. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4) var(--space-7); padding: var(--space-5) var(--space-5); margin-bottom: var(--space-6);
+  background: var(--surface-2); border-radius: var(--radius-md);
 }
-.dossier-money .k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.dossier-money .v { font-size: 13.5px; }
+.dossier-money .k {
+  display: block; font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
+}
+.dossier-money .v { font-size: var(--text-base); }
 .dossier-amount { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .dossier-section {
-  font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-secondary); margin: 20px 0 12px;
+  font-size: var(--text-sm); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-secondary); margin: var(--space-7) 0 var(--space-5);
 }
 
 .dossier-timeline { list-style: none; margin: 0; padding: 0; }
 .dossier-timeline li {
-  display: grid; grid-template-columns: 130px 1fr; gap: 14px;
-  padding: 0 0 18px 0; position: relative;
+  display: grid; grid-template-columns: 130px 1fr; gap: var(--space-5);
+  padding: 0 0 var(--space-6) 0; position: relative;
 }
 .dossier-timeline li::before {
-  content: ''; position: absolute; left: 122px; top: 16px; bottom: 0;
+  content: ''; position: absolute; left: 122px; top: var(--space-6); bottom: 0;
   width: 2px; background: var(--border);
 }
 .dossier-timeline li:last-child::before { display: none; }
-.dossier-when { text-align: right; padding-right: 4px; position: relative; }
+/* The gutter holds a date and nothing else, and must never push into the facts column —
+ * belt and braces after a long tag overflowed it in the narrower right-hand panel. */
+.dossier-when { text-align: right; padding-right: var(--space-2); position: relative; overflow: hidden; }
 .dossier-when::after {
-  content: ''; position: absolute; right: -13px; top: 5px;
+  content: ''; position: absolute; right: -13px; top: var(--space-2);
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
 }
-.dossier-when time { display: block; font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
-.dossier-kind { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650; margin-top: 1px; }
-.dossier-body { padding-left: 6px; min-width: 0; }
-.dossier-headline { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
-.dossier-detail { font-size: 13px; color: var(--text-secondary); max-width: 82ch; }
+.dossier-when time {
+  display: block; font-family: var(--mono); font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums; font-weight: 600; overflow-wrap: anywhere;
+}
+/* The kind label used to be painted in the same status colour as its dot — and two of those sit at
+ * 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the meaning,
+ * so the label stays a legible ink. */
+.dossier-kind {
+  display: block; font-size: var(--text-xxs); text-transform: uppercase;
+  letter-spacing: 0.06em; font-weight: 640; margin-top: 1px;
+  color: var(--text-secondary) !important;
+}
+.dossier-body { padding-left: var(--space-3); min-width: 0; }
+.dossier-headline { font-size: var(--text-md); font-weight: 600; letter-spacing: var(--tracking-tight); margin-bottom: var(--space-1); }
+.dossier-detail { font-size: var(--text-base); color: var(--text-secondary); max-width: 82ch; }
 .dossier-provenance {
-  display: flex; gap: 14px; flex-wrap: wrap;
-  font-size: 11.5px; color: var(--text-muted); margin-top: 4px;
+  display: flex; gap: var(--space-5); flex-wrap: wrap;
+  font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-2);
 }
 .dossier-provenance .mono { font-family: var(--mono); }
 
@@ -336,31 +507,32 @@ details.evidence pre {
  * list (an array of objects) spans the full width instead of being squeezed into one column. */
 .dossier-facts {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 6px 18px; margin: 2px 0 6px; max-width: 82ch;
+  gap: var(--space-3) var(--space-6); margin: var(--space-1) 0 var(--space-3); max-width: 82ch;
 }
 .dossier-fact { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dossier-fact.wide { grid-column: 1 / -1; max-width: none; }
 .dossier-fact dt {
-  margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  margin: 0; font-size: var(--text-xxs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
   color: var(--text-muted);
 }
-.dossier-fact dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.dossier-fact dd { margin: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
 
-.fact-nested { margin: 2px 0 0; max-width: 82ch; }
-.fact-nested table th, .fact-nested table td { padding: 4px 8px; font-size: 11.5px; white-space: normal; }
+.fact-nested { margin: var(--space-1) 0 0; max-width: 82ch; }
+.fact-nested table th, .fact-nested table td { padding: var(--space-2) var(--space-4); font-size: var(--text-xs); white-space: normal; }
 
 .fact-object {
-  display: flex; flex-direction: column; gap: 2px;
-  border: 1px dashed var(--border-strong); border-radius: 6px;
-  padding: 5px 8px; margin-top: 1px; max-width: 82ch;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4); margin-top: 1px; max-width: 82ch;
 }
-.fact-object-row { display: flex; gap: 8px; font-size: 12px; }
+.fact-object-row { display: flex; gap: var(--space-4); font-size: var(--text-sm); }
 .fact-object-key { color: var(--text-muted); min-width: 14ch; flex: 0 0 auto; }
 
 @media (max-width: 640px) {
-  .dossier-timeline li { grid-template-columns: 1fr; gap: 2px; }
+  .dossier-timeline li { grid-template-columns: 1fr; gap: var(--space-1); }
   .dossier-timeline li::before { display: none; }
-  .dossier-when { text-align: left; display: flex; gap: 10px; align-items: baseline; }
+  .dossier-when { text-align: left; display: flex; gap: var(--space-4); align-items: baseline; }
   .dossier-when::after { display: none; }
   .dossier-body { padding-left: 0; }
   .dossier-facts { grid-template-columns: 1fr; }
@@ -380,30 +552,8 @@ details.evidence pre {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
-
-/* The timeline's kind label was painted in the same status colour as its dot — and two of those
- * sit at 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the
- * meaning, so the label goes back to a legible ink. */
-.dossier-kind { color: var(--text-secondary) !important; }
-
-/* The timeline gutter holds a date and nothing else, and must never push into the facts
- * column. Belt and braces after a long tag overflowed it in the narrower right-hand panel. */
-.dossier-when { overflow: hidden; }
-.dossier-when time { overflow-wrap: anywhere; }
-
-/* #74736d on --surface-2 measures 4.02:1, below the 4.5:1 body-text floor. Chips and small labels
- * sit on surface-2 constantly, so muted ink is darkened for the light theme only; the dark theme's
- * muted step already clears its surface. */
-:root { --text-muted: #6a6964; }
-
-/* A rebate is not a status, so it needs its own token rather than a hardcoded hex in the JSX —
- * the violet that reads well on white is 2.04:1 on the dark surface. */
-:root { --track-rebate: #4a3aa7; }
-
-/* 280px of minimum column does not fit a 360px phone once the app and panel padding are taken out. */
-.dossier-money { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 
 @media print {
   .table-wrap, .queue-scroll { overflow: visible; max-height: none; }
@@ -417,21 +567,21 @@ details.evidence pre {
 .agent-unavailable {
   border: 1px solid var(--border-strong);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface-2);
-  padding: 10px 14px;
-  font-size: 13px;
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--text-base);
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
 
 .agent-unsourced {
   border: 1px solid var(--status-critical);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  margin-top: 10px;
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
 }
 
 /* The streamed decide loop. Deliberately a plain scrolling log, not a spinner — every line is
@@ -441,37 +591,37 @@ details.evidence pre {
   max-height: 42vh;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-2);
-  padding: 8px 10px;
-  margin-bottom: 12px;
-  font-size: 12px;
-  line-height: 1.55;
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
 }
 .agent-log-row { overflow-wrap: anywhere; }
 .agent-log-row.muted { color: var(--text-muted); }
 .agent-log-row.bad { color: var(--status-critical); font-weight: 600; }
 .agent-log-row.mono { font-family: var(--mono); }
 .agent-log-divider {
-  margin: 8px 0 4px;
-  font-size: 11.5px;
-  font-weight: 700;
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 680;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
-.agent-log-rule { border: none; border-top: 1px dashed var(--border); margin: 8px 0; }
+.agent-log-rule { border: none; border-top: 1px dashed var(--border); margin: var(--space-4) 0; }
 .agent-log-card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 4px 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
 }
-.agent-log-card-head { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.agent-log-card-body { margin-top: 4px; color: var(--text-secondary); overflow-wrap: anywhere; }
-.agent-log-card-foot { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
-.agent-log-criteria { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.agent-log-card-head { font-weight: 640; display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.agent-log-card-body { margin-top: var(--space-2); color: var(--text-secondary); overflow-wrap: anywhere; }
+.agent-log-card-foot { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-muted); }
+.agent-log-criteria { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 .agent-log-criteria .chip { border-width: 2px; cursor: help; }
 
 /* The terminal outcome. `--oc` carries the per-status colour set inline by OutcomeBanner —
@@ -479,34 +629,35 @@ details.evidence pre {
 .outcome-banner {
   border: 1px solid var(--border);
   border-left: 4px solid var(--oc, var(--border-strong));
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
 }
-.outcome-banner-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.outcome-banner-icon { color: var(--oc); font-size: 16px; font-weight: 700; }
-.outcome-banner-label { font-size: 14.5px; font-weight: 650; color: var(--oc); }
-.outcome-trajectory { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.outcome-banner-head { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.outcome-banner-icon { color: var(--oc); font-size: var(--text-lg); font-weight: 700; }
+.outcome-banner-label { font-size: var(--text-md); font-weight: 650; letter-spacing: var(--tracking-tight); color: var(--oc); }
+.outcome-trajectory { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); }
 
 /* The editable work-item draft — a safety property, not a convenience: nothing here is
  * pre-committed, and every field the human gate writes is a plain, directly-editable control. */
-.wi-form { margin-top: 4px; }
-.wi-field { display: block; margin-bottom: 12px; }
+.wi-form { margin-top: var(--space-2); }
+.wi-field { display: block; margin-bottom: var(--space-5); }
 .wi-field > span {
-  display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--text-muted);
+  display: block; margin-bottom: var(--space-2); font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
 }
 .wi-field select, .wi-field textarea {
-  width: 100%; font: inherit; font-size: 13px; padding: 6px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
+  width: 100%; font: inherit; font-size: var(--text-base); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--text-primary); resize: vertical;
 }
-.wi-artifact-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.wi-artifact-row { display: flex; gap: var(--space-3); margin-bottom: var(--space-3); }
 .wi-artifact-row input {
-  flex: 1; font: inherit; font-size: 13px; padding: 6px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
+  flex: 1; font: inherit; font-size: var(--text-base); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--text-primary);
 }
+.wi-field textarea:focus, .wi-artifact-row input:focus, .wi-field select:focus { border-color: var(--accent); }
 
 /* ═══ dossier: sticky header, view toggle, source panel ══════════════════ */
 
@@ -524,35 +675,37 @@ details.evidence pre {
   z-index: 2;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
-  margin: 0 0 14px;
-  padding-bottom: 12px;
+  margin: 0 0 var(--space-5);
+  padding-bottom: var(--space-5);
 }
-.dossier-sticky .dossier-head { border-bottom: none; margin-bottom: 0; padding-bottom: 10px; }
-.dossier-sticky .dossier-reasons { margin: 0 0 2px; }
+.dossier-sticky .dossier-head { border-bottom: none; margin-bottom: 0; padding-bottom: var(--space-4); }
+.dossier-sticky .dossier-reasons { margin: 0 0 var(--space-1); }
 
 .view-toggle {
   display: inline-flex;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .view-toggle button {
   border: none;
   border-radius: 0;
-  background: var(--surface-2);
-  padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 600;
+  background: var(--surface-1);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+  font-weight: 550;
 }
 .view-toggle button + button { border-left: 1px solid var(--border-strong); }
+.view-toggle button:hover:not(:disabled) { background: var(--surface-2); }
 .view-toggle button[aria-pressed='true'] { background: var(--accent); color: #fff; }
-.view-toggle button:hover:not(:disabled) { border-color: var(--border-strong); }
+.view-toggle button[aria-pressed='true']:hover:not(:disabled) { background: var(--accent-hover); }
 
 /* The detailed view's source line becomes a button once it can be clicked open; it has to keep
  * reading as the same quiet provenance text it always was, not suddenly look like a form control. */
 .source-link {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
+  font-weight: 400;
   color: var(--text-muted);
   background: none;
   border: none;
@@ -564,37 +717,43 @@ details.evidence pre {
   text-underline-offset: 2px;
   text-decoration-color: var(--border-strong);
 }
-.source-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+/* Same specificity note as `.tile:hover` — this is a <button> that must not pick up the generic
+ * button hover fill. */
+.source-link:hover:not(:disabled) { background: none; color: var(--accent); text-decoration-color: var(--accent); }
 
 .source-panel {
-  margin: 6px 0 0;
-  padding: 8px 10px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   max-width: 82ch;
 }
-.source-panel-meta { color: var(--text-secondary); margin-bottom: 6px; }
+.source-panel-meta { color: var(--text-secondary); margin-bottom: var(--space-3); }
 .source-panel pre {
-  margin: 0 0 8px;
-  padding: 8px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   white-space: pre;
 }
-.source-panel-hashes { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-muted); font-size: 11px; font-family: var(--mono); }
+.source-panel-hashes {
+  display: flex; gap: var(--space-5); flex-wrap: wrap;
+  color: var(--text-muted); font-size: var(--text-xs); font-family: var(--mono);
+}
 
 /* A citation marker in agent prose. Deliberately quiet: the evidence must be
-   reachable without the sentence having to carry a parser's worth of syntax. */
+   reachable without the sentence having to carry a parser's worth of syntax.
+   9px is below the type scale on purpose — it is a marker, not text. */
 .agent-cite {
   display: inline-block;
-  margin-left: 2px;
+  margin-left: var(--space-1);
   padding: 0 3px;
   font-size: 9px;
   font-weight: 600;
@@ -613,10 +772,10 @@ details.evidence pre {
  * new here (a rationale column too long to stay on one line, a disclosure row nested under its
  * parent, and a note that the replay cursor is hiding rows) gets its own rules. */
 
-/* Rationale runs 20-600 characters of free text — `th, td` (line 200) forces `white-space: nowrap`
- * for the dense tabular columns, which would push this one column far off the right edge of the
- * table instead of wrapping it. Bounded so the column can neither collapse to an unreadable sliver
- * on a short rationale nor swallow the rest of the table on a long one. */
+/* Rationale runs 20-600 characters of free text — the `th, td` rule above forces
+ * `white-space: nowrap` for the dense tabular columns, which would push this one column far off the
+ * right edge of the table instead of wrapping it. Bounded so the column can neither collapse to an
+ * unreadable sliver on a short rationale nor swallow the rest of the table on a long one. */
 td.todo-rationale {
   white-space: normal;
   min-width: 26ch;
@@ -635,14 +794,13 @@ td.todo-artifacts {
 
 /* The replay cursor can hide to-dos that exist outside the current window, and a reader who
  * doesn't notice a muted caption will trust an incomplete list as if it were the whole one. Same
- * shape as `.error` (line 260) so it reads as a real notice rather than helper text, but in
- * `--status-warning` (line 30) rather than `--status-critical` — nothing here is broken, the list
- * is just partial. */
+ * shape as `.error` so it reads as a real notice rather than helper text, but in `--status-warning`
+ * rather than `--status-critical` — nothing here is broken, the list is just partial. */
 .todo-hidden {
   border: 1px solid var(--status-warning);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  font-size: var(--text-sm);
 }
