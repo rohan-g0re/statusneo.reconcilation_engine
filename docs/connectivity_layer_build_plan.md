@@ -424,7 +424,7 @@ requirement ids closed, what was discovered, and the test delta.
 | 5 Mapping | E1–E5 | ✅ *(see E1 caveat)* | +85 (805) | `ab9f7d8` |
 | 6 Proof | F1–F3 | ✅ | +76 (881) | `e02be93` |
 | 7.1 UI restyle | goal item 5 | ✅ | — | `5eafe36` |
-| 7.2 Connectivity page + browser | goal item 5 | ✅ | +6 (887) | pending |
+| 7.2 Connectivity page + browser | goal item 5 | ✅ | +6 (887) | `4533988` |
 
 Baseline was **585**.
 
