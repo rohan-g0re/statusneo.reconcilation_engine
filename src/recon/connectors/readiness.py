@@ -73,6 +73,31 @@ table, it imports nothing from ``recon.ingest``, and it never opens a path under
 ``truth/``.  The one database it touches it touches read-only, through a connection a caller
 hands it, and it tolerates the table being absent — a report that could only be produced
 after a successful ingest would be useless on the day you most want it.
+
+═══ Three states that are not one state ═══════════════════════════════════════════
+
+A reader of this report asks three separate questions about a source and they were, for a
+while, answered by one cell:
+
+* **Can we read these bytes?**  A transport moves them and a mapping splits them.
+* **Does anything turn them into records?**  An adapter accepts the rows, or it does not —
+  and "does not" can be a deliberate refusal rather than an unwritten reader.
+* **Are we allowed to fetch them yet?**  :attr:`SourceReadiness.awaiting_access`, which is
+  Doc 2's Week 1-3 credential gate and nothing else.
+
+:attr:`SourceReadiness.ingest` answers the first two and :attr:`SourceReadiness.awaiting_access`
+answers the third, and they are deliberately **not** combined anywhere in this module.  The
+same source is routinely fully readable *and* waiting on a credential at the same moment, and
+a single cell for both has to pick one of those to say — which is how a source whose reader
+works ends up rendered as a source that cannot be read.
+
+The adapter answer is the one fact here that lives on the other side of the connectors/ingest
+seam, so it is **handed in** rather than imported: :func:`build_report` takes an ``adapters``
+object and :func:`adapter_coverage` finds the answer on it *by shape* — a mapping whose values
+are callables, a set of strings — rather than by the names those tables happen to carry today.
+The caller that owns both layers does the wiring, which is why this module still imports
+nothing from ``recon.ingest`` and why a rename over there does not silently flip a cell here.
+``None`` means nobody was asked, which is reported as "not measured" and never as "no".
 """
 
 from __future__ import annotations
@@ -110,10 +135,13 @@ __all__ = [
     "UNCONFIGURED_ENDPOINT",
     "Stage",
     "Reach",
+    "Ingest",
     "TransportReadiness",
     "AuthReadiness",
     "SchemaReadiness",
     "MappingReadiness",
+    "AdapterCoverage",
+    "AdapterReadiness",
     "MockFidelity",
     "GoldenClaimReadiness",
     "ControlTotalReadiness",
@@ -123,6 +151,8 @@ __all__ = [
     "declared_sources",
     "transport_implementations",
     "vendor_mappings",
+    "source_mappings",
+    "adapter_coverage",
     "mock_field_tallies",
     "evidence_index",
     "build_report",
@@ -262,6 +292,35 @@ class Reach(StrEnum):
     VENDOR = "VENDOR"
 
 
+class Ingest(StrEnum):
+    """How far a source's bytes get once a transport has fetched them.
+
+    **This is not a rung of :class:`Stage` and must never be rendered as one.**  A stage says
+    how much of Doc 2's connector method has been built for a source; this says what happens
+    to the bytes themselves, and the two move independently — a source can be connector-ready
+    and still have rows nothing adapts, which is a decision rather than a missing rung.
+
+    It is also not :attr:`SourceReadiness.awaiting_access`.  Every member below is a statement
+    about a file we can already read; whether anybody has issued us the credential to go and
+    fetch one is the separate question, and collapsing the two is the specific confusion this
+    vocabulary exists to end.
+    """
+
+    #: Nobody was asked.  :func:`build_report` was handed no adapter layer, so the answer is
+    #: absent rather than negative — the same three-valued discipline
+    #: :attr:`ControlTotalReadiness.clean` follows, and for the same reason: "not measured" and
+    #: "no" are different answers and only one of them is a finding.
+    UNMEASURED = "UNMEASURED"
+    #: No transport implements this source's kind, so there are no bytes to talk about.
+    UNREADABLE = "UNREADABLE"
+    #: Fetched, split and contract-checked — and no adapter takes the rows.  Reported with the
+    #: refusal in :attr:`AdapterReadiness.refusal`, because "we cannot read this" and "we read
+    #: this and deliberately stop" are opposite findings that look identical in a boolean.
+    READS = "READS"
+    #: Fetched, split, contract-checked, and an adapter turns the rows into canonical records.
+    READS_AND_ADAPTS = "READS_AND_ADAPTS"
+
+
 # ═══ the cells ══════════════════════════════════════════════════════════════
 
 
@@ -345,10 +404,76 @@ class MappingReadiness:
     #: vendor.  Beacon's mapping is keyed by payload kind rather than by source id, so the
     #: weaker answer is the honest one there.
     per_source: bool = False
+    #: The vendor's own name for this dataset, read off the mapping object.  Carried because a
+    #: source id is ours and a dataset name is theirs, and a reader comparing this report
+    #: against a vendor's file listing needs the name the vendor uses.
+    dataset: str | None = None
+    #: The column the mapping takes each row's arrival time from, or ``None``.
+    #:
+    #: The field the whole vendor leg was once blocked on, so the report says it out loud.  A
+    #: vendor export carries no column called ``received_at``; each dataset names its own, and
+    #: some name none.  ``None`` here is a real answer and not a gap — see :attr:`arrival_time`.
+    received_at_column: str | None = None
 
     @property
     def implemented(self) -> bool:
         return self.module is not None
+
+    @property
+    def arrival_time(self) -> str | None:
+        """How rows of this dataset get the timestamp the pipeline orders them by.
+
+        ``None`` when no mapping declares this source id, because then there is no dataset to
+        answer for.  Otherwise one of two sentences, and the difference between them matters
+        to anybody reading a timeline: a per-row stamp says when the row became true, and an
+        inherited one says only when the file landed.  Reporting the second as though it were
+        the first would hide every day of vendor lag behind a fill date.
+        """
+        if not self.per_source:
+            return None
+        if self.received_at_column is None:
+            return (
+                "inherited from the delivery's own fetch stamp — this dataset publishes no "
+                "arrival column, so we know when the file landed and not when the row did"
+            )
+        return f"read per row from {self.received_at_column}"
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterCoverage:
+    """What the ingest layer will turn into canonical records, as two sets of names.
+
+    Handed to :func:`build_report` by a caller that owns both layers, never imported here.
+    Both members are *names* and neither is a callable: this report describes what exists, and
+    holding a function it could call would make it one step from becoming an ingest run.
+    """
+
+    #: Source systems an adapter is registered for, stringified.
+    source_systems: frozenset[str]
+    #: Source ids the vendor door accepts by name, for the datasets it checks individually.
+    datasets: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterReadiness:
+    """Whether anything turns this source's rows into canonical records, and if not, why not.
+
+    Three-valued exactly like :attr:`ControlTotalReadiness.clean`, and for the same reason:
+    ``None`` is "nobody handed this report an adapter layer to ask", which is not "no".  A
+    report that answered "no" to an unasked question would mark every source in the build
+    unadaptable and read as a catastrophe.
+
+    :attr:`refusal` is the point of the class.  *Not adapted* covers two opposite findings —
+    a reader nobody has written, and a reader deliberately withheld because nobody has decided
+    what the rows mean — and a boolean cannot tell them apart.
+    """
+
+    adapts: bool | None = None
+    refusal: str | None = None
+
+    @property
+    def measured(self) -> bool:
+        return self.adapts is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,11 +589,15 @@ class SourceReadiness:
     enabled: bool
     reach: Reach
     endpoint: str
+    #: How the registry row says its documents are split into records, stringified.  A property
+    #: of the source and never inferred from a filename, which is why it can be reported at all.
+    payload_format: str
     mock_modules: tuple[str, ...]
     transport: TransportReadiness
     auth: AuthReadiness
     schema: SchemaReadiness
     mapping: MappingReadiness
+    adapter: AdapterReadiness
     fidelity: MockFidelity
     golden: GoldenClaimReadiness
     control_totals: ControlTotalReadiness
@@ -495,6 +624,36 @@ class SourceReadiness:
     def talks_to_a_vendor(self) -> bool:
         """The question the whole document exists to answer honestly."""
         return self.reach is Reach.VENDOR and self.auth.configured
+
+    @property
+    def ingest(self) -> Ingest:
+        """How far this source's bytes get once they have been fetched.
+
+        Reads the transport cell first, because "no transport implements this kind" makes
+        every question after it moot — there are no bytes to split, map or adapt.  After that
+        the answer is the adapter's, three-valued, with ``None`` staying ``None``.
+        """
+        if not self.transport.implemented:
+            return Ingest.UNREADABLE
+        if self.adapter.adapts is None:
+            return Ingest.UNMEASURED
+        return Ingest.READS_AND_ADAPTS if self.adapter.adapts else Ingest.READS
+
+    @property
+    def awaiting_access(self) -> bool:
+        """Whether this row is switched off pending something somebody else has to issue.
+
+        **Deliberately independent of :attr:`ingest`, and that independence is the finding.**
+        A vendor row here is switched off because Doc 2's Week 1-3 access gate has not cleared
+        — no credential, no scheduled export, no authorised covered entity — and for no other
+        reason.  It is not switched off because the file cannot be read; :attr:`ingest` says
+        whether it can, separately, and for the vendor datasets it says yes.
+
+        Kept as its own property rather than folded into a status string so that no caller can
+        render the two as alternatives.  They are simultaneously true of the same source.
+        :attr:`blocked` carries the evidence for the ``ACCESS`` items behind it.
+        """
+        return not self.enabled
 
     @property
     def gaps(self) -> tuple[str, ...]:
@@ -702,15 +861,98 @@ def _credential_kind_for(resolver: str) -> str | None:
     return None
 
 
+def _self_describing_tables(module: ModuleType) -> Iterator[Mapping[str, Any]]:
+    """Every module-level mapping whose values each carry a ``source_id`` equal to their key.
+
+    The shape :func:`~recon.connectors.vendors.mappings_by_source_id` builds.  Requiring the
+    values to agree with the keys rather than trusting any dict of strings is what keeps
+    ``__builtins__`` and every other incidental mapping out of the answer — and it is why a
+    vendor module can grow a third dataset without anything here being told.
+
+    Factored out because two callers now need it and they must not be able to disagree about
+    what counts as a mapping table: :func:`vendor_mappings` wants the keys, and
+    :func:`source_mappings` wants the objects behind them.
+    """
+    for name, value in sorted(vars(module).items()):
+        if name.startswith("_") or not isinstance(value, Mapping) or not value:
+            continue
+        if all(
+            isinstance(key, str) and getattr(entry, "source_id", None) == key
+            for key, entry in value.items()
+        ):
+            yield value
+
+
+def source_mappings() -> dict[str, Any]:
+    """Source id -> the mapping object declared for it, for the sources that have one.
+
+    The same walk :func:`vendor_mappings` does, keeping the objects instead of counting their
+    keys, because two cells now want to read a *declaration* off the mapping rather than merely
+    know one exists: the vendor's own name for the dataset, and which of its columns carries a
+    row's arrival time.
+
+    Deliberately typed loosely and read with ``getattr``.  This module has no business knowing
+    the mapping class, and a report that imported it would stop working the day a vendor needed
+    a different one — which is precisely the day the report is worth reading.
+    """
+    found: dict[str, Any] = {}
+    for module in _submodules(_VENDORS_PACKAGE):
+        vendor = getattr(module, "VENDOR", None)
+        if not isinstance(vendor, str) or not vendor:
+            continue
+        for table in _self_describing_tables(module):
+            for key, entry in table.items():
+                found.setdefault(key, entry)
+    return dict(sorted(found.items()))
+
+
+def adapter_coverage(adapters: object) -> AdapterCoverage:
+    """What the ingest layer accepts, found on the object a caller hands in.
+
+    **Found by shape, never by name.**  The dispatch table is "a non-empty mapping whose every
+    value is callable"; a per-dataset allow list is "a non-empty set of strings".  That is the
+    same discovery discipline the rest of this module uses, and the reason for it here is
+    concrete: those tables are private to the layer that owns them, they are free to be renamed
+    tomorrow, and a report keyed on today's spelling would answer a renamed table with silence.
+    A shape survives a rename; a name does not.
+
+    Nothing found is ever called.  Both members of :class:`AdapterCoverage` are sets of names,
+    so this stays a description of what exists rather than becoming one step from running an
+    ingest — which is the line the module docstring draws and this function sits closest to.
+
+    Raises:
+        ValueError: nothing on the object looks like a dispatch table.  Loud on purpose: the
+            quiet alternative marks every source in the build unadaptable and reads as a
+            catastrophe, which is the one failure an honesty report cannot afford.
+    """
+    systems: set[str] = set()
+    datasets: set[str] = set()
+    for name, value in sorted(vars(adapters).items()):
+        if name.startswith("__"):
+            continue
+        if isinstance(value, Mapping) and value and all(callable(item) for item in value.values()):
+            systems.update(str(key) for key in value)
+        elif (
+            isinstance(value, (set, frozenset))
+            and value
+            and all(isinstance(item, str) for item in value)
+        ):
+            datasets.update(value)
+    if not systems:
+        raise ValueError(
+            f"{getattr(adapters, '__name__', adapters)!r} carries nothing shaped like an "
+            "adapter dispatch table — no non-empty mapping whose every value is callable. "
+            "Answering 'nothing adapts' here would mark every source unadaptable and read as "
+            "a catastrophe, so this raises rather than guessing."
+        )
+    return AdapterCoverage(source_systems=frozenset(systems), datasets=frozenset(datasets))
+
+
 def vendor_mappings() -> dict[str, tuple[str, tuple[str, ...]]]:
     """Vendor -> (mapping module path, the source ids it declares).
 
-    Every module in ``recon.connectors.vendors`` that names a ``VENDOR`` is a mapping module.
-    The source ids come from a module-level mapping **that is self-describing**: every value
-    carries a ``source_id`` equal to its own key, which is the shape
-    :func:`~recon.connectors.vendors.mappings_by_source_id` builds.  Requiring the values to
-    agree with the keys rather than trusting any dict of strings is what keeps ``__builtins__``
-    and every other incidental mapping out of the answer.
+    Every module in ``recon.connectors.vendors`` that names a ``VENDOR`` is a mapping module;
+    the source ids come from its self-describing tables (:func:`_self_describing_tables`).
 
     Beacon's module has no such table — its payloads are keyed by kind rather than by source
     — so it contributes a vendor with an empty id tuple, which is what
@@ -722,15 +964,8 @@ def vendor_mappings() -> dict[str, tuple[str, tuple[str, ...]]]:
         if not isinstance(vendor, str) or not vendor:
             continue
         ids: list[str] = []
-        for name, value in sorted(vars(module).items()):
-            if name.startswith("_") or not isinstance(value, Mapping) or not value:
-                continue
-            if not all(
-                isinstance(key, str) and getattr(entry, "source_id", None) == key
-                for key, entry in value.items()
-            ):
-                continue
-            ids.extend(key for key in value if key not in ids)
+        for table in _self_describing_tables(module):
+            ids.extend(key for key in table if key not in ids)
         found[vendor] = (module.__name__, tuple(sorted(ids)))
     return found
 
@@ -1147,6 +1382,52 @@ def _fidelity_for(
     )
 
 
+def _adapter_for(
+    source: Source,
+    coverage: AdapterCoverage | None,
+    per_source: bool,
+) -> AdapterReadiness:
+    """Whether the ingest layer would turn this source's rows into records, and if not, why.
+
+    One rule, applied to every source, written once.  It reads in two steps because the two
+    refusals mean different things:
+
+    * A source system nothing dispatches on has **no adapter at all**.  Its rows are fetched,
+      split and contract-checked, and then stop — which is a true and useful thing to report,
+      and a thing no cell on this report said until there was somewhere to say it.
+    * A source whose *dataset* a mapping declares individually is checked by name a second
+      time, because the door that serves it checks by name: one adapter can serve several of a
+      vendor's datasets and decline one of them on the grounds that its rows describe something
+      else.  That is a decision about meaning, not a reader nobody wrote, and the refusal says
+      so rather than leaving a reader to assume the weaker explanation.
+
+    ``per_source`` rather than the source id alone, so the second check only applies where a
+    per-dataset declaration exists to be checked against.  A source with no mapping of its own
+    is answered entirely by the first step, which is the honest answer for a generated feed.
+    """
+    if coverage is None:
+        return AdapterReadiness()
+    system = str(source.source_system)
+    if system not in coverage.source_systems:
+        return AdapterReadiness(
+            adapts=False,
+            refusal=(
+                f"no adapter is registered for {system}: these rows are fetched, split and "
+                "contract-checked, and they do not become canonical records"
+            ),
+        )
+    if per_source and source.source_id not in coverage.datasets:
+        return AdapterReadiness(
+            adapts=False,
+            refusal=(
+                f"the adapter for {system} serves this vendor and does not accept this "
+                "dataset. The file is readable and the rows are contract-checked; what is "
+                "missing is a decision about what they mean, not a reader"
+            ),
+        )
+    return AdapterReadiness(adapts=True)
+
+
 def _golden_for(
     source: Source,
     coverage: Mapping,
@@ -1248,6 +1529,7 @@ def build_report(
     control_totals: sqlite3.Connection | None = None,
     vendor_dir: Path | str | None = None,
     settings: config.Settings | None = None,
+    adapters: object | None = None,
 ) -> ReadinessReport:
     """Derive the readiness of every source from the objects that define them.
 
@@ -1270,6 +1552,12 @@ def build_report(
         settings: used only to locate ``feeds_dir`` and ``vendor_dir``.  ``None`` loads the
             default profile, and a failure to do so is not fatal — the six generated feeds
             are then simply absent from the report rather than the report being absent.
+        adapters: the ingest layer's adapter module, or anything carrying the same shapes, from
+            which :func:`adapter_coverage` reads what will be turned into canonical records.
+            **Handed in rather than imported**, which is what keeps the connectors/ingest seam
+            intact — the caller that owns both layers does the wiring.  ``None`` means nobody
+            was asked, and every source's :attr:`SourceReadiness.ingest` is then
+            :attr:`Ingest.UNMEASURED`, which is reported as "not measured" and never as "no".
     """
     root = _repo_root() if repo_root is None else Path(repo_root)
     environ = os.environ if env is None else env
@@ -1297,6 +1585,8 @@ def build_report(
 
     transports = transport_implementations()
     mappings = vendor_mappings()
+    declared_mappings = source_mappings()
+    coverage_of_adapters = None if adapters is None else adapter_coverage(adapters)
     mocks = _mock_modules()
     tallies = mock_field_tallies(root)
     evidence = evidence_index(root)
@@ -1317,6 +1607,8 @@ def build_report(
         )
         auth = _auth_for(source, transports, environ, secrets_file)
         mapping_module, mapping_ids = mappings.get(source.vendor, (None, ()))
+        per_source = source.source_id in mapping_ids
+        declared = declared_mappings.get(source.source_id)
         counts = totals.get(source.source_id)
         built.append(
             SourceReadiness(
@@ -1325,14 +1617,18 @@ def build_report(
                 enabled=source.enabled,
                 reach=_reach(source.endpoint),
                 endpoint=source.endpoint,
+                payload_format=str(source.payload_format),
                 mock_modules=mocks.get(source.vendor, ()),
                 transport=transport,
                 auth=auth,
                 schema=_schema_for(source, active_registry),
                 mapping=MappingReadiness(
                     module=mapping_module,
-                    per_source=source.source_id in mapping_ids,
+                    per_source=per_source,
+                    dataset=getattr(declared, "dataset", None),
+                    received_at_column=getattr(declared, "received_at_column", None),
                 ),
+                adapter=_adapter_for(source, coverage_of_adapters, per_source),
                 fidelity=_fidelity_for(source, tallies, known_evidence),
                 golden=_golden_for(source, coverage, traces),
                 control_totals=ControlTotalReadiness(
@@ -1380,6 +1676,15 @@ def build_report(
             "is Doc 2 step 6 and is out of scope by decision.",
             "Every connector in this build talks to a local mock or a local directory. No "
             "row below has exchanged a byte with a vendor system.",
+            # The third note, and the one that exists because its absence was actively
+            # misleading.  Readable and awaiting-access are simultaneously true of the same
+            # vendor row, and a reader who takes the switched-off flag to mean the file cannot
+            # be read draws exactly the wrong conclusion about what is left to do.
+            "Whether a source can be read and whether we are allowed to fetch it are two "
+            "questions, and a vendor row here answers yes to the first and no to the second. "
+            "A row that reads and does not adapt is a third answer again: the file is "
+            "readable and contract-checked, and what is missing is a decision about what its "
+            "rows mean.",
         ),
     )
 
@@ -1428,6 +1733,27 @@ def _reach_cell(row: SourceReadiness) -> str:
     return "not configured"
 
 
+def _ingest_cell(row: SourceReadiness) -> str:
+    """How far the bytes get, in words that cannot be read as an access answer.
+
+    None of the four phrases mentions a credential, a gate or being switched on, and that is
+    the constraint rather than an accident: this cell and :func:`_access_cell` sit beside each
+    other, and a reader who can tell them apart at a glance is the entire point of the pair.
+    """
+    if row.ingest is Ingest.READS_AND_ADAPTS:
+        return "reads and adapts"
+    if row.ingest is Ingest.READS:
+        return "reads, no adapter"
+    if row.ingest is Ingest.UNREADABLE:
+        return "no transport moves its bytes"
+    return "not measured"
+
+
+def _access_cell(row: SourceReadiness) -> str:
+    """Whether anybody has let us fetch this yet — and nothing whatever about readability."""
+    return "awaiting access" if row.awaiting_access else "switched on"
+
+
 def render_markdown(report: ReadinessReport) -> str:
     """The whole report as one document.  Byte-identical for identical inputs.
 
@@ -1460,9 +1786,14 @@ def render_markdown(report: ReadinessReport) -> str:
             "",
             "## Gate evidence table",
             "",
-            "| source | vendor | stage | reaches | transport | auth | schema | mapping | "
-            "mock fidelity | golden claims | control totals | gaps | blocked |",
-            "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+            # ``ingest`` and ``access`` are two columns and never one.  They answer different
+            # questions about the same row and are true at the same time; one column would have
+            # to pick which of the two to say, and the one it dropped is the one a reader would
+            # then assume.
+            "| source | vendor | stage | reaches | ingest | access | transport | auth | "
+            "schema | mapping | mock fidelity | golden claims | control totals | gaps | "
+            "blocked |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
     )
 
@@ -1476,6 +1807,8 @@ def render_markdown(report: ReadinessReport) -> str:
                     row.vendor,
                     row.stage.value,
                     _reach_cell(row),
+                    _ingest_cell(row),
+                    _access_cell(row),
                     _yes_no(row.transport.implemented) + f" ({row.transport.kind})",
                     (
                         "not required"
@@ -1626,6 +1959,27 @@ def render_source(row: SourceReadiness) -> str:
             if row.mapping.implemented
             else "none"
         )
+        + (f" — the vendor calls this dataset `{row.mapping.dataset}`" if row.mapping.dataset else "")
+    )
+    if row.mapping.arrival_time:
+        lines.append(f"  - arrival time: {_cell(row.mapping.arrival_time)}")
+
+    # The two lines this document grew because one line was answering both questions and could
+    # only ever answer one of them.  They are adjacent on purpose: a reader who sees "reads and
+    # adapts" directly above "awaiting access" cannot come away thinking the file is unreadable.
+    lines.append(
+        f"- **Ingest**: {_ingest_cell(row)} — documents are split as `{row.payload_format}`"
+        + (f". {_cell(row.adapter.refusal)}" if row.adapter.refusal else "")
+    )
+    lines.append(
+        "- **Access**: "
+        + (
+            "the registry row is switched off; what is outstanding is a credential, not a "
+            "reader"
+            if row.awaiting_access
+            else "the row is switched on"
+        )
+        + " — a separate question from the ingest line above, and true at the same time"
     )
     lines.append(
         "- **Mock**: "
@@ -1792,6 +2146,27 @@ def _mapping_dict(mapping: MappingReadiness) -> dict[str, Any]:
         "module": mapping.module,
         "per_source": mapping.per_source,
         "implemented": mapping.implemented,
+        "dataset": mapping.dataset,
+        "received_at_column": mapping.received_at_column,
+        # The sentence, not just the column name.  A client that turned a null column into
+        # words itself would have to decide what a missing arrival time means, and the honest
+        # answer — we know when the file landed and not when the row did — is exactly the kind
+        # of thing a UI would round up to "no timestamp".
+        "arrival_time": mapping.arrival_time,
+    }
+
+
+def _adapter_dict(adapter: AdapterReadiness) -> dict[str, Any]:
+    """Three-valued, with the refusal carried beside it.
+
+    ``adapts: null`` is "nobody was asked", which is not ``false``.  ``refusal`` is what makes
+    ``false`` readable: it distinguishes a reader nobody has written from a reader deliberately
+    withheld, and those two are opposite findings that a boolean renders identically.
+    """
+    return {
+        "adapts": adapter.adapts,
+        "measured": adapter.measured,
+        "refusal": adapter.refusal,
     }
 
 
@@ -1858,13 +2233,29 @@ def _source_dict(row: SourceReadiness) -> dict[str, Any]:
         # ``LOCAL_MOCK`` into words itself would be free to choose flattering ones.
         "reaches": _reach_cell(row),
         "endpoint": row.endpoint,
+        "payload_format": row.payload_format,
         "is_vendor": row.is_vendor,
         "talks_to_a_vendor": row.talks_to_a_vendor,
+        # ═══ two keys, never one ═══
+        #
+        # ``ingest`` says how far the bytes get; ``awaiting_access`` says whether anybody has
+        # let us go and fetch them.  They are routinely both interesting about the same source
+        # at the same moment — a vendor dataset here reads and adapts *and* waits on a
+        # credential — so a single status string would have to drop one of them, and whichever
+        # it dropped is the one a client would then invent for itself.
+        #
+        # ``ingest_summary`` is the rendered phrase, for the same reason ``reaches`` is: a
+        # client turning ``READS`` into words is a client free to choose flattering ones.
+        "ingest": row.ingest.value,
+        "ingest_summary": _ingest_cell(row),
+        "awaiting_access": row.awaiting_access,
+        "access_summary": _access_cell(row),
         "mock_modules": list(row.mock_modules),
         "transport": _transport_dict(row.transport),
         "auth": _auth_dict(row.auth),
         "schema": _schema_dict(row.schema),
         "mapping": _mapping_dict(row.mapping),
+        "adapter": _adapter_dict(row.adapter),
         "fidelity": _fidelity_dict(row.fidelity),
         "golden": _golden_dict(row.golden),
         "control_totals": _control_totals_dict(row.control_totals),

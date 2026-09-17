@@ -176,6 +176,19 @@ CLAIMS_REPORT = SecureFileMapping(
     # which is the point of addressing columns by name rather than by index.
     declared_count_column="declared_record_count",
     schema_version_column="schema_version",
+    # No ``received_at_column``, and that absence is the finding rather than an oversight.
+    # The Claims Report publishes four temporal columns and every one of them is a *date*:
+    # ``fill_date``, ``reversal_date``, ``rebate_submitted_date``, ``rebate_payment_date``.
+    # None of them says when Craneware delivered the row. Promoting one — ``fill_date`` is
+    # the tempting one, since it is the only required column of the four — would date a row
+    # to the day the drug left the shelf and hide every day of TPA lag behind it, which is
+    # the lag a 340B reconciliation exists to measure.
+    #
+    # So these rows inherit the delivery's fetch stamp. That is weaker than Verity's per-row
+    # timestamp and it is honestly weaker: we know when the file landed and we do not know
+    # when the row did. ``CRANEWARE-005`` records that no column list is published at all,
+    # so this may change the day a real customer sends a real file — and it changes here, in
+    # one declaration, not in the reader.
 )
 
 #: Every Craneware report this fabric can read, by source id.

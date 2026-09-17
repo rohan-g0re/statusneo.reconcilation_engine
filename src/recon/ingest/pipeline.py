@@ -80,6 +80,7 @@ from recon.ingest.adapters import AdapterError, CanonicalRecord
 __all__ = [
     "IngestStats",
     "UnknownSourceSystemError",
+    "MissingDeliveryStampError",
     "load_feeds",
     "load_from_sources",
     "ingest",
@@ -135,6 +136,79 @@ class UnknownSourceSystemError(RuntimeError):
         self.line_no = line_no
         self.value = value
         self.permitted = permitted
+
+
+class MissingDeliveryStampError(RuntimeError):
+    """A vendor dataset publishes no arrival time and the caller supplied no delivery stamp.
+
+    Raised at **load** time by :func:`_read_rows`, on the ``VENDOR_CSV`` branch only, when
+    :attr:`~recon.connectors.vendors.SecureFileMapping.received_at_column` is ``None`` and
+    ``fetched_at`` is still :data:`EPOCH_STAMP`.  It exists because the alternative is silence,
+    and the silence is expensive.
+
+    Craneware's Claims Report declares no arrival column on purpose — it publishes no timestamp
+    of any kind, only dates, and promoting ``fill_date`` to an arrival time would date a
+    dispense to the day the drug left the shelf and hide every day of TPA lag behind it.  So
+    those rows inherit the delivery's fetch stamp, which is the honest answer *when the stamp
+    is real*.  When it is the epoch it is not an answer at all: :func:`ingest` orders by
+    ``received_at`` and every crosswalk lookup is cursored on it, so a row dated 1970 is asked
+    to resolve at a moment when no episode has been created yet and resolves against nothing.
+
+    **Measured, not argued** — on the ``demo`` profile at the ``RECORDED`` spine, with the six
+    generated feeds loaded first so that 60 episodes exist for the vendor rows to resolve
+    against.  Craneware's export lands 33 normalized records.  Dated to the epoch, 27 of them
+    park as ``NO_KEY_MATCH``; dated to a real delivery stamp, 1 does — and that one is the
+    identifier drift the generator injects deliberately, which is the answer this leg is
+    supposed to produce.  The other 26 are an artefact of the date alone.
+
+    Those two counts are profile-dependent and are quoted to show the *shape*, which is not:
+    under the epoch nearly every row parks, under a real stamp nearly none does.  Nothing in
+    the system reports the difference — no exception, no quarantine, no control-total
+    shortfall, just a park queue that reads as a crosswalk problem and sends somebody to fix a
+    mapping that was never wrong.  A loud failure at load beats a queue full of parks that look
+    like findings.
+
+    Aborting is safe to abort *into*, on the same three counts
+    :class:`UnknownSourceSystemError` sets out: no ``raw_record`` exists yet so there is
+    nothing a quarantine row could reference, the defect is dataset-shaped rather than
+    record-shaped (one missing argument mis-dates every row of every drop, so quarantining
+    would emit one row per record for a single caller mistake), and ``load_from_sources``
+    builds the whole row list before inserting a batch — so this document lands nothing,
+    documents already loaded keep their batches, ``_checkpoint()`` is not reached, and loading
+    is idempotent on the file hash, so a corrected re-run resumes exactly here.
+
+    A ``RuntimeError`` rather than a ``ValueError``, and the two precedents in this fabric
+    genuinely pull in opposite directions, so the conflict is stated rather than hidden.
+
+    :class:`~recon.connectors.registry.UnknownPayloadFormatError` is a ``ValueError`` on the
+    test *"a fact about an argument a caller passed — a registry row written wrong, in this
+    repository, by us"*, as against a fact about the environment the process runs in.  Read
+    literally that test points at ``ValueError`` here, because the offending value did arrive
+    as an argument.  Read for what it is actually distinguishing, it points the other way: the
+    thing that is missing is when this delivery landed, and that is not a row anybody writes in
+    this repository — it comes from a clock or a delivery manifest on the machine doing the
+    fetching.  The default is ours; the fact it is standing in for is the environment's.
+
+    :class:`UnknownSourceSystemError` settles it, and its argument transfers intact:
+    :func:`_process_raw_record` catches ``(AdapterError, ValueError)`` and quarantines what it
+    catches, so a ``ValueError`` raised anywhere in this module is one refactor away from being
+    absorbed into a quarantine queue.  For an error whose entire value is that it is loud, that
+    is not a stylistic risk — being swallowed would convert this into 43 quarantine rows, which
+    is the same failure as the 35 parks wearing a different reason code.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        source_id: str,
+        document: str,
+        dataset: str,
+    ) -> None:
+        super().__init__(message)
+        self.source_id = source_id
+        self.document = document
+        self.dataset = dataset
 
 
 #: Which source system each feed file carries.  The 340B feed carries two, distinguished per
@@ -203,9 +277,29 @@ class IngestStats:
 #: (requirement §4.11), but *permitted* is not the same as *unavoidable*.  Every random
 #: stream in this system is seeded from a canonical string and ``ingest_batch.loaded_at`` is
 #: pinned to the epoch, precisely so that the same seed produces the same bytes.  Reading a
-#: real clock here by default would break that for no gain: nothing downstream may read
-#: ``fetched_at``, so a fixed value costs nothing and keeps a test's database reproducible.
-#: A deployment that wants a real timestamp passes one.
+#: real clock here by default would break that for no gain on the six generated feeds, every
+#: one of which carries its own ``received_at`` on every record and so never consults this.
+#:
+#: **One path downstream does read it, and this comment used to say none did.**  That was
+#: true when it was written, and the ``VENDOR_CSV`` branch of :func:`_read_rows` made it
+#: false: a vendor dataset whose mapping declares no ``received_at_column`` takes this value
+#: as the arrival time of every row in the delivery.  A comment that reads as verified and is
+#: not is worse than no comment, so it is corrected here rather than softened.
+#:
+#: The epoch is not a harmless placeholder on that path.  :func:`ingest` orders by
+#: ``received_at`` and every crosswalk lookup is cursored on it, so rows dated 1970 sort to
+#: the very front of the timeline and are asked to resolve before any episode exists.
+#: Measured on the ``demo`` profile: of the 33 records Craneware's export lands, 27 park as
+#: ``NO_KEY_MATCH`` when dated to the epoch and 1 does when dated to a real delivery stamp —
+#: and that 1 is the identifier drift the generator injects on purpose.  The counts move with
+#: the profile; the shape does not.  Nothing raises either way; the queue simply reads as a
+#: crosswalk problem.
+#:
+#: So that one path refuses this value by name instead of inheriting it — see
+#: :class:`MissingDeliveryStampError`.  A deployment passes the moment the delivery actually
+#: landed.  A caller loading only the generated feeds keeps the default and is unaffected, and
+#: so is any vendor dataset that declares an arrival column: Verity's rows carry their own
+#: stamp and never reach the fallback at all.
 EPOCH_STAMP = "1970-01-01T00:00:00Z"
 
 
@@ -300,6 +394,7 @@ def load_from_sources(
                     source.source_system,
                     source_id=source.source_id,
                     document=document.name,
+                    fetched_at=fetched_at,
                 )
             )
             # F2.  Before the batch row exists, not after.  A batch written first and then
@@ -424,6 +519,7 @@ def _read_rows(
     *,
     source_id: str = "<unregistered>",
     document: str = "<unnamed>",
+    fetched_at: str = EPOCH_STAMP,
 ) -> Iterable[tuple[str, str | None, str, SourceSystem]]:
     """Yield ``(payload_json, record_id, received_at, source_system)`` per source row.
 
@@ -464,6 +560,79 @@ def _read_rows(
                     document=document,
                     line_no=line_no,
                 ),
+            )
+        return
+
+    if fmt is PayloadFormat.VENDOR_CSV:
+        from recon.connectors import vendors as vendor_mappings
+        from recon.connectors.transport import Document
+
+        mapping = vendor_mappings.mapping_for(source_id)
+
+        # Checked once per document, before a single row is parsed, because it is a fact about
+        # the dataset and the call rather than about any row — reporting it per row would be 43
+        # copies of one mistake.  A dataset that declares an arrival column never reaches this:
+        # its rows carry their own stamp and the fallback is unused, which is why Verity keeps
+        # loading on the default.
+        if mapping.received_at_column is None and fetched_at == EPOCH_STAMP:
+            raise MissingDeliveryStampError(
+                f"{mapping.source_id!r} ({mapping.vendor} {mapping.dataset!r}) publishes no "
+                "per-row arrival time, so every row of "
+                f"{document!r} inherits the delivery's fetch stamp — and no delivery stamp was "
+                f"supplied, so it is still the {EPOCH_STAMP} default. Pass load_from_sources "
+                "the moment this delivery actually landed. Defaulting would date the whole "
+                "file to 1970, which sorts it to the very front of the timeline where no "
+                "episode exists yet: the rows resolve against nothing and park as "
+                "NO_KEY_MATCH, and nothing anywhere reports that the date was the cause.",
+                source_id=mapping.source_id,
+                document=document,
+                dataset=mapping.dataset,
+            )
+
+        parsed = vendor_mappings.read(mapping, Document(name=document, text=text))
+
+        # Detail rows and unrecognised rows both land; only the trailer is dropped. The
+        # trailer is the one row that is genuinely not a claim — it describes the file, and
+        # ``control_totals`` has already read it as the declared count before we got here.
+        # An unrecognised row is the opposite case: it may well be a claim under a
+        # ``record_type`` this mapping has never seen, and dropping it would remove a record
+        # from the count the trailer is about to be checked against — a silent shortfall in
+        # the one number that exists to catch shortfalls. So it lands with its bytes intact
+        # and fails the contract at adaptation, which is a quarantine somebody can read.
+        # The row is stored in the **vendor's** spelling, not this fabric's. Renaming here
+        # would defeat the check that has not run yet: ``_process_raw_record`` validates every
+        # payload against the contract registered for its source id, and that contract
+        # describes the file as the vendor writes it — ``ndc_11`` on Verity, ``ndc11`` on
+        # Craneware. A payload arriving pre-renamed would be checked against a shape it no
+        # longer has. Renaming is the adapter's job, one step later, once the shape is proven.
+        for line_no, row in (*parsed.rows, *parsed.unrecognised):
+            record: dict[str, Any] = {
+                key: (value if value != "" else None) for key, value in row.items()
+            }
+            stamp = vendor_mappings.received_at(mapping, row, fallback=fetched_at)
+            # Three keys this fabric adds to the vendor's own. The contract ignores fields it
+            # does not declare, so they travel without being mistaken for columns.
+            #
+            # ``received_at`` is the one that mattered: a vendor export publishes no column by
+            # that name, the pipeline orders everything it holds by it, and resolving it needs
+            # the per-dataset declaration plus the fetch stamp — neither of which an adapter
+            # holding only a payload can see. Resolving it here is what unblocked the leg.
+            record["received_at"] = stamp
+            record["source_id"] = mapping.source_id
+            record["dataset"] = mapping.dataset
+            yield (
+                json.dumps(record, separators=(",", ":"), sort_keys=True),
+                # No source record id. Verity stamps an ``accumulation_id`` on every row and
+                # Craneware stamps nothing, so the only spelling available across both vendors
+                # is the natural key — and that is the crosswalk's business, not the raw
+                # layer's. Identity here is the payload hash, as it is for every bank row.
+                None,
+                stamp,
+                # Attributed from the registry row and never from the payload. A vendor export
+                # publishes no ``source_system`` column, so consulting the payload for one
+                # would read ``None`` on every row of every file and then fall back here
+                # anyway — with a lookup in between that could only ever go wrong.
+                default_source_system,
             )
         return
 

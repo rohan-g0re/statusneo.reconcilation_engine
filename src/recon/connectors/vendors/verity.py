@@ -158,6 +158,11 @@ ACCUMULATIONS = SecureFileMapping(
     },
     natural_key_fields=_NATURAL_KEY,
     reversal=_REVERSAL,
+    # The qualification decision is the event this dataset reports, so the moment it was
+    # decided is the moment the row became true. The alternative on this file is
+    # ``fill_date``, which is when the drug was dispensed — days to weeks earlier, and not a
+    # fact about when Verity told us anything.
+    received_at_column="qualification_received_at",
 )
 
 #: The rebate money: one row per paid dispense, drawn from the lines inside a payment batch.
@@ -190,6 +195,12 @@ INVOICES = SecureFileMapping(
     },
     natural_key_fields=_NATURAL_KEY,
     reversal=_REVERSAL,
+    # ``batch_received_at`` and not ``payment_effective_date``, and the distinction is the
+    # one the field comment above already draws: effective date is when the money counts,
+    # arrival is when we learned of it. The pipeline orders by arrival because a cursor asks
+    # *what did we know by now* — so dating these rows by effective date would let an
+    # evaluation see a payment before the batch announcing it had landed.
+    received_at_column="batch_received_at",
 )
 
 #: Every Verity dataset this fabric can read, by source id.

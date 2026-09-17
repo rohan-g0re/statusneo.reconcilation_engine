@@ -47,12 +47,26 @@ def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any
     from recon.engine import run as engine
     from recon.generators import orchestrator
     from recon.ingest import pipeline
+    from recon.mocks import coverage
 
     if rebuild:
         migrate.rebuild(settings.db_path)
 
     generation = orchestrator.generate(settings)
     hashes = orchestrator.write_outputs(settings, generation)
+
+    # The vendor exports are written here rather than inside ``write_outputs`` because they are
+    # *derived from* the feeds it just wrote: ``coverage.write_all`` re-reads the six feed files
+    # and the identifier sidecar off disk and re-dresses them in each vendor's own layout. Putting
+    # the call in ``write_outputs`` would make ``recon.generators`` import ``recon.mocks``, and the
+    # mocks are downstream of generation by design — they format what the generators decided and
+    # decide nothing themselves.
+    #
+    # Until this line existed the vendor layer was reachable only from the test suite, so
+    # ``data/generated/<profile>/vendor/`` held the identifier sidecar and nothing else: every
+    # Verity dataset and Craneware report was real code with no output a human could open. A
+    # connector whose payloads only exist inside a pytest tmp dir cannot be demonstrated.
+    coverage.write_all(settings)
 
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = connection.connect(settings.db_path)
@@ -384,13 +398,26 @@ def create_app(settings: Settings | None = None):
         to be empty; ``live_vendor_connection_statement`` is the sentence that goes with it, and
         both are computed by :mod:`recon.connectors.readiness` rather than by the client, so no
         front end can render a connection this build has not made.
+
+        **The adapter module is handed in, and this route is the only place that could do it.**
+        The report has to say whether a source's rows become canonical records — the difference
+        between "we read this file" and "we read this file and deliberately stop at the rows" —
+        and that fact lives in :mod:`recon.ingest.adapters`, on the far side of a seam the
+        report keeps deliberately: ``readiness`` imports nothing from ``recon.ingest``, and a
+        test asserts it on the import graph. An API route is the composition root that owns both
+        layers, so the wiring belongs here and the rule stays over there. No rule is written in
+        this function; :func:`recon.connectors.readiness.adapter_coverage` reads the answer off
+        the module by shape, and omitting the argument would report "not measured" rather than
+        "no".
         """
         from recon.connectors import readiness
+        from recon.ingest import adapters
 
         with open_conn() as conn:
             report = readiness.build_report(
                 control_totals=conn,
                 settings=app.state.settings,
+                adapters=adapters,
             )
         return readiness.as_dict(report)
 

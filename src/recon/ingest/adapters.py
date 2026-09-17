@@ -709,6 +709,172 @@ def _adapt_tpa(payload: dict[str, Any]) -> CanonicalRecord:
     return record
 
 
+#: The vendor datasets that describe a qualification decision, and therefore the ones
+#: :func:`_adapt_vendor_export` can adapt.
+#:
+#: ``verity_invoices`` is mapped, contract-checked and deliberately **not** here.  It is the
+#: rebate money — ``invoice_line_amount`` against ``batch_total_rebate_amount`` — which is a
+#: ``REBATE_BATCH`` parent with ``REBATE_DISPENSE_LINE`` children, not a qualification.
+#: Pushing it through this adapter would produce a record whose ``status_code`` is null and
+#: whose money is nowhere, and the batch/line split it actually needs is a decision about how
+#: one invoice row relates to the batch above it that no evidence we hold answers.  A loud
+#: refusal is worth more than a plausible record: this is the same call as leaving the
+#: prescriber-affiliation inference out, where a weak answer proved worse than no answer.
+_QUALIFICATION_DATASETS = frozenset({"verity_accumulations", "craneware_claims_report"})
+
+
+def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
+    """One row of a 340B TPA's own export, under this fabric's spelling.
+
+    The connector half of ``_adapt_tpa``.  Both produce ``TPA_QUALIFICATION`` because both
+    describe the same event — a TPA deciding a dispense qualifies — and a second record kind
+    meaning that would have made the engine's evidence map depend on which door the fact
+    came through.  What differs is only the door: ``_adapt_tpa`` reads the synthetic
+    ``tpa_340b_events.jsonl``, this reads what Verity and Craneware actually deliver.
+
+    **The rename happens here and not in the reader**, which is why this function begins by
+    looking up a mapping it was not handed.  The raw layer stores the vendor's own columns so
+    the registered contract can be checked against the shape the vendor can be held to; by
+    the time a payload reaches an adapter that check has passed, and renaming is safe.
+
+    **A reversed row produces a parent and exactly one child.**  Both vendors declare a flag
+    representation — the dispense and its reversal ride one row — so a reader looking for a
+    second, correcting row would find none and report the reversal as never having happened.
+    One ``TPA_REVERSAL`` child, never two, is requirement B3's *"not zero, not two"* arriving
+    as a record rather than as a count.
+    """
+    from recon.connectors import vendors as vendor_mappings
+
+    mapping = vendor_mappings.mapping_for(payload["source_id"])
+    if mapping.source_id not in _QUALIFICATION_DATASETS:
+        raise AdapterError(
+            f"{mapping.source_id} is mapped and readable but has no adapter: it does not "
+            "describe a qualification decision, and adapting it as one would land a record "
+            "whose status is null and whose meaning is invented"
+        )
+    record = vendor_mappings.canonical(mapping, payload)
+
+    ndc11 = record.get("ndc11")
+    hcpcs = record.get("hcpcs")
+    if not ndc11 and not hcpcs:
+        raise AdapterError(
+            f"{mapping.source_id} row identifies no drug: it carries neither an NDC nor a "
+            "J-code, so there is no key on which it could ever reach a dispense"
+        )
+    fill_date = keys.wire_date_to_iso(record["fill_date"])
+
+    # Shaped for ``_tpa_lookup_keys``, which reads the feed's spelling because that is the
+    # spelling it was written for. Building the four names it needs is cheaper and far less
+    # fragile than teaching it a second vocabulary, and it keeps one key-choice rule for both
+    # doors — a vendor row and a feed row describing the same dispense must produce the same
+    # key, or the crosswalk silently splits one claim into two.
+    for_keys = {
+        "rx_number": record.get("rx_number"),
+        "pharmacy_npi": record.get("pharmacy_npi"),
+        "provider_npi": record.get("provider_npi"),
+        "hcpcs": hcpcs,
+    }
+    natural = "|".join(vendor_mappings.natural_key(mapping, payload))
+    reversed_row = vendor_mappings.is_reversed(mapping, payload)
+
+    canonical_fields = {
+        "event_type": "QUALIFICATION_DECISION",
+        "qualification_status": record.get("qualification_status"),
+        "disqualification_reason": record.get("disqualification_reason"),
+        "manufacturer": record.get("manufacturer"),
+        # **Relayed, not asserted, and the prefix is load-bearing.**
+        #
+        # Both vendors print the manufacturer's answer in their own export — Craneware under
+        # ``manufacturer_status``, Verity under ``batch_line_manufacturer_status``. Writing
+        # either into the canonical ``manufacturer_status`` key would make a TPA the author of
+        # a decision DOC2-004 gives to Beacon, and ``connectors/authority.py`` refuses it:
+        # the breach is never the vendor printing a value, it is us letting that value become
+        # the canonical fact.
+        #
+        # This is not theoretical. The first version of this adapter wrote the plain key and
+        # nine Craneware rows — every rejected claim in the profile — quarantined as
+        # SOURCE_AUTHORITY_BREACH, taking their perfectly valid qualification down with them.
+        # Under a relayed name the row keeps both: the qualification it owns, and a record of
+        # what the TPA says it heard, which a dossier can show and no verdict can rest on.
+        "relayed_manufacturer_status": record.get("manufacturer_decision_status"),
+        "relayed_rejection_reason": record.get("rejection_reason"),
+        "covered_entity_id": record.get("covered_entity_id"),
+        "hin": record.get("hin"),
+        "wholesaler_invoice_number": record.get("wholesaler_invoice_number"),
+        "reversal_reason": record.get("reversal_reason"),
+        # Provenance, carried so a dossier can say which of a vendor's datasets a fact came
+        # from. One source system covers every file a vendor sends, so without this a Verity
+        # accumulation and a Verity invoice are indistinguishable once they are rows.
+        "vendor": mapping.vendor,
+        "dataset": mapping.dataset,
+        "source_id": mapping.source_id,
+    }
+
+    parent = CanonicalRecord(
+        record_kind=RecordKind.TPA_QUALIFICATION,
+        source_system=SourceSystem(payload["source_system"])
+        if payload.get("source_system")
+        else _VENDOR_SOURCE_SYSTEMS[mapping.vendor],
+        received_at=payload["received_at"],
+        # The vendor assigns no row id — Craneware stamps nothing at all — so identity is the
+        # dataset plus the natural key. It is stable across redeliveries of the same file,
+        # which is what makes a vendor re-sending yesterday's export collapse to nothing
+        # rather than double every qualification in it.
+        idempotency_key=f"{mapping.source_id}|{natural}",
+        canonical=canonical_fields,
+        pharmacy_npi=record.get("pharmacy_npi"),
+        provider_npi=record.get("provider_npi"),
+        rx_number=record.get("rx_number"),
+        ndc11=ndc11,
+        date_of_service=fill_date,
+        covered_entity_id=record.get("covered_entity_id"),
+        hcpcs=hcpcs,
+        status_code=record.get("qualification_status"),
+        looks_up=_tpa_lookup_keys(for_keys, ndc11, fill_date),
+    )
+
+    if reversed_row:
+        parent.children.append(
+            CanonicalRecord(
+                record_kind=RecordKind.TPA_REVERSAL,
+                source_system=parent.source_system,
+                received_at=parent.received_at,
+                idempotency_key=f"{mapping.source_id}|{natural}|REVERSAL",
+                canonical={
+                    "event_type": "DISPENSE_REVERSAL",
+                    "reversal_reason": record.get("reversal_reason"),
+                    "reversal_quantity": record.get("reversal_quantity"),
+                    "representation": mapping.reversal.representation,
+                    "vendor": mapping.vendor,
+                    "dataset": mapping.dataset,
+                    "source_id": mapping.source_id,
+                },
+                pharmacy_npi=record.get("pharmacy_npi"),
+                provider_npi=record.get("provider_npi"),
+                rx_number=record.get("rx_number"),
+                ndc11=ndc11,
+                date_of_service=fill_date,
+                covered_entity_id=record.get("covered_entity_id"),
+                hcpcs=hcpcs,
+                looks_up=parent.looks_up,
+            )
+        )
+    return parent
+
+
+#: Which source system a vendor's rows are attributed to when the payload does not say.
+#:
+#: The payload normally does not say: a vendor export publishes no ``source_system`` column,
+#: so attribution comes from the registry row that fetched the file and arrives on the raw
+#: record rather than inside it.  This is the fallback for a payload adapted directly — a
+#: fixture in a test, most often — and it is a dict rather than a default so that a third
+#: vendor cannot quietly inherit the second one's identity.
+_VENDOR_SOURCE_SYSTEMS = {
+    "verity": SourceSystem.TPA_VERITY,
+    "craneware": SourceSystem.TPA_CRANEWARE,
+}
+
+
 def _tpa_lookup_keys(
     payload: dict[str, Any], ndc11: str | None, fill_date: str
 ) -> tuple[tuple[KeyType, str], ...]:
@@ -867,6 +1033,14 @@ _DISPATCH = {
     SourceSystem.TPA_PORTAL: _adapt_tpa,
     SourceSystem.MANUFACTURER_REBATE: _adapt_tpa,
     SourceSystem.BANK: _adapt_bank,
+    # The connector door. Both vendors route to one adapter because the per-vendor difference
+    # is already data — ``SecureFileMapping`` — and a branch here would be that difference
+    # expressed a second time, in a place that could disagree with the first.
+    #
+    # ``BEACON`` is deliberately absent. Its inbound records are decisions and payments, not
+    # qualifications, and they would need their own adapter rather than a line in this table.
+    SourceSystem.TPA_VERITY: _adapt_vendor_export,
+    SourceSystem.TPA_CRANEWARE: _adapt_vendor_export,
 }
 
 

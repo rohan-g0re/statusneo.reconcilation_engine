@@ -75,6 +75,8 @@ from recon.connectors.transport import Document
 __all__ = [
     "ReversalRepresentation",
     "UnsupportedReversalRepresentationError",
+    "UnmappedSourceError",
+    "mapping_for",
     "FlagReversal",
     "ReversalEffect",
     "SecureFileMapping",
@@ -83,6 +85,7 @@ __all__ = [
     "canonical",
     "natural_key",
     "is_reversed",
+    "received_at",
     "reversal_effects",
     "net_effects_by_claim",
     "schema_violation",
@@ -289,6 +292,27 @@ class SecureFileMapping:
     #: Craneware does, so the wire names its own contract; Verity does not, so this is
     #: ``None`` and the registry's current registration is what a record is checked against.
     schema_version_column: str | None = None
+    #: Which column carries the moment this row became true, or ``None`` when the vendor
+    #: publishes no such column.
+    #:
+    #: This is the field the whole vendor leg was blocked on.  The ingest pipeline orders
+    #: everything it holds by ``received_at`` and evaluates at a cursor, so a row with no
+    #: arrival time cannot be placed on the timeline at all.  A vendor export does not carry
+    #: a column called ``received_at``: Verity's accumulations carry
+    #: ``qualification_received_at``, its invoices carry ``batch_received_at``, and both
+    #: carry ``reversal_received_at`` besides.  Choosing among them is a statement about what
+    #: the dataset *means*, which is why it is declared here per dataset rather than guessed
+    #: by a reader that can only see column names.
+    #:
+    #: ``None`` is a real answer and not an omission.  Craneware's Claims Report publishes no
+    #: timestamp of any kind — only dates: ``fill_date``, ``rebate_submitted_date``,
+    #: ``rebate_payment_date``.  Promoting one of those to an arrival time would be inventing
+    #: a fact: a fill date is when the drug left the shelf, not when Craneware told us about
+    #: it, and the gap between them is exactly the lateness a reconciliation exists to
+    #: measure.  When this is ``None`` every row inherits the delivery's own fetch stamp,
+    #: which is the honest answer — we know when the file arrived, and we do not know when
+    #: the row did.
+    received_at_column: str | None = None
 
     @property
     def control_columns(self) -> frozenset[str]:
@@ -340,6 +364,13 @@ class SecureFileMapping:
                 f"{self.source_id}: this mapping reads {unknown}, which the registered "
                 "contract does not declare. Those columns would be absent from every row of "
                 "every file, and the mapping would read None and say nothing."
+            )
+        if self.received_at_column is not None and self.received_at_column not in self.fields:
+            raise ValueError(
+                f"{self.source_id}: this mapping takes its arrival time from "
+                f"{self.received_at_column!r}, which it does not read. Every row would land "
+                "with no time on it, and the pipeline orders by arrival — so the rows would "
+                "be evaluated in whatever order the file happened to list them."
             )
         for name in self.natural_key_fields:
             if name not in self.fields.values():
@@ -497,6 +528,37 @@ def is_reversed(mapping: SecureFileMapping, row: Mapping[str, str]) -> bool:
     return mapping.reversal.flagged(row)
 
 
+def received_at(mapping: SecureFileMapping, row: Mapping[str, str], *, fallback: str) -> str:
+    """When this row became true, as text, for a pipeline that orders everything by it.
+
+    The latest timestamp the row actually carries, and never a computed one.  A row under a
+    flag representation holds one dispense's whole story, so a reversed row is true as of its
+    reversal and an un-reversed row is true as of whatever :attr:`SecureFileMapping.
+    received_at_column` names.  Taking the later of the two is what makes those one rule
+    instead of two, and it is also the conservative direction: placing a row *earlier* than
+    it was knowable would let the engine reach a verdict on evidence that had not arrived,
+    which is the one ordering mistake a cursor-based model cannot recover from.
+
+    ``fallback`` is the delivery's own fetch stamp, used when the vendor publishes no
+    timestamp at all.  It is passed in rather than read here because this module has no
+    clock and is not getting one — see ``connectors/__init__.py``.
+
+    Comparison is lexical, which is exact for the only format either vendor writes: a
+    ``YYYY-MM-DDTHH:MM:SSZ`` stamp at a fixed width in a single zone sorts identically as
+    text and as time.  A vendor that started mixing offsets would need parsing, and would
+    need a decision about which zone the file is in before parsing could be correct.
+    """
+    stamps = [
+        value
+        for value in (
+            _cell(row, mapping.received_at_column),
+            _cell(row, mapping.reversal.received_at_column) if is_reversed(mapping, row) else None,
+        )
+        if value
+    ]
+    return max(stamps) if stamps else fallback
+
+
 def reversal_effects(
     mapping: SecureFileMapping, parsed: ParsedDocument
 ) -> tuple[ReversalEffect, ...]:
@@ -589,6 +651,39 @@ def _cell(row: Mapping[str, str], column: str | None) -> str | None:
     if column is None:
         return None
     return row.get(column) or None
+
+
+class UnmappedSourceError(ValueError):
+    """A source declared ``VENDOR_CSV`` and no mapping module claims its source id.
+
+    A ``ValueError`` for the same reason
+    :class:`~recon.connectors.registry.UnknownPayloadFormatError` is one: it is a fact about
+    a registry row we wrote, not about the file that arrived.  The vendor sent something
+    perfectly valid; we forgot to say how to read it.
+    """
+
+
+def mapping_for(source_id: str) -> SecureFileMapping:
+    """The mapping registered for this source id, across every vendor module.
+
+    The import is deferred to call time and not hoisted to the top of this file, because
+    ``verity`` and ``craneware`` both import :class:`SecureFileMapping` *from* here — hoisting
+    would make the package import itself while it was still half-built.  It is also what
+    keeps the dependency pointing the right way: a vendor module knows about the shared
+    machinery, and the shared machinery does not know about any particular vendor until
+    somebody asks it for one by name.
+    """
+    from recon.connectors.vendors import craneware, verity
+
+    registered = {**verity.MAPPINGS, **craneware.MAPPINGS}
+    mapping = registered.get(source_id)
+    if mapping is None:
+        raise UnmappedSourceError(
+            f"{source_id!r} is configured to be read as a vendor export and no mapping module "
+            f"claims it. Known: {sorted(registered)}. Adding a vendor is a registry row plus a "
+            "mapping module, and this is the error that says the second half is missing."
+        )
+    return mapping
 
 
 def mappings_by_source_id(

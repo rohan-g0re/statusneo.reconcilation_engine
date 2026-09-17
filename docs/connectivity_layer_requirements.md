@@ -3,7 +3,7 @@
 **Source:** `docs/Assignment_Doc_2.pdf` (StatusNeo, *Connectivity Assessment*, 11 September 2026)
 **Branch:** `connectivity_layer`
 **Scope:** connector-ready only. Production hardening is deliberately excluded.
-**Status:** requirements only — nothing in this document is built yet.
+**Status:** this is the requirements of record, written before the build and kept as written. It is **not** a status document — waves 0–7 have since shipped, and `docs/connectivity_layer_build_plan.md` carries per-requirement status, including the requirements an adversarial review downgraded after they were recorded as closed. §1's scoring below is as of drafting and has not been restated. The one place this document reports on the build is §6, which records the vendor connector leg because the reason it was blocked was written down wrong here for a long time.
 
 > **Two hard requirements, in this order.**
 >
@@ -522,3 +522,74 @@ Connector-ready is reached when all of the following hold:
 Items 1, 4, 5, 7 and 8 are the ones worth defending in a walkthrough, and none of them depends on a vendor credential.
 
 **Explicitly not part of acceptance**, because it is step 6: scheduled unattended operation, alerting, retry-on-failure, backfill, quarantine queue, cutover parity against Inmar.
+
+---
+
+## 6. Addendum — the 340B TPA vendor leg, and the blocker that was named wrong
+
+This section exists because a reason was recorded incorrectly and stayed incorrect long enough to be believed. Correcting it quietly would lose the more useful half of the lesson.
+
+### What the record said, and what was actually true
+
+For several waves the position was that Verity and Craneware rows were off because of `DOC2-016`, Doc 2's Week 1–3 access gate — no credential, no file, nothing to turn on. That is a real constraint and it is still in force. It was not the blocker.
+
+The blocker was a missing decision, and `registry.py`'s own docstring named it correctly at the time:
+
+> the delimited reader in `ingest/pipeline.py` reads a `received_at` off every row, and a vendor export does not carry one: its timestamps are `qualification_received_at`, `batch_received_at`, `reversal_received_at`, and choosing among them is a mapping decision rather than a parsing one.
+
+The pipeline orders everything it holds by `received_at` and evaluates at a cursor, so a row with no arrival time cannot be placed on the timeline at all. A vendor export publishes no column by that name. Picking one of the candidates is a statement about what the dataset *means*, which a reader looking at column names cannot make and which nobody had made. So the rows could not be enabled, and the access gate absorbed the blame for a seam that did not exist.
+
+**The lesson is the shape of the error, not the field.** A genuine external blocker (no credentials) sat in front of an internal one (no decision) and hid it. The external blocker was true, so nobody looked past it, and "we are waiting on the vendor" is a much more comfortable sentence than "we have not decided what our own data means."
+
+### What closed it
+
+| Change | Where |
+|---|---|
+| `received_at_column`, declared per dataset, plus a `received_at(mapping, row, *, fallback)` helper and `mapping_for(source_id)` | `connectors/vendors/__init__.py` |
+| `PayloadFormat.VENDOR_CSV`, emitted by `vendor_sources()` — a vendor file routes through its mapping, not through the bank reader | `connectors/registry.py` |
+| A `VENDOR_CSV` branch in `_read_rows` | `ingest/pipeline.py` |
+| `_adapt_vendor_export`, `_QUALIFICATION_DATASETS`, `_VENDOR_SOURCE_SYSTEMS`, and `_DISPATCH` entries for `TPA_VERITY` / `TPA_CRANEWARE` | `ingest/adapters.py` |
+| `build_dataset` calls `coverage.write_all(settings)` | `api/app.py` |
+
+Two details in the reader are load-bearing. The row is stored in the **vendor's own spelling**, because the registered contract describes the shape the vendor can be held to and a pre-renamed payload would be checked against a shape it no longer has. And an unrecognised row is **carried through rather than dropped**, so it quarantines where somebody can read it instead of vanishing from the control total the trailer is about to be checked against. Only the trailer is dropped, because it describes the file rather than a claim.
+
+**`enabled=False` now means what it says.** The rows are off because nobody has sent us a credential, and not because we could not read the file if they did. That is `DOC2-016` and nothing else.
+
+### Measured
+
+The data layer used to be reachable only from the test suite — `data/generated/<profile>/vendor/` held `identifiers.jsonl` and nothing else, so every Verity dataset and Craneware report was real code with no output a human could open. `write_all` now runs inside `build_dataset`, and 17 files land there on every seed and every regenerate: five Verity datasets, five Craneware reports, five Beacon payload kinds, `coverage.json` and `COVERAGE.md`.
+
+Replaying the demo profile's six feeds and then both vendor exports in a single pass:
+
+| Source | DETAIL rows | Landed | Quarantined | Control total |
+|---|---|---|---|---|
+| `verity_accumulations` | 34 | 34 `TPA_QUALIFICATION` + 4 `TPA_REVERSAL` | 0 | declared 34, observed 34 |
+| `craneware_claims_report` | 39 | 39 `TPA_QUALIFICATION` + 4 `TPA_REVERSAL` | 0 | declared 39, observed 39 |
+
+These are the **first sources in the build that carry a declared count at all** — all six native feeds record `declared_count` as null, because none of them has a trailer. F2's check was previously executing against nothing. It now compares two numbers.
+
+### Three things that are weaker than they look, stated as weaker
+
+**Craneware has no arrival time and inherits the delivery's.** The Claims Report publishes four temporal columns and every one is a date: `fill_date`, `reversal_date`, `rebate_submitted_date`, `rebate_payment_date`. None says when Craneware handed us the row. `fill_date` was the tempting promotion — it is the only required column of the four — and it would have dated a row to the day the drug left the shelf, hiding every day of TPA lag behind it. That lag is the thing a 340B reconciliation exists to measure. So the mapping declares no arrival column and the rows take the delivery's fetch stamp: we know when the file landed, we do not know when the row did. This is genuinely weaker than Verity's per-row `qualification_received_at` and should not be presented as equivalent.
+
+**And that weakness has a measured consequence.** `load_from_sources` defaults `fetched_at` to `1970-01-01T00:00:00Z`, deliberately, so that a test database stays reproducible. Under that default every timestamp-less Craneware row sorts to the very front of the timeline, arrives before any episode exists, and parks: **35 of 43 Craneware records park as `NO_KEY_MATCH`**. Passing a realistic delivery stamp drops that to 3, which is the identifier-drift defect the generator injects on purpose. Verity never falls back and is unaffected. So the Craneware leg is correct only when the caller supplies a real delivery stamp, and the default is not one. Deciding where that stamp comes from — file mtime, listing timestamp, or the checkpoint — is open work, and it belongs to whoever owns A4. Note also that `pipeline.EPOCH_STAMP`'s own comment claims "nothing downstream may read `fetched_at`"; the `VENDOR_CSV` branch now does, and that comment is stale.
+
+**No test covers the join.** `tests/test_vendor_connector_leg.py` pins `FETCHED_AT` to `2099-01-02T03:04:05Z` and loads vendor files into a database containing no episodes. So the suite proves records land, and proves nothing about whether they reach an episode. Both of the points above were found by hand, not by the suite.
+
+### `verity_invoices` is readable and deliberately not adapted
+
+It is mapped, contract-checked and excluded from `_QUALIFICATION_DATASETS`. It carries rebate money — `invoice_line_amount` against `batch_total_rebate_amount` — which needs `REBATE_BATCH` parent and `REBATE_DISPENSE_LINE` child semantics, and how one invoice row relates to the batch above it is a question no evidence we hold answers. Pushed through the qualification adapter it would produce a record whose status is null and whose money is nowhere.
+
+So all 23 rows land and then refuse by name, with the reason carried into the quarantine detail. The refusal is loud rather than silent, which is the point — this is the same call as leaving the prescriber-affiliation inference out, where a weak answer proved worse than no answer. One wrinkle worth recording: the refusal quarantines under `UNPARSEABLE`, which is a misnomer. The file parsed perfectly; the adapter declined it. The behaviour is right and the reason code is borrowed.
+
+### E5 caught a real bug, on its first contact with real vendor rows
+
+The first version of `_adapt_vendor_export` wrote the manufacturer's answer into the canonical `manufacturer_status` and `rejection_reason` keys. `connectors/authority.py` refused it and quarantined **nine Craneware rows** as `SOURCE_AUTHORITY_BREACH` — a TPA asserting a decision Doc 2's page-2 table gives to Beacon. Nine is every rejected claim in the profile, and each one took a perfectly valid qualification down with it.
+
+The fix is to relay rather than assert: `relayed_manufacturer_status` and `relayed_rejection_reason`. The row keeps the qualification it genuinely owns *and* a record of what the TPA says it heard — something a dossier can display and no verdict can rest on. The breach was never the vendor printing the value; it was us letting that value become the canonical fact.
+
+Worth stating plainly because E5 was the requirement most likely to be dismissed as ceremony: it was the only thing standing between a plausible-looking record and nine wrong ones, and it fired the first time a real vendor row reached it.
+
+### Suite state
+
+**916 passed, 2 skipped, 1 failed.** The failure is `tests/test_query_plans.py::test_latest_verdict_walks_the_index_not_the_table`: SQLite's planner selects `sqlite_autoindex_verdict_1` over `ix_verdict_latest`. Both are index seeks, so the query does not scan, but the assertion names a specific index. It was confirmed pre-existing by stashing this work and re-running. It is reported as a failure rather than rounded to green, because rounding it is how a real failure later gets mistaken for this one.

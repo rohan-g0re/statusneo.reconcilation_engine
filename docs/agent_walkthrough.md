@@ -14,6 +14,14 @@
 > spine is **`E-000007`** (`A-04`/`C-09`, EXCEPTION): reimbursement fully reconciled at $6,638.63,
 > and a rebate approved and never paid — $1,929.00 expected, $0.00 received. That is a real
 > "approved but unpaid rebate" to point at.
+>
+> **Why the body below was not renumbered, stated so it reads as a decision and not as neglect.**
+> Assignment Doc 2 — the connectivity assessment, the connector fabric, the six-step build method,
+> the vendor-access gate — does not scope the agent layer. Re-deriving every figure in Parts II to
+> IV from a run is a large edit to a document the assignment being demonstrated does not ask about,
+> and each re-derived number is a new chance to be wrong in the same way this banner exists to
+> catch. So the example stays as an illustration of the *shape* of the flow, which is what it was
+> always good at, and the one sentence above tells you what to click instead.
 
 
 *This is the companion to `claim_walkthrough.md`. That one followed a claim through the deterministic side. This one follows a **request** through the agent side — from the moment you click a button to the moment something lands on disk. Same promise: at every stage I say what came in, what happened, what got written, and where it went. Where one program hands off to another, I stop and say so, because that is where the first document lost you. Read it straight through. About 90 minutes.*
@@ -401,7 +409,7 @@ One JSON object per line, flushed after each write. Every line has the same four
 {"seq":6,"at":"...","run_id":"a3f9","kind":"run_finished","outcome":"complete","wall_ms":19204}
 ```
 
-`kind` comes from a closed list of nineteen values. Anything else raises rather than being written — so a new kind of event cannot quietly appear in the log and be missed by everything that reads it.
+`kind` comes from a closed list of eighteen values. Anything else raises rather than being written — so a new kind of event cannot quietly appear in the log and be missed by everything that reads it.
 
 **Why a file and not a table:** because the log is not a byproduct of the run, it *is* the run. Three different things read it, and each one needs a different property:
 
@@ -503,6 +511,8 @@ tools           eight read tools          none at all
 ```
 
 The Evaluator getting a **fresh trace every round** is intentional. It should re-read the proposal cold, not carry forward its own opinion from round one.
+
+**Correction, and the honest version of the first row.** The table above describes a configuration, not the shipped default. `config.py` defaults *both* `proposer_model` and `evaluator_model` to `deepseek-chat` — the same non-thinking model. So out of the box the two rows that matter here are not different at all, and the self-preference-bias mitigation that motivated splitting them is off. Set `RECON_AGENT_EVALUATOR_MODEL` and the row becomes true; leave it and one model is grading its own homework. `agent_layer_design.md` and `DESIGN_NOTE.md` section 9 both already say this; this document was the last one still claiming an independence it does not have by default. The remaining two rows — fresh trace, no tools — hold either way, and they are the ones doing the real work.
 
 **The practitioner's detail:** the two models need completely different handling to produce structured output. The Proposer's model accepts a forced tool choice — you can say "call exactly this function" and it will. The Evaluator's thinking model returns HTTP 400 if you try that, so it has to be asked nicely and then repaired if it answers in the wrong shape. One function knows how to get either model to reliably emit one specific tool call, and that awkwardness is a real fact about the provider rather than a design choice.
 

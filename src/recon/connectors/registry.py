@@ -70,6 +70,19 @@ class PayloadFormat(StrEnum):
 
     JSONL = "jsonl"
     BANK_CSV = "bank_csv"
+    #: A delimited vendor export, split by the mapping registered for the source id rather
+    #: than by column names this module knows.
+    #:
+    #: It is a separate member from ``BANK_CSV`` because the two differ in what they can
+    #: assume, not in how they are punctuated.  ``BANK_CSV`` reads a file where every row is
+    #: a record and every record already carries a ``received_at``.  A vendor export carries
+    #: neither guarantee: it interleaves DETAIL rows with a TRAILER that declares a control
+    #: total, and it names its arrival time whatever the vendor felt like naming it — or, on
+    #: Craneware's Claims Report, does not name one at all.  Reading such a file as
+    #: ``BANK_CSV`` would hand the trailer to an adapter as though it were a dispense and
+    #: then fail on the missing timestamp, which is exactly what it did before this member
+    #: existed.
+    VENDOR_CSV = "vendor_csv"
 
 
 class UnknownPayloadFormatError(ValueError):
@@ -315,14 +328,21 @@ def vendor_sources(
     no file to fetch, so a row that declared itself ready would be asserting something nobody
     has yet been given.  Pass ``enabled=True`` when the gate has cleared for this deployment.
 
-    There is a second, sharper reason.  ``payload_format`` below is honest about the *shape* —
-    a header row, one record per line, an empty cell meaning absent — but the delimited reader
-    in ``ingest/pipeline.py`` reads a ``received_at`` off every row, and a vendor export does
-    not carry one: its timestamps are ``qualification_received_at``, ``batch_received_at``,
+    There used to be a second, sharper reason, and it is worth keeping the record of it
+    because it was the real blocker and the access gate was not.  The delimited reader in
+    ``ingest/pipeline.py`` read a ``received_at`` off every row, and a vendor export does not
+    carry one: its timestamps are ``qualification_received_at``, ``batch_received_at``,
     ``reversal_received_at``, and choosing among them is a mapping decision rather than a
-    parsing one.  So these rows are read today by ``connectors.vendors``, which maps them, and
-    not by ``load_from_sources``.  Turning one on before that seam exists would fail loudly on
-    the first row, which is survivable; leaving the reason undocumented would not be.
+    parsing one.  So these rows were read only by ``connectors.vendors``, which maps them, and
+    never by ``load_from_sources`` — turning one on would have failed on the first row.
+
+    **That seam now exists.**  ``SecureFileMapping.received_at_column`` is where each dataset
+    declares which of its timestamps is its arrival time, ``PayloadFormat.VENDOR_CSV`` routes
+    the file through the mapping rather than through the bank reader, and
+    ``adapters._adapt_vendor_export`` turns a mapped row into a ``TPA_QUALIFICATION``.  What
+    remains is only the access gate, which is what ``enabled`` is for — so these rows are now
+    off because nobody has sent us a credential, and not because we could not read the file
+    if they did.
 
     Args:
         endpoints: source id to the SFTP path that source is delivered to.  An SFTP path per
@@ -368,11 +388,15 @@ def vendor_sources(
                 source_system=declared.source_system,
                 filenames=tuple(filename_overrides.get(source_id, declared.filenames)),
                 endpoint=endpoints[source_id],
-                # ``BANK_CSV`` names a shape and not the source that first had it — a header
-                # row, one record per line, an empty cell meaning absent — and that is
-                # exactly what both vendors write.  Declaring a new member for "the same
-                # shape, a different vendor" is how a format enum becomes a vendor list.
-                payload_format=PayloadFormat.BANK_CSV,
+                # ``VENDOR_CSV`` and not ``BANK_CSV``.  The two are punctuated identically and
+                # that is exactly why the distinction took a wave to see: what differs is not
+                # the delimiter but what the reader may assume.  A bank row is a record and
+                # carries its own ``received_at``; a vendor row may be a trailer, and names
+                # its arrival time — when it has one — whatever the vendor felt like naming
+                # it.  Declaring a new member for "the same shape, a different vendor" would
+                # indeed be a format enum becoming a vendor list; this is not that.  One
+                # member serves both vendors, and a third would need none.
+                payload_format=PayloadFormat.VENDOR_CSV,
                 credential_ref=credential_overrides.get(
                     source_id, _default_credential_ref(declared.vendor)
                 ),
