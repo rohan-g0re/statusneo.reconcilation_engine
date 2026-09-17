@@ -24,6 +24,7 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -366,6 +367,210 @@ def test_a_configured_credential_flips_the_auth_cell(no_secrets):
         for item in row.blocked
     )
     assert "not-a-real-token" not in readiness.render_markdown(built)
+
+
+# ═══ derivation: what the ingest layer adapts ═══
+#
+# The one cell on this report that lives on the far side of the connectors/ingest seam.
+# ``readiness`` imports nothing from ``recon.ingest`` — ``test_the_report_module_imports_nothing
+# _from_ingest`` asserts that on the import graph — so ``adapter_coverage`` is handed the module
+# and finds the two tables on it *by shape*: a mapping whose values are all callable, and a set
+# of strings.
+#
+# The tests below import ``recon.ingest.adapters`` directly and read the same two tables *by
+# name*, which is the one thing the module under test may not do.  That asymmetry is the point,
+# and it is the same argument ``_tier_rows_for`` makes further down: a probe checked only
+# against its own output keeps agreeing with itself long after the thing it probes for has
+# moved.
+
+
+def test_adapter_coverage_finds_the_real_dispatch_table_and_the_real_allow_list():
+    """The live answer, found a second way and compared.
+
+    Equality in both directions rather than a subset, because the probe can be wrong twice
+    over.  Finding too little is the silent denial the guards below exist for; finding too
+    much would mean some unrelated collection of strings in the adapter layer had been absorbed
+    into ``datasets``, and a stray name there reads as "this dataset is adapted" — a report
+    flattering the build, which is the failure this whole module is shaped to prevent.
+    """
+    from recon.ingest import adapters
+
+    coverage = readiness.adapter_coverage(adapters)
+    assert coverage.source_systems == frozenset(str(key) for key in adapters._DISPATCH), (
+        "the shape probe and the dispatch table disagree about which source systems have an "
+        "adapter"
+    )
+    assert coverage.datasets == frozenset(adapters._QUALIFICATION_DATASETS), (
+        "the shape probe and the per-dataset allow list disagree; either the probe missed the "
+        "table, or it absorbed a second collection of strings that is not an allow list"
+    )
+    # Not a tautology: two empty sets are equal, and the whole hazard here is emptiness.
+    assert coverage.source_systems and coverage.datasets
+
+
+def test_adapter_coverage_refuses_an_object_with_no_dispatch_table():
+    """Nothing shaped like a dispatch table means the question cannot be answered at all."""
+    stand_in = SimpleNamespace(some_allow_list=frozenset({"a_dataset_name"}))
+    with pytest.raises(ValueError) as excinfo:
+        readiness.adapter_coverage(stand_in)
+    assert "dispatch table" in str(excinfo.value)
+
+
+def test_adapter_coverage_refuses_an_object_with_no_per_dataset_allow_list():
+    """The other half of the same guard, and the half that was missing.
+
+    An absent dispatch table denies every source at once, which is loud enough that a reader
+    disbelieves the page.  An absent allow list denies only the sources whose mapping declares
+    them individually — which is to say only the vendor datasets that actually have a reader —
+    and it denies them in the same words the report uses for a dataset that genuinely has none.
+    That is the answer a reader has no way to catch, so it must not be an answer at all.
+
+    The third case is the control: hand in both shapes and the same function returns both,
+    which is what makes the two failures above about the missing table rather than about the
+    stand-in.
+    """
+    only_dispatch = SimpleNamespace(some_dispatch={"A_SOURCE_SYSTEM": lambda payload: payload})
+    with pytest.raises(ValueError) as excinfo:
+        readiness.adapter_coverage(only_dispatch)
+    message = str(excinfo.value)
+    assert "allow list" in message
+    assert "deny a connector leg that works" in message, (
+        "the guard raises without saying what the quiet answer would have cost, which is the "
+        "only thing that tells the next reader why it is not simply returning an empty set"
+    )
+
+    both = SimpleNamespace(
+        some_dispatch={"A_SOURCE_SYSTEM": lambda payload: payload},
+        some_allow_list=frozenset({"a_dataset_name"}),
+    )
+    coverage = readiness.adapter_coverage(both)
+    assert coverage.source_systems == frozenset({"A_SOURCE_SYSTEM"})
+    assert coverage.datasets == frozenset({"a_dataset_name"})
+
+
+def test_a_reshaped_allow_list_cannot_silently_unadapt_a_working_source(
+    monkeypatch, no_secrets
+):
+    """The regression the guard exists for, reproduced exactly as it would arrive.
+
+    ``_QUALIFICATION_DATASETS`` is a ``frozenset`` and the probe matches sets.  Make it a
+    tuple.  Nothing changes in the layer that owns it — ``in`` works on both, and every test
+    over there still passes — and over here the probe stops matching, ``datasets`` comes back
+    empty, and the per-dataset rule answers "this adapter does not accept this dataset" for
+    every vendor dataset that adapts.  No exception, no failing test, no signal of any kind:
+    the one page in this repository whose job is to be honest about what is built would quietly
+    deny a connector leg that works.
+
+    So this asserts two things.  First that the wrong answer is real and reachable, by handing
+    the rule an empty coverage directly — otherwise the guard would be standing in front of
+    nothing.  Second that the public door now refuses to produce a report at all, which is the
+    only outcome that beats a plausible lie.
+    """
+    from recon.ingest import adapters
+
+    # The detector, armed.  A test that only asserts "this raises" passes just as happily
+    # against a build where nothing adapted in the first place.  The population actually at
+    # risk is narrower than "everything that adapts": a source is only checked against the
+    # allow list when its mapping declares it by name, so a generated feed is answered by the
+    # dispatch table alone and an empty allow list never reaches it.
+    before = readiness.build_report(env={}, secrets_file=no_secrets, adapters=adapters)
+    at_risk = [
+        source
+        for source in readiness.declared_sources()
+        if before.by_id(source.source_id).adapter.adapts
+        and before.by_id(source.source_id).mapping.per_source
+    ]
+    assert at_risk, (
+        "no source both adapts and is checked by name, so nothing is at risk from an empty "
+        "allow list and this test has nothing to prove"
+    )
+
+    # What the guard stands in front of, stated rather than described: the same source, the
+    # same rule, with the allow list empty.
+    target = at_risk[0]
+    denied = readiness._adapter_for(
+        target,
+        readiness.AdapterCoverage(
+            source_systems=frozenset({str(target.source_system)}), datasets=frozenset()
+        ),
+        True,
+    )
+    assert denied.adapts is False
+    assert "does not accept this dataset" in str(denied.refusal), (
+        f"an empty allow list reports {target.source_id} as a dataset nobody has decided the "
+        "meaning of, which is a finding rather than a lookup failure"
+    )
+
+    # And the door that a caller actually uses, after the behaviour-preserving refactor.
+    monkeypatch.setattr(
+        adapters, "_QUALIFICATION_DATASETS", tuple(adapters._QUALIFICATION_DATASETS)
+    )
+    with pytest.raises(ValueError) as excinfo:
+        readiness.build_report(env={}, secrets_file=no_secrets, adapters=adapters)
+    assert "allow list" in str(excinfo.value)
+
+
+def test_the_connectivity_endpoint_tells_no_adapter_apart_from_no_decision(tmp_path):
+    """Registry row to probe to cell to JSON, over HTTP, on the three states that matter.
+
+    *Not adapted* covers two opposite findings and the payload has to keep them apart.  One
+    vendor dataset here is mapped, contract-checked, perfectly readable and deliberately has no
+    adapter — the rows are rebate money rather than a qualification decision, and adapting them
+    as one would land a record whose meaning was invented.  The other two have a reader.  A
+    boolean renders those identically; ``refusal`` is what does not.
+
+    The names are written out rather than derived, and that is deliberate here.  Deriving the
+    expected set from ``_QUALIFICATION_DATASETS`` would assert the allow list against itself and
+    keep passing if a dataset silently dropped out of it.  ``readiness.py`` may not name a
+    vendor; a test may, and this is where one has to.  The last assertion ties the pinned names
+    back to the registry, so a seventh vendor row fails here rather than going unchecked.
+    """
+    pytest.importorskip(
+        "fastapi", reason="the API layer is an optional extra: pip install -e '.[api]'"
+    )
+    from fastapi.testclient import TestClient
+
+    from recon.api.app import create_app
+    from recon.config import load_settings
+
+    adapted = {"verity_accumulations", "craneware_claims_report"}
+    refused = {"verity_invoices"}
+    assert adapted | refused == set(registry.VENDOR_SOURCE_IDS), (
+        "the secure-file registry rows have changed; this test pins which of them have an "
+        "adapter and the pinned list no longer covers them"
+    )
+
+    response = TestClient(create_app(load_settings("demo", data_dir=tmp_path))).get(
+        "/api/connectivity"
+    )
+    assert response.status_code == 200
+    rows = {row["source_id"]: row for row in response.json()["sources"]}
+
+    for source_id in sorted(adapted):
+        row = rows[source_id]
+        assert row["adapter"]["adapts"] is True, (
+            f"{source_id} has an adapter and the endpoint says it does not; the report is "
+            "denying a connector leg that works"
+        )
+        assert row["ingest"] == "READS_AND_ADAPTS"
+        assert row["adapter"]["refusal"] is None
+
+    for source_id in sorted(refused):
+        row = rows[source_id]
+        assert row["adapter"]["adapts"] is False
+        assert row["ingest"] == "READS"
+        # Readable, mapped, and refused on purpose — three facts a single cell would collapse.
+        assert row["transport"]["implemented"]
+        assert row["mapping"]["per_source"] is True
+        refusal = row["adapter"]["refusal"]
+        assert "not a reader" in refusal, (
+            f"{source_id} is refused without saying why; 'nobody wrote a reader' and 'nobody "
+            "has decided what these rows mean' are opposite findings"
+        )
+        assert "no adapter is registered" not in refusal, (
+            f"{source_id} is reported as having no adapter at all, which is the other refusal "
+            "and is not true of it"
+        )
 
 
 # ═══ derivation: mock fidelity ═══

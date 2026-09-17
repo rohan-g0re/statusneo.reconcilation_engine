@@ -9,10 +9,13 @@ sorted to the very front of the timeline, and asked to resolve before any episod
 
 **Nothing reported it.**  No exception, no quarantine, no control-total shortfall: just a park
 queue full of ``NO_KEY_MATCH`` rows that reads as a crosswalk problem and sends somebody to fix
-a mapping that was never wrong.  On the ``demo`` profile at the ``RECORDED`` spine, 27 of the
-33 records Craneware lands parked under the epoch and 1 parks under a real delivery stamp —
-and that 1 is the identifier drift the generator injects on purpose, which is the answer this
-leg is supposed to produce.  26 of the 27 were an artefact of the date alone.
+a mapping that was never wrong.  On the ``demo`` profile at the ``RECORDED`` spine the export's
+39 ``DETAIL`` rows land 43 records — 39 qualifications and 4 reversals — and 35 of them park
+under the epoch against 3 under a real delivery stamp.  Those 3 are the identifier drift the
+generator injects on purpose, which is the answer this leg is supposed to produce; the other
+32 were an artefact of the date alone.  (An earlier revision of this docstring said 33, 27 and
+26.  The figures below are recomputed from the committed export and the counts they describe
+are asserted as shares, not as numbers, which is what keeps the two from drifting again.)
 
 :class:`~recon.ingest.pipeline.MissingDeliveryStampError` now refuses that call, and this file
 is its only coverage.  ``tests/test_vendor_connector_leg.py`` and ``tests/test_file_pattern.py``
@@ -73,9 +76,9 @@ DELIVERED_AT = "2099-03-04T05:06:07Z"
 #:
 #: The two regimes this separates are not close together, which is why a fraction is honest
 #: here and a hardcoded count is not.  Under a real stamp the only rows that park are the ones
-#: the generator deliberately broke — 1 of 33 on the committed profile, 3% — because identifier
-#: drift is injected on a small fraction of claims by design.  Under the epoch, 27 of 33 park,
-#: 82%, because no episode exists yet for any of them to resolve against.  A fifth sits
+#: the generator deliberately broke — 3 of 43 on the committed profile, 7% — because identifier
+#: drift is injected on a small fraction of claims by design.  Under the epoch, 35 of 43 park,
+#: 81%, because no episode exists yet for any of them to resolve against.  A fifth sits
 #: between the two with room on both sides, so this fails on the defect and not on the
 #: generator drawing a slightly different spine.
 MAX_PARKED_SHARE = 5
@@ -289,6 +292,14 @@ def test_craneware_rows_land_at_exactly_the_delivery_stamp_the_caller_passed(con
     legitimately carries its own ``reversal_date``, and ``vendors.received_at`` takes the
     later of the stamps a row holds — so those rows sit at the reversal.  Skipping them would
     let a fallback that had quietly started overwriting real timestamps pass unnoticed.
+
+    **Read back from ``raw_record`` and not from ``normalized_record``, on purpose**: the
+    fallback is applied in ``_read_rows``, so the raw layer is the first place the stamp
+    exists and the last place before an adapter could quietly substitute something else.
+
+    Keyed on ``source_line_no``, which this test also pins as *the line in the file* rather
+    than the record's position in the delivery — see the comment below on the compensating
+    index this used to carry.
     """
     mapping, _path, parsed = _export(generated, CRANEWARE_SOURCE_ID)
     expected: dict[int, str] = {}
@@ -313,10 +324,19 @@ def test_craneware_rows_land_at_exactly_the_delivery_stamp_the_caller_passed(con
         conn, [_source(generated, CRANEWARE_SOURCE_ID)], fetched_at=DELIVERED_AT
     )
 
-    # Keyed on the file's own line numbers. ``source_line_no`` is the raw layer's 1-based
-    # position within the delivery, and the reader yields detail rows in file order, so the
-    # two orders are the same one — which is what lets a landed row be checked against the
-    # file row it came from rather than against a count of them.
+    # Keyed on the file's own line numbers, and that is now literally true rather than nearly
+    # true.  ``source_line_no`` is the line ``vendors.read`` read the record from — header
+    # counted, so the first DETAIL row is line 2 — carried out of ``_read_rows`` on the row
+    # itself.
+    #
+    # It used to be the record's 1-based *position* in the yielded stream, and this loop used
+    # to walk ``enumerate(sorted(expected.items()), start=1)`` and index ``landed[position]``
+    # to absorb the difference.  That compensation was the defect wearing a disguise: position
+    # and line differ by one on any file with a header, so every vendor quarantine row sent a
+    # person to the line above the one that failed, and they differ by more than one the moment
+    # a file carries an unrecognised row, because the reader appends those after every detail
+    # row regardless of where they sat.  Comparing the two mappings on the same key is the
+    # assertion the compensating index was hiding.
     landed = {
         row["source_line_no"]: row["received_at"]
         for row in conn.execute("SELECT source_line_no, received_at FROM raw_record")
@@ -324,9 +344,19 @@ def test_craneware_rows_land_at_exactly_the_delivery_stamp_the_caller_passed(con
     assert len(landed) == len(expected), (
         f"{len(expected)} DETAIL rows and {len(landed)} raw records"
     )
-    for position, (line_no, stamp) in enumerate(sorted(expected.items()), start=1):
-        assert landed[position] == stamp, (
-            f"line {line_no} landed at {landed[position]!r} rather than {stamp!r}. For an "
+    assert min(landed) == 2, (
+        f"the first record landed on line {min(landed)}, and line 1 of this file is the "
+        "header. A 1 here means ``source_line_no`` is the record's position in the delivery "
+        "rather than its line in the file, which is the off-by-one that sends somebody "
+        "reading a quarantine row to the row above the one that failed."
+    )
+    assert set(landed) == set(expected), (
+        f"the raw rows claim lines {sorted(set(landed) - set(expected))} that the file's "
+        f"DETAIL rows do not occupy, and miss {sorted(set(expected) - set(landed))}"
+    )
+    for line_no, stamp in sorted(expected.items()):
+        assert landed[line_no] == stamp, (
+            f"line {line_no} landed at {landed[line_no]!r} rather than {stamp!r}. For an "
             "un-reversed row that means the delivery stamp the caller passed was not the one "
             "the rows inherited — most likely a date column was promoted to an arrival time, "
             "which hides the TPA lag the reconciliation is measuring."
@@ -344,7 +374,7 @@ def test_craneware_rows_reach_episodes_instead_of_parking_when_the_stamp_is_real
     This is the test that would have caught the original bug, and the only one in the suite
     that asserts a vendor row ever reaches an episode at all.  Everything else about the
     vendor leg — the reader, the mapping, the reversal rule, the adapter — was already correct
-    while 26 of 27 parks were an artefact of the delivery date, because every one of those
+    while 32 of 35 parks were an artefact of the delivery date, because every one of those
     layers is observable without a crosswalk hit and none of them changes when the date does.
 
     The ordering is the experiment.  The six generated feeds are ingested **first**, so 60

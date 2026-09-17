@@ -446,6 +446,11 @@ class AdapterCoverage:
     Handed to :func:`build_report` by a caller that owns both layers, never imported here.
     Both members are *names* and neither is a callable: this report describes what exists, and
     holding a function it could call would make it one step from becoming an ingest run.
+
+    **Neither member is ever empty.**  :func:`adapter_coverage` raises rather than build one
+    that is, because an empty set here is read downstream as a denial — "no adapter is
+    registered", "this dataset is not accepted" — and a denial produced by a failed lookup is
+    indistinguishable, in the rendered document, from one that is true.
     """
 
     #: Source systems an adapter is registered for, stringified.
@@ -920,10 +925,39 @@ def adapter_coverage(adapters: object) -> AdapterCoverage:
     so this stays a description of what exists rather than becoming one step from running an
     ingest — which is the line the module docstring draws and this function sits closest to.
 
+    ═══ Why a probe, when a probe is brittle ═══
+
+    A shape survives a rename but it does not survive a reshape, and that is a real hazard
+    rather than a theoretical one.  Change the allow list from ``frozenset({...})`` to a tuple
+    in the layer that owns it and nothing over there notices: every ``in`` test still works and
+    every test over there still passes.  Over here the probe stops matching and the allow list
+    comes back empty.  Both alternatives to the probe were weighed and both are worse.
+
+    *Reading the table by its name* trades one silent failure for another.  The name is private
+    to the other layer and is no more stable than the shape is; a rename produces exactly the
+    same empty answer, and it puts a decision that belongs to the ingest layer — what its own
+    tables are called — into a cell of this report.
+
+    *Widening the probe to any collection of strings* — tuple, list, set — would survive the
+    reshape, and would pay for it by absorbing every other module-level list of strings the
+    adapter layer happens to hold.  A stray name in :attr:`AdapterCoverage.datasets` reads as
+    "this dataset is adapted", which is the direction of error this whole document exists to
+    prevent: a report that flatters the build.  A narrow probe can only ever find too little.
+
+    So the probe stays narrow and what is fixed is the **silence**.  Both guards below raise, so
+    there are two outcomes and not three: either both tables are found, or no report is produced
+    at all.  There is no path on which this quietly returns a smaller answer than the truth.
+
+    The durable fix is on the far side of the seam and is not this module's to make.  An adapter
+    layer that published its own coverage — a documented attribute or function on its public
+    surface — would let this read a declaration instead of probing for one.  Until one exists,
+    the pair of guards is what stands in for it.
+
     Raises:
-        ValueError: nothing on the object looks like a dispatch table.  Loud on purpose: the
-            quiet alternative marks every source in the build unadaptable and reads as a
-            catastrophe, which is the one failure an honesty report cannot afford.
+        ValueError: nothing on the object looks like a dispatch table, or nothing on it looks
+            like a per-dataset allow list.  Loud on purpose in both cases: an absent table and
+            an empty one are indistinguishable from out here and have opposite answers, and
+            every quiet answer available is a wrong one that reads as a finding.
     """
     systems: set[str] = set()
     datasets: set[str] = set()
@@ -944,6 +978,24 @@ def adapter_coverage(adapters: object) -> AdapterCoverage:
             "adapter dispatch table — no non-empty mapping whose every value is callable. "
             "Answering 'nothing adapts' here would mark every source unadaptable and read as "
             "a catastrophe, so this raises rather than guessing."
+        )
+    if not datasets:
+        # The same guard as the one above, for the same reason, and it is here because its
+        # absence was the more dangerous of the two.  A missing dispatch table denies every
+        # source at once, which is loud enough that a reader disbelieves the whole page.  A
+        # missing allow list denies only the sources whose mapping names them individually —
+        # which is to say only the vendor datasets that actually have a reader — and it denies
+        # them in the same words the report uses for a dataset that genuinely has none.  That
+        # is a lie a reader has no way to catch, on the one page whose entire purpose is to be
+        # trustworthy about what is built.
+        raise ValueError(
+            f"{getattr(adapters, '__name__', adapters)!r} carries nothing shaped like a "
+            "per-dataset allow list — no non-empty set of strings. An empty answer is not a "
+            "safe default here: every source whose mapping declares it by name would come "
+            "back not adapted, so this report would deny a connector leg that works, in the "
+            "same words it uses for one that has no reader at all. From out here a table that "
+            "does not exist and a table this probe failed to match look identical and mean "
+            "opposite things, so this raises rather than picking one."
         )
     return AdapterCoverage(source_systems=frozenset(systems), datasets=frozenset(datasets))
 

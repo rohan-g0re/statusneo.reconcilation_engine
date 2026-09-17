@@ -84,6 +84,7 @@ __all__ = [
     "read",
     "canonical",
     "natural_key",
+    "row_id",
     "is_reversed",
     "received_at",
     "reversal_effects",
@@ -313,6 +314,30 @@ class SecureFileMapping:
     #: which is the honest answer — we know when the file arrived, and we do not know when
     #: the row did.
     received_at_column: str | None = None
+    #: Which column carries the vendor's own id for the row, or ``None`` when the vendor
+    #: stamps none.
+    #:
+    #: A vendor-assigned row id is the identity **the vendor itself uses**:
+    #: ``accumulation_id`` is what Verity calls that accumulation when it re-sends it,
+    #: corrects it, or is asked about it.  A natural key is a different kind of thing
+    #: entirely — it is a *guess* about identity, assembled out of the claim's own facts,
+    #: and it is wrong in exactly one case: when two real rows describe one claim.  A partial
+    #: fill and its completion, same Rx, same NDC, same day, are two rows, two accumulations
+    #: and two real events, and they agree on all five natural-key components.  Keyed on the
+    #: natural key they collapse into one another, and the collapse is silent — no quarantine,
+    #: no park, no control-total shortfall, just a counter going up.  Thirteen of the
+    #: thirty-four accumulation rows in the demo export carry an empty ``rx_number`` besides,
+    #: because a clinic-administered drug has no prescription, so for a third of the file the
+    #: guess is four components with a gap in it.
+    #:
+    #: **``None`` is a real answer and not an omission.**  Craneware's Claims Report stamps no
+    #: id of any kind — its whole column list is in ``craneware.py`` and the nearest thing to
+    #: an identifier is ``rx_number``, empty on fourteen of its thirty-nine rows.  A caller
+    #: that gets ``None`` from :func:`row_id` has no vendor identity to key on and must choose
+    #: a fallback knowingly and name it as a fallback in its own code.  What it must not do is
+    #: treat both answers the same and key everything on the natural key, because then the
+    #: dataset that *has* an identity loses it for the sake of the one that does not.
+    row_id_column: str | None = None
 
     @property
     def control_columns(self) -> frozenset[str]:
@@ -372,6 +397,14 @@ class SecureFileMapping:
                 "with no time on it, and the pipeline orders by arrival — so the rows would "
                 "be evaluated in whatever order the file happened to list them."
             )
+        if self.row_id_column is not None and self.row_id_column not in self.fields:
+            raise ValueError(
+                f"{self.source_id}: this mapping takes its row id from "
+                f"{self.row_id_column!r}, which it does not read. Every row would report no "
+                "id at all, and a caller that read that as 'this vendor stamps none' would "
+                "fall back to the natural key — on a dataset that has a perfectly good "
+                "identity sitting in a column nobody opened."
+            )
         for name in self.natural_key_fields:
             if name not in self.fields.values():
                 raise ValueError(
@@ -415,8 +448,42 @@ class ParsedDocument:
 
     @property
     def parsed_record_count(self) -> int:
-        """How many detail rows were actually read."""
+        """How many **DETAIL** rows were read — and only those.
+
+        The question it answers is *"how many rows of this file did the mapping recognise as
+        claims"*, which is what a reader asks when it wants to know the parse found everything
+        it was supposed to find.
+
+        It is deliberately **not** the number to reconcile a trailer against, and the two part
+        company the moment a file carries an unrecognised row. Use
+        :attr:`observed_record_count` for that.
+        """
         return len(self.rows)
+
+    @property
+    def observed_record_count(self) -> int:
+        """How many rows of this file are **records**: detail plus unrecognised.
+
+        The number requirement F2's control total compares against the trailer's declaration.
+        It is named after the parameter that consumes it —
+        ``control_totals.reconcile_or_fail(..., observed_count=...)``, whose own docstring says
+        *"the number of records the document yielded, never the number of lines"* — so the
+        wiring reads as one word matching another rather than as a judgement call at the call
+        site.
+
+        **Unrecognised rows count because they are records.** The ingest pipeline lands them,
+        bytes intact, so they fail the contract at adaptation where a person can read the
+        quarantine; a control total that left them out would report a shortfall against a file
+        that arrived complete, and the reason code would say the delivery was truncated when it
+        was not. **Trailers do not count, because a trailer is the envelope.** Counting it
+        would report one phantom extra record in every healthy file — which is the same bug in
+        the other direction, and the one this property exists to stop being reintroduced by
+        whichever count happened to be nearer to hand.
+
+        In a healthy file this equals :attr:`parsed_record_count` exactly. That is precisely
+        why the difference has to be a name: it is invisible until the day it matters.
+        """
+        return len(self.rows) + len(self.unrecognised)
 
     @property
     def declared_record_count(self) -> int | None:
@@ -516,6 +583,33 @@ def natural_key(mapping: SecureFileMapping, row: Mapping[str, str]) -> tuple[str
     """
     record = canonical(mapping, row)
     return tuple((record.get(name) or "") for name in mapping.natural_key_fields)
+
+
+def row_id(mapping: SecureFileMapping, row: Mapping[str, str]) -> str | None:
+    """The vendor's own id for this row, or ``None`` when the vendor stamps none.
+
+    The counterpart to :func:`natural_key`, and the two are not interchangeable: this is the
+    identity the vendor assigned, that one is an identity inferred from the claim's facts. See
+    :attr:`SecureFileMapping.row_id_column` for why the difference is worth a field.
+
+    Read in the **vendor's** spelling — like :func:`received_at` and unlike
+    :func:`natural_key` — because :attr:`SecureFileMapping.row_id_column` names a column of
+    the file rather than a canonical field. The row a caller already holds is the row to pass.
+
+    Two different absences arrive as one ``None``, deliberately, for :func:`_cell`'s reason: a
+    dataset that declares no ``row_id_column`` and a row whose id cell is empty are both "no
+    vendor identity here", and both leave the caller with the same thing to decide.
+
+    **What a caller does with each answer.** A string is the identity the vendor itself uses,
+    so it is what an idempotency key should be built from — the same row re-delivered tomorrow
+    carries the same id, and two genuinely different rows carry two different ones, which is
+    the property a natural key cannot offer. ``None`` means the vendor supplies no identity and
+    the caller has to invent one; the natural key is the tempting invention and
+    :attr:`SecureFileMapping.row_id_column` says what it costs. This function will not invent
+    it, because a fallback chosen inside a shared reader is a fallback every vendor silently
+    inherits, including the ones that never needed it.
+    """
+    return _cell(row, mapping.row_id_column)
 
 
 def is_reversed(mapping: SecureFileMapping, row: Mapping[str, str]) -> bool:

@@ -148,7 +148,10 @@ CREATE TABLE normalized_record (
                      'REMITTANCE','REMITTANCE_CLAIM_LINE','PROVIDER_LEVEL_ADJUSTMENT',
                      'MEDICAL_SUBMISSION','MEDICAL_ACKNOWLEDGMENT',
                      'TPA_QUALIFICATION','TPA_REBATE_REQUEST','TPA_MANUFACTURER_DECISION',
-                     'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION')),
+                     'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION',
+                     -- Beacon's inbound shapes, added by the connector layer per DOC2-007.
+                     'BEACON_ACKNOWLEDGMENT','BEACON_VALIDATION_OUTCOME',
+                     'BEACON_PAYMENT_REFERENCE')),
   source_system    TEXT NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
                      'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',

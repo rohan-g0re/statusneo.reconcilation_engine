@@ -124,6 +124,21 @@ class Source:
     #: The *name* of a credential, resolved at fetch time. Never a secret.
     credential_ref: str | None = None
     mapping_version: str = config.ADAPTER_VERSION
+    #: Which key on a JSONL payload carries the moment the record became true.
+    #:
+    #: The six generated feeds all spell it ``received_at`` and the default keeps them
+    #: unchanged.  Beacon does not: its acknowledgement says ``received_at``, its validation
+    #: outcome says ``decided_at``, its rebate status says ``as_of`` and its payment
+    #: reference says ``batch_received_at``.  Four payloads, four spellings, one of them a
+    #: coincidence.
+    #:
+    #: A default-valued field rather than a new :class:`PayloadFormat` member, because a new
+    #: format would need its own ``_read_rows`` branch to do precisely what the JSONL branch
+    #: already does.  This is the same class of decision as
+    #: ``SecureFileMapping.received_at_column`` and it matters for the same reason: a row
+    #: stamped from the wrong column is not a row with a cosmetic error, it is a row placed
+    #: somewhere else on the timeline.
+    received_at_field: str = "received_at"
     enabled: bool = True
     transport: Transport | None = field(default=None, compare=False, repr=False)
 
@@ -448,6 +463,18 @@ def vendor_sources(
 #: manufacturer's *status* is a fact Beacon relays, so ``MANUFACTURER_REBATE`` remains
 #: entitled to set it; the *identifier* is a fact Beacon originates, so nothing else may.  A
 #: fabricated ``beacon_id`` does not fail to resolve — it resolves to the wrong episode.
+#: Where each Beacon source keeps its arrival time.  Beacon names it four different things
+#: across four payloads, and only the acknowledgement happens to agree with the six feeds.
+#:
+#: ``beacon_submissions`` is absent because it fetches nothing: it is an outbound row and
+#: there is no inbound payload to stamp.
+_BEACON_RECEIVED_AT_FIELDS: dict[str, str] = {
+    "beacon_acknowledgements": "received_at",
+    "beacon_validation_outcomes": "decided_at",
+    "beacon_rebate_status": "as_of",
+    "beacon_payment_references": "batch_received_at",
+}
+
 _BEACON_ROWS: dict[str, _VendorRow] = {
     "beacon_submissions": _VendorRow(
         vendor="beacon",
@@ -563,6 +590,11 @@ def beacon_sources(
                 filenames=tuple(filename_overrides.get(source_id, declared.filenames)),
                 endpoint=endpoints[source_id],
                 payload_format=PayloadFormat.JSONL,
+                # Each Beacon payload keeps its arrival time under its own name. Declared
+                # here on the row rather than guessed by the reader, for the reason
+                # ``received_at_field`` gives: promoting the wrong column does not fail, it
+                # silently files the record at the wrong point on the timeline.
+                received_at_field=_BEACON_RECEIVED_AT_FIELDS.get(source_id, "received_at"),
                 credential_ref=credential_overrides.get(
                     source_id, _default_api_credential_ref(declared.vendor)
                 ),

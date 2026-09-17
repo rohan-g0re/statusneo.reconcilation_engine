@@ -266,6 +266,18 @@ _ROLE_BY_KIND = {
     str(RecordKind.TPA_REVERSAL): EvidenceRole.REVERSAL,
     str(RecordKind.REBATE_DISPENSE_LINE): EvidenceRole.REBATE_LINE,
     str(RecordKind.BANK_TRANSACTION): EvidenceRole.BANK_CREDIT,
+    # Beacon's three inbound kinds.  Mapping them is not optional housekeeping: the lookup
+    # below defaults to ``EvidenceRole.ADJUDICATION``, so a kind missing from this table is
+    # not refused — it is silently cited as the episode's pharmacy adjudication evidence.
+    #
+    # They are mapped here and deliberately NOT added to ``dimensions._KIND_BUCKETS``.
+    # ``gather_evidence`` appends to ``citations`` for every row *before* it looks up a
+    # bucket, so an unbucketed kind is gathered, cited and visible on the trace while
+    # contributing to no dimension.  That is the whole safety property of this wave: the
+    # records land, they are inspectable, and they provably move no verdict.
+    str(RecordKind.BEACON_ACKNOWLEDGMENT): EvidenceRole.REBATE_SUBMISSION,
+    str(RecordKind.BEACON_VALIDATION_OUTCOME): EvidenceRole.REBATE_SUBMISSION,
+    str(RecordKind.BEACON_PAYMENT_REFERENCE): EvidenceRole.REBATE_SUBMISSION,
 }
 
 

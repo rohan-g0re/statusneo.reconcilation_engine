@@ -742,6 +742,12 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
     second, correcting row would find none and report the reversal as never having happened.
     One ``TPA_REVERSAL`` child, never two, is requirement B3's *"not zero, not two"* arriving
     as a record rather than as a count.
+
+    ═══ Identity: the vendor's row id, and what it costs when there is none ═════════
+
+    See :func:`_vendor_idempotency_key`.  It is a function and not two lines inline because
+    the two datasets get genuinely different guarantees out of it and the weaker one has to be
+    written down where it is chosen.
     """
     from recon.connectors import vendors as vendor_mappings
 
@@ -774,7 +780,7 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
         "provider_npi": record.get("provider_npi"),
         "hcpcs": hcpcs,
     }
-    natural = "|".join(vendor_mappings.natural_key(mapping, payload))
+    identity = _vendor_idempotency_key(mapping, payload)
     reversed_row = vendor_mappings.is_reversed(mapping, payload)
 
     canonical_fields = {
@@ -816,11 +822,7 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
         if payload.get("source_system")
         else _VENDOR_SOURCE_SYSTEMS[mapping.vendor],
         received_at=payload["received_at"],
-        # The vendor assigns no row id — Craneware stamps nothing at all — so identity is the
-        # dataset plus the natural key. It is stable across redeliveries of the same file,
-        # which is what makes a vendor re-sending yesterday's export collapse to nothing
-        # rather than double every qualification in it.
-        idempotency_key=f"{mapping.source_id}|{natural}",
+        idempotency_key=identity,
         canonical=canonical_fields,
         pharmacy_npi=record.get("pharmacy_npi"),
         provider_npi=record.get("provider_npi"),
@@ -839,7 +841,11 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
                 record_kind=RecordKind.TPA_REVERSAL,
                 source_system=parent.source_system,
                 received_at=parent.received_at,
-                idempotency_key=f"{mapping.source_id}|{natural}|REVERSAL",
+                # Derived from the parent's, so the child inherits whichever guarantee the
+                # parent got. A reversal is not a record in its own right — it is the reversal
+                # *of this dispense* — so a child that identified itself independently could
+                # survive a parent that collapsed, or collapse under a parent that did not.
+                idempotency_key=f"{identity}|REVERSAL",
                 canonical={
                     "event_type": "DISPENSE_REVERSAL",
                     "reversal_reason": record.get("reversal_reason"),
@@ -860,6 +866,71 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
             )
         )
     return parent
+
+
+def _vendor_idempotency_key(mapping: Any, payload: dict[str, Any]) -> str:
+    """Identity for one vendor row: the vendor's own id, or a named fallback when it has none.
+
+    ``_insert_tree``'s rule is that idempotency keys on the source record id and never on a
+    natural key alone, and its docstring gives the reason: two genuine business events that
+    share a natural key are two events, and collapsing them deletes one.  This function is
+    where that rule is honoured on the vendor leg, and it used to break it — the key was
+    ``f"{source_id}|{natural}"`` on every dataset, including the ones that publish an id.
+
+    **When the vendor stamps a row id, that is the key.**  ``vendors.row_id`` returns it;
+    Verity writes ``accumulation_id`` on every accumulation and ``invoice_number`` on every
+    invoice line.  This is the strong case and it has every property identity needs: the same
+    row re-delivered tomorrow carries the same id, and two different rows carry two different
+    ones, however alike their claim facts happen to be.  The failure it buys back is not
+    hypothetical — a partial fill and its completion on one Rx, same NDC, same day, are two
+    accumulations with one natural key, and under the old rule the second one vanished with no
+    quarantine, no park and no control-total shortfall.
+
+    **When the vendor stamps nothing, this invents a key, and the invention is weaker.**
+    Craneware's Claims Report carries no usable id on any of its columns, so the fallback is
+    the dataset, the natural key, and *where the row sat in which delivery*:
+    ``<source_id>|<natural key>|<document>#<line_no>``.  The last component is what stops the
+    partial-fill collapse, since two rows in one file cannot share a line number.
+
+    What it costs, stated plainly rather than left to be discovered:
+
+    * **Re-delivery only collapses when the row does not move.**  Craneware sends a full file
+      every drop, and the Claims Report is a snapshot of state rather than a journal — so a
+      row that was line 12 yesterday and is line 11 today, because something above it was
+      dropped, is a *different* key and lands a second time.  The natural key had no such
+      problem; this is a real regression and it is the deliberate half of the trade.
+    * **It is bounded by file-level idempotency, which is why the trade is worth making.**
+      ``load_from_sources`` skips any document whose content hash it has already seen, so an
+      unchanged re-delivery never reaches this function at all.  The exposure is only a
+      delivery whose bytes genuinely changed — and there the outcome is a duplicate record,
+      which is visible, countable and correctable.  The old outcome was a dropped record,
+      which is none of those.  A duplicate you can find; a deletion you cannot.
+    * **The document name is part of the key**, so a vendor that started dating its filenames
+      the way Verity does would break collapsing entirely.  Craneware's mapping declares
+      ``filename_prefix="claims_report.csv"`` — the prefix is the whole name — so the name is
+      stable today, and that is a fact about a mapping rather than a promise about a vendor.
+
+    The honest fix for all three is a row id from Craneware, and ``CRANEWARE-005`` records
+    that no public column list exists to ask for one against.  Until then this is a fallback
+    that says it is a fallback, which is the difference between a weak key and a weak key
+    nobody knew about.
+    """
+    from recon.connectors import vendors as vendor_mappings
+
+    vendor_row_id = vendor_mappings.row_id(mapping, payload)
+    if vendor_row_id:
+        return f"{mapping.source_id}|{vendor_row_id}"
+
+    natural = "|".join(vendor_mappings.natural_key(mapping, payload))
+    # Added to the payload by the ``VENDOR_CSV`` branch of ``ingest.pipeline._read_rows``,
+    # which is the only place that knows them: an adapter is handed a payload and cannot see
+    # the file it came out of. Absent only for a payload adapted directly — a fixture in a
+    # test — where the natural key alone is what there is.
+    document = payload.get("document")
+    line_no = payload.get("line_no")
+    if document is None or line_no is None:
+        return f"{mapping.source_id}|{natural}"
+    return f"{mapping.source_id}|{natural}|{document}#{line_no}"
 
 
 #: Which source system a vendor's rows are attributed to when the payload does not say.
@@ -1025,6 +1096,166 @@ def _adapt_bank(payload: dict[str, Any]) -> CanonicalRecord:
 
 # ═══ dispatch ═══════════════════════════════════════════════════════════════
 
+#: Which ``payload_kind`` becomes which record kind.  ``rebate_status`` is absent on
+#: purpose — see :func:`_adapt_beacon`.
+_BEACON_KINDS = {
+    "acknowledgement": RecordKind.BEACON_ACKNOWLEDGMENT,
+    "validation_outcome": RecordKind.BEACON_VALIDATION_OUTCOME,
+    "payment_reference": RecordKind.BEACON_PAYMENT_REFERENCE,
+}
+
+#: Where each Beacon payload keeps the moment it became true.  Four payloads, four
+#: spellings, none of them ``received_at`` except the first — which is why
+#: ``registry.Source`` carries ``received_at_field`` rather than the reader assuming.
+_BEACON_RECEIVED_AT = {
+    "acknowledgement": "received_at",
+    "validation_outcome": "decided_at",
+    "payment_reference": "batch_received_at",
+}
+
+
+def _adapt_beacon(payload: dict[str, Any]) -> CanonicalRecord:
+    """One Beacon inbound payload, as a canonical record.
+
+    ``DOC2-013``'s hand-off is *"persist Beacon ID against Shields Claim Financial
+    Episode"*, and this is the half that makes it possible: a Beacon response becomes a row,
+    the row resolves to an episode, and the identifier is stored once against the record that
+    carried it.
+
+    **The acknowledgement is the bridge and the only publisher.**  It is the one payload
+    carrying both the natural 340B key and the Beacon ID, so it looks the claim up by the key
+    and publishes ``BEACON_ID`` against whatever it found.  The other two carry only the
+    Beacon ID and look it up.  That asymmetry is load-bearing: two records publishing the
+    same ``(key_type, key_value)`` pair make every lookup on it a two-hit, which the
+    crosswalk parks as ``AMBIGUOUS_KEY_MATCH`` — so a second publisher would not produce a
+    wrong answer, it would produce *no* answer, for every rebate at once.
+
+    **What this adapter may and may not say.**  ``connectors/authority.py`` makes Beacon
+    authoritative for the submission identifier and for rebate status, and makes it *not*
+    authoritative for qualification — that belongs to the TPA sources.  The outbound
+    submission payload carries ``qualification_status`` because it is our own request;
+    copying it back off an inbound record would be Beacon asserting a decision the TPA made,
+    and would quarantine every row as ``SOURCE_AUTHORITY_BREACH``.  It is relayed under
+    ``relayed_qualification_status`` instead, the same way the vendor adapter relays the
+    manufacturer's answer.
+
+    Raises:
+        AdapterError: for an unknown ``payload_kind``, for a submission fed back in, or for a
+            payload missing the timestamp its kind keeps its arrival time in.
+    """
+    kind_name = payload.get("payload_kind")
+
+    if kind_name == "submission":
+        raise AdapterError(
+            "a Beacon submission is our own outbound request, not a response, and adapting "
+            "one would record a claim as decided by the fact that we sent it. Only the four "
+            "inbound payload kinds may be ingested."
+        )
+    if kind_name == "rebate_status":
+        # Not an oversight, and not adaptable here. A rebate status is the manufacturer's
+        # decision under Beacon's name for it, so its kind is TPA_MANUFACTURER_DECISION --
+        # which ``dimensions._KIND_BUCKETS`` *does* bucket, so landing it moves verdicts.
+        # That belongs in its own measurable step rather than mixed into this one, where the
+        # delta would be unattributable.
+        raise AdapterError(
+            "a Beacon rebate_status is the manufacturer's decision under another name, and "
+            "landing it changes rebate verdicts. It is held out of this wave deliberately so "
+            "the verdict delta can be measured on its own."
+        )
+
+    record_kind = _BEACON_KINDS.get(kind_name)
+    if record_kind is None:
+        raise AdapterError(
+            f"unknown Beacon payload_kind {kind_name!r}; known: {sorted(_BEACON_KINDS)}"
+        )
+
+    beacon_id = payload.get("beacon_id")
+    if not beacon_id:
+        raise AdapterError(
+            f"a Beacon {kind_name} carries no beacon_id. The identifier is the only thing "
+            "tying an inbound payload to the submission it answers, so one without it can "
+            "reach no episode by any route."
+        )
+
+    # The arrival time the READER resolved, under the canonical spelling it wrote back.
+    #
+    # Deliberately not re-derived from ``_BEACON_RECEIVED_AT[kind_name]`` here. Beacon keeps
+    # each payload's stamp under its own name, and the registry row says which — so by the
+    # time a payload reaches an adapter that has already been settled, and settling it twice
+    # is two chances to disagree. It also matters for the one payload where the vendor's own
+    # field is legitimately null: a PENDING validation outcome has no ``decided_at`` because
+    # Beacon has not decided, and the reader dates it to the delivery. An adapter re-reading
+    # the raw field would see the null and refuse a record that is perfectly readable and
+    # perfectly true.
+    received_at = payload.get("received_at")
+    if not received_at:
+        raise AdapterError(
+            f"a Beacon {kind_name} reached the adapter with no resolved arrival time. The "
+            "reader writes one back under 'received_at' from the field the registry row "
+            f"names for this source ({_BEACON_RECEIVED_AT[kind_name]!r}); its absence means "
+            "the row did not come through load_from_sources, or the registry row is wrong."
+        )
+
+    canonical_fields: dict[str, Any] = {
+        "payload_kind": kind_name,
+        "direction": payload.get("direction"),
+        "template": payload.get("template"),
+        "covered_entity_id": payload.get("covered_entity_id"),
+        "manufacturer": payload.get("manufacturer"),
+        # Beacon's own judgement of the submission, which it owns (DOC2-004).
+        "validation_outcome": payload.get("outcome"),
+        "validation_reason_code": payload.get("reason_code"),
+        "outcome_source": payload.get("outcome_source"),
+        # The payment side. ``payment_reference`` is carried and the AMOUNT is not promoted
+        # to ``amount_cents`` -- see below.
+        "payment_reference": payload.get("payment_reference"),
+        "payment_effective_date": payload.get("payment_effective_date"),
+        "rebate_amount": payload.get("rebate_amount"),
+        "batch_total_amount": payload.get("batch_total_amount"),
+        "status": payload.get("status"),
+    }
+
+    record = CanonicalRecord(
+        record_kind=record_kind,
+        source_system=SourceSystem.BEACON,
+        received_at=str(received_at),
+        idempotency_key=(
+            f"{payload['payment_reference']}|{beacon_id}"
+            if kind_name == "payment_reference"
+            else str(beacon_id)
+        ),
+        canonical=canonical_fields,
+        beacon_id=str(beacon_id),
+        covered_entity_id=payload.get("covered_entity_id"),
+        payment_reference=payload.get("payment_reference"),
+        # **Deliberately no ``amount_cents``.** Beacon's line amount is the same money the
+        # 340B feed already reported, because the mock formats the same generated data. If
+        # this were promoted to a rebate line the engine would sum both and stamp C-14
+        # "duplicate rebate payment" on every paid episode. The figure rides in ``canonical``
+        # for the dossier, where nothing adds it up.
+        status_code=payload.get("outcome") or payload.get("status"),
+    )
+
+    if record_kind is RecordKind.BEACON_ACKNOWLEDGMENT:
+        # The bridge. It holds the natural key AND the identifier, so it is the only payload
+        # that can tie the two together -- and therefore the only one that may publish.
+        ndc11 = payload.get("ndc_11") or payload.get("ndc11")
+        date_of_service = payload.get("date_of_service")
+        if ndc11 and date_of_service:
+            fill_date = keys.wire_date_to_iso(str(date_of_service))
+            record.ndc11 = str(ndc11)
+            record.date_of_service = fill_date
+            record.pharmacy_npi = payload.get("pharmacy_npi")
+            record.provider_npi = payload.get("provider_npi")
+            record.rx_number = payload.get("rx_number")
+            record.looks_up = _tpa_lookup_keys(payload, str(ndc11), fill_date)
+        record.publishes = (keys.beacon_id(str(beacon_id)),)
+    else:
+        record.looks_up = (keys.beacon_id(str(beacon_id)),)
+
+    return record
+
+
 _DISPATCH = {
     SourceSystem.PBM_ADJUDICATION: _adapt_pbm_adjudication,
     SourceSystem.PBM_REMITTANCE: _adapt_pbm_remittance,
@@ -1037,10 +1268,13 @@ _DISPATCH = {
     # is already data — ``SecureFileMapping`` — and a branch here would be that difference
     # expressed a second time, in a place that could disagree with the first.
     #
-    # ``BEACON`` is deliberately absent. Its inbound records are decisions and payments, not
-    # qualifications, and they would need their own adapter rather than a line in this table.
+    # ``BEACON`` gets its own adapter rather than a share of the vendor one, which is what
+    # the comment that used to sit here predicted it would need: its inbound records are
+    # decisions, receipts and payments, not qualifications, so they map to different kinds
+    # and answer to a different authority domain.
     SourceSystem.TPA_VERITY: _adapt_vendor_export,
     SourceSystem.TPA_CRANEWARE: _adapt_vendor_export,
+    SourceSystem.BEACON: _adapt_beacon,
 }
 
 

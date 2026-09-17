@@ -268,6 +268,11 @@ def _records(conn: sqlite3.Connection, episode_id: str, cursor: str) -> list[sql
         "SELECT DISTINCT n.norm_id, n.raw_id, n.record_kind, n.source_system, n.received_at,"
         "       n.amount_cents, n.status_code, n.canonical, n.date_of_service, n.clp07,"
         "       n.rx_number, n.authorization_number, n.allocation_code, n.trn02,"
+        # Beacon's two identity columns. A projection naming a column this SELECT does not
+        # fetch does not read as null -- sqlite3.Row raises IndexError, and it raises inside
+        # the dossier, which is the one call the whole UI and the whole agent layer go
+        # through. That is how three new record kinds took out 39 tests at once.
+        "       n.beacon_id, n.payment_reference,"
         "       r.source_record_id, r.source_line_no, b.source_file"
         "  FROM crosswalk_key k"
         "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
@@ -493,6 +498,38 @@ RECORD_PROJECTIONS: dict[RecordKind, Projection] = {
         ),
         row=("trn02", "amount_cents"),
         simple=("direction", "amount_cents", "posting_date"),
+    ),
+    # Beacon's three inbound shapes.  Each one's ``simple`` view answers the question that
+    # kind exists to answer and nothing else -- the Beacon ID is identity and appears in
+    # ``row`` for anyone chasing a record down, not in the story.
+    RecordKind.BEACON_ACKNOWLEDGMENT: Projection(
+        body=("payload_kind", "direction", "template", "status", "covered_entity_id"),
+        row=("beacon_id",),
+        # A receipt says one thing: Beacon has it, and here is what it is called now.
+        simple=("status", "template"),
+    ),
+    RecordKind.BEACON_VALIDATION_OUTCOME: Projection(
+        body=(
+            "payload_kind", "direction", "template", "validation_outcome",
+            "validation_reason_code", "outcome_source",
+        ),
+        row=("beacon_id",),
+        # The reason code is in the story rather than filed under identity, because a
+        # rejection whose reason is one click away is a rejection nobody reads the reason
+        # for -- and requirement C3 exists to carry that reason verbatim.
+        simple=("validation_outcome", "validation_reason_code"),
+    ),
+    RecordKind.BEACON_PAYMENT_REFERENCE: Projection(
+        body=(
+            "payload_kind", "direction", "manufacturer", "rebate_amount",
+            "batch_total_amount", "payment_effective_date",
+        ),
+        row=("beacon_id", "payment_reference"),
+        # ``rebate_amount`` is text carried from the payload and is NOT ``amount_cents``:
+        # this record deliberately sets no money column, because the same payment is already
+        # counted once through the 340B feed's rebate line. Showing it and summing it are
+        # different things, and only the first is safe here.
+        simple=("rebate_amount", "payment_effective_date"),
     ),
 }
 

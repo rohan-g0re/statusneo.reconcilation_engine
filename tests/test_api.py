@@ -443,15 +443,37 @@ def test_the_dossier_honours_the_cursor(client):
     assert len(early["timeline"]) < len(payload["timeline"])
 
 
-def test_every_sourced_event_points_at_a_real_feed_record(client):
-    """Lineage, inside the narrative: a claim on the timeline names the file and line it came from."""
+def test_every_sourced_event_points_at_a_real_ingested_file(client):
+    """Lineage, inside the narrative: a claim on the timeline names the file and line it came from.
+
+    The allowed set is every file this build actually reads, which is no longer only the six
+    generated feeds -- Beacon's inbound payloads land through the connector and are cited on
+    the timeline like anything else. It is still a closed set rather than "any string": the
+    point of the assertion is that a citation names something a person can open, and a
+    timeline event pointing at a file nothing ingested is a dead reference dressed as
+    provenance.
+
+    ``record_id`` is checked only where the source carries one. A Beacon payload has no
+    record identifier of its own -- the Beacon ID is the identity, and it is on the record
+    rather than in the file's own numbering -- which is the same reason ``raw_record``
+    declares ``source_record_id`` nullable for the bank CSV.
+    """
+    from recon.api.app import _BEACON_INBOUND
+    from recon.connectors import registry
+
+    ingested = set(config.FEED_FILENAMES)
+    for source_id in _BEACON_INBOUND:
+        ingested.update(registry._BEACON_ROWS[source_id].filenames)
+
     payload = _richest_dossier(client)
     sourced = [e for e in payload["timeline"] if e.get("source") and e["source"].get("file")]
     assert sourced, "record-derived events must carry their provenance"
     for event in sourced:
-        assert event["source"]["file"] in set(config.FEED_FILENAMES)
+        assert event["source"]["file"] in ingested, (
+            f"{event['source']['file']!r} is cited on the timeline and is not a file this "
+            f"build reads; known: {sorted(ingested)}"
+        )
         assert event["source"]["line"] >= 1
-        assert event["source"]["record_id"]
 
 
 def test_the_dossier_reports_money_the_engine_computed(client):

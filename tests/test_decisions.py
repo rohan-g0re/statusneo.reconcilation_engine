@@ -15,7 +15,7 @@ import pytest
 from recon.crosswalk import keys
 from recon.db import migrate
 from recon.domain import verdicts
-from recon.domain.enums import Disposition, KeyType
+from recon.domain.enums import Disposition, KeyType, RecordKind, SourceSystem
 from recon.engine import verdicts as engine_verdicts
 
 
@@ -178,6 +178,108 @@ def test_a24_both_hot_lookups_are_indexed_on_key_type_key_value():
     assert re.search(
         r"ix_parked_key_lookup ON parked_record_key\(key_type, key_value\)", schema
     ), "the parked backward re-check must be indexed, or it is a full scan per arrival"
+
+
+# ═══ Closed vocabularies — every CHECK list must equal its enum ═════════════
+#
+# ``schema.sql`` says of ``record_kind``: "The literal list must stay in lockstep with
+# domain.enums.RecordKind; a test parses this file and asserts they match."  That sentence
+# had nothing behind it.  The only schema-vs-enum lockstep test in the repository was
+# ``test_a24_schema_check_constraints_match_the_enum`` above, which parses the ``key_type``
+# blocks and looks at nothing else — so ``record_kind`` and ``source_system``, the two other
+# closed vocabularies the schema pins with a CHECK, were unguarded in both directions.
+#
+# The gap is not cosmetic, and the reason is *where* the drift surfaces.  Adding a
+# ``RecordKind`` or ``SourceSystem`` member without editing ``schema.sql`` passes every
+# import, every adapter and every unit test that does not touch the database.  The first
+# evidence is SQLite refusing the INSERT — and that INSERT happens inside
+# ``ingest.pipeline._insert_tree``, which ``_process_raw_record`` calls at
+# ``pipeline.py:766``, *after* and outside the ``try`` that wraps adaptation
+# (``pipeline.py:700-763``).  The exception raised there is ``sqlite3.IntegrityError``,
+# which is neither an ``AdapterError`` nor a ``ValueError``, so the quarantine branch
+# cannot catch it: it propagates out through ``ingest()``'s loop and aborts the whole run
+# partway through, with earlier rows already committed.  A set comparison at definition
+# time costs nothing and converts that into a named failing assertion.
+
+
+def _sql_without_comments(schema: str) -> str:
+    """``--`` comments stripped, line by line.
+
+    The schema argues about these vocabularies in prose as well as declaring them — the
+    note beside ``ix_norm_amount_match`` contains the literal
+    ``WHERE record_kind IN ('REMITTANCE','REBATE_BATCH')`` — so the parser must read
+    constraints, not commentary.  That particular comment happens not to match the regex
+    below (it carries no ``CHECK``), and stripping first is what keeps this test from
+    depending on that coincidence.  Two tests further down this file strip comments the
+    same way for the same reason.
+    """
+    return "\n".join(line.split("--")[0] for line in schema.splitlines())
+
+
+def _check_lists(schema: str, column: str) -> list[tuple[str, set[str]]]:
+    """Every ``CHECK (<column> IN (...))`` in the schema, paired with the table it is on.
+
+    Attributing each block to a table is what makes a count mismatch actionable: the
+    failure says *which* tables were found rather than only how many.
+    """
+    sql_only = _sql_without_comments(schema)
+    tables = [(m.start(), m.group(1)) for m in re.finditer(r"CREATE TABLE (\w+)", sql_only)]
+    found: list[tuple[str, set[str]]] = []
+    for match in re.finditer(rf"CHECK\s*\(\s*{column}\s+IN\s*\(([^)]*)\)", sql_only):
+        table = next(
+            (name for start, name in reversed(tables) if start < match.start()),
+            "<outside any CREATE TABLE>",
+        )
+        found.append((table, set(re.findall(r"'([A-Z0-9_]+)'", match.group(1)))))
+    return found
+
+
+@pytest.mark.parametrize(
+    "column,enum,expected_tables",
+    [
+        # ``parked_record.record_kind`` carries no CHECK; it is a copy of a value that was
+        # already checked on the way into ``normalized_record``.
+        ("record_kind", RecordKind, ["normalized_record"]),
+        # ``ingest_batch.source_system`` and ``connector_source.source_system`` carry none
+        # either: the first is batch-level provenance, the second is registry configuration.
+        ("source_system", SourceSystem, ["raw_record", "normalized_record"]),
+    ],
+    ids=["record_kind", "source_system"],
+)
+def test_closed_vocabulary_check_constraints_match_their_enum(
+    column: str, enum: type, expected_tables: list[str]
+):
+    """Every CHECK list for a closed vocabulary must equal its enum, exactly.
+
+    Set equality, not containment, because the two directions fail differently and both
+    are bad:
+
+    * in the enum and missing from SQL — the ingest-aborting direction described above;
+    * in SQL and missing from the enum — a retired member SQLite still accepts, so a
+      stale writer keeps inserting rows the Python layer can no longer construct, and
+      nothing says so.
+
+    The table list is asserted as well as the vocabularies, exactly as the ``key_type``
+    test asserts its count of two, so that a new table acquiring one of these columns
+    cannot quietly gain a CHECK list this test never reads.
+    """
+    found = _check_lists(migrate.schema_sql(), column)
+    assert [table for table, _ in found] == expected_tables, (
+        f"expected {column} CHECK constraints on {expected_tables}, found them on "
+        f"{[table for table, _ in found]}. A new one is not automatically wrong, but it "
+        f"has to be added here or it is a vocabulary nothing compares against."
+    )
+
+    expected = {member.value for member in enum}
+    for table, listed in found:
+        assert listed == expected, (
+            f"{table}.{column} drifted from {enum.__name__}: "
+            f"in the enum and missing from SQL: {sorted(expected - listed) or 'none'} "
+            f"(an insert Python believes is valid, rejected by SQLite from _insert_tree, "
+            f"outside the quarantine branch — the ingest aborts partway through); "
+            f"in SQL and missing from the enum: {sorted(listed - expected) or 'none'} "
+            f"(a value the database still accepts that no Python writer can produce)."
+        )
 
 
 # ═══ A4 / A5 / Decision 19 — aging is never stored ══════════════════════════

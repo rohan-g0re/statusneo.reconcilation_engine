@@ -140,6 +140,29 @@ class RecordKind(StrEnum):
     REBATE_DISPENSE_LINE = "REBATE_DISPENSE_LINE"
     BANK_TRANSACTION = "BANK_TRANSACTION"
 
+    #: Beacon's three inbound shapes, added by the connector layer (``DOC2-007``).
+    #:
+    #: Beacon sends four payloads and only three are here, because ``rebate_status`` is the
+    #: manufacturer's decision under another name and already has a kind —
+    #: ``TPA_MANUFACTURER_DECISION``.  A second kind meaning the same event would have made
+    #: the engine's evidence map depend on which door the fact arrived through.
+    #:
+    #: ``BEACON_VALIDATION_OUTCOME`` is separate from that decision and is *not* a
+    #: near-duplicate of it.  Beacon validating a submission and a manufacturer refusing to
+    #: pay are different judgements by different parties: a Beacon format rejection filed as
+    #: a manufacturer decision would be C-07 attributed to the wrong party.
+    #:
+    #: ``BEACON_PAYMENT_REFERENCE`` is a leaf and deliberately **not** ``REBATE_BATCH`` or
+    #: ``REBATE_DISPENSE_LINE``.  ``REBATE_BATCH`` sits in ``pipeline._RESOLUTION_ROOTS``,
+    #: where ``_attach`` returns before it processes ``looks_up`` — the Beacon ID lookup
+    #: would be silently dropped.  ``REBATE_DISPENSE_LINE`` is worse: ``_read_rebate_lines``
+    #: sums across rebate lines, and Beacon's line amount *is* the 340B feed's amount, so
+    #: reading one payment through two doors would stamp C-14 "duplicate rebate payment" on
+    #: every paid episode in the profile.
+    BEACON_ACKNOWLEDGMENT = "BEACON_ACKNOWLEDGMENT"
+    BEACON_VALIDATION_OUTCOME = "BEACON_VALIDATION_OUTCOME"
+    BEACON_PAYMENT_REFERENCE = "BEACON_PAYMENT_REFERENCE"
+
 
 class KeyType(StrEnum):
     """The eight crosswalk key types (Decision A24), one per bridge in
@@ -300,6 +323,14 @@ class EvidenceRole(StrEnum):
     TPA_QUALIFICATION = "TPA_QUALIFICATION"
     REBATE_LINE = "REBATE_LINE"
     MEDICAL_SUBMISSION = "MEDICAL_SUBMISSION"
+
+    #: What a Beacon inbound record was cited as.  Its own role rather than a borrowed one,
+    #: because ``engine.run._evidence_rows`` reads ``_ROLE_BY_KIND.get(kind, ADJUDICATION)``
+    #: — a kind left out of that table is not rejected, it is silently filed as the pharmacy
+    #: adjudication evidence on the episode, which is a wrong citation rather than a missing
+    #: one.  Unlike ``record_kind`` this has no SQL ``CHECK`` behind it; ``schema.sql`` says
+    #: the column is "validated against domain.enums.EvidenceRole in Python".
+    REBATE_SUBMISSION = "REBATE_SUBMISSION"
 
 
 class ReasonCode(StrEnum):

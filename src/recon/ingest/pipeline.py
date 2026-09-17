@@ -46,6 +46,7 @@ import io
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable, Sequence
 
@@ -156,12 +157,31 @@ class MissingDeliveryStampError(RuntimeError):
 
     **Measured, not argued** — on the ``demo`` profile at the ``RECORDED`` spine, with the six
     generated feeds loaded first so that 60 episodes exist for the vendor rows to resolve
-    against.  Craneware's export lands 33 normalized records.  Dated to the epoch, 27 of them
-    park as ``NO_KEY_MATCH``; dated to a real delivery stamp, 1 does — and that one is the
-    identifier drift the generator injects deliberately, which is the answer this leg is
-    supposed to produce.  The other 26 are an artefact of the date alone.
+    against.  ``data/generated/demo/vendor/craneware/claims_report.csv`` carries 39 ``DETAIL``
+    rows and one ``TRAILER`` declaring 39; four of the detail rows are flagged
+    ``dispense_status = REVERSED``.  So the delivery lands 39 raw records and 43 normalized
+    ones — 39 ``TPA_QUALIFICATION`` parents plus 4 ``TPA_REVERSAL`` children — and nothing is
+    collapsed, because all 39 rows are distinct under every identity this leg has ever keyed
+    on.  Dated to the epoch, 35 of those 43 park as ``NO_KEY_MATCH``; dated to a real delivery
+    stamp, 3 do.  The other 32 are an artefact of the date alone.
 
-    Those two counts are profile-dependent and are quoted to show the *shape*, which is not:
+    Those 3 are the identifier drift the generator injects deliberately, which is the answer
+    this leg is supposed to produce, and they are checkable rather than asserted: the *same*
+    three claims park out of ``tpa_340b_events.jsonl`` as well, on the feed leg, with no vendor
+    file involved.  One of them is visible by eye — the export writes ``rx_number`` ``22105567``
+    where ``pbm_claim_events.jsonl`` wrote ``221055677``.  A park that reproduces on both doors
+    is a crosswalk miss; a park that appears only on this one is a defect in this leg.
+
+    **These figures were recomputed from the file and an earlier revision of this docstring
+    had them wrong** — it said 33 records, 27 parks and 26 artefacts, while the paragraphs
+    below already said 43 and 35, so the same docstring disagreed with itself.  A number
+    labelled "Measured, not argued" that is not measured is worse than no number, because it
+    is the one a reader will not think to check.  Recompute with ``csv.DictReader`` over the
+    export for the record counts, and with the six feeds ingested first for the park counts;
+    the two regimes are far enough apart that a stale figure does not change the argument, but
+    it does destroy the reason to believe it.
+
+    Those park counts are profile-dependent and are quoted to show the *shape*, which is not:
     under the epoch nearly every row parks, under a real stamp nearly none does.  Nothing in
     the system reports the difference — no exception, no quarantine, no control-total
     shortfall, just a park queue that reads as a crosswalk problem and sends somebody to fix a
@@ -193,8 +213,10 @@ class MissingDeliveryStampError(RuntimeError):
     :func:`_process_raw_record` catches ``(AdapterError, ValueError)`` and quarantines what it
     catches, so a ``ValueError`` raised anywhere in this module is one refactor away from being
     absorbed into a quarantine queue.  For an error whose entire value is that it is loud, that
-    is not a stylistic risk — being swallowed would convert this into 43 quarantine rows, which
-    is the same failure as the 35 parks wearing a different reason code.
+    is not a stylistic risk — being swallowed would convert this into 39 quarantine rows, one
+    per ``DETAIL`` row of the file, which is the same failure as the 35 parks wearing a
+    different reason code.  (39 and not 43: a quarantine row references a ``raw_record``, and
+    the four reversal children are normalized records that share their parent's raw row.)
     """
 
     def __init__(
@@ -289,11 +311,11 @@ class IngestStats:
 #: The epoch is not a harmless placeholder on that path.  :func:`ingest` orders by
 #: ``received_at`` and every crosswalk lookup is cursored on it, so rows dated 1970 sort to
 #: the very front of the timeline and are asked to resolve before any episode exists.
-#: Measured on the ``demo`` profile: of the 33 records Craneware's export lands, 27 park as
-#: ``NO_KEY_MATCH`` when dated to the epoch and 1 does when dated to a real delivery stamp —
-#: and that 1 is the identifier drift the generator injects on purpose.  The counts move with
-#: the profile; the shape does not.  Nothing raises either way; the queue simply reads as a
-#: crosswalk problem.
+#: Measured on the ``demo`` profile: of the 43 records Craneware's export lands — 39
+#: qualifications and 4 reversals off 39 ``DETAIL`` rows — 35 park as ``NO_KEY_MATCH`` when
+#: dated to the epoch and 3 do when dated to a real delivery stamp, and those 3 are the
+#: identifier drift the generator injects on purpose.  The counts move with the profile; the
+#: shape does not.  Nothing raises either way; the queue simply reads as a crosswalk problem.
 #:
 #: So that one path refuses this value by name instead of inheriting it — see
 #: :class:`MissingDeliveryStampError`.  A deployment passes the moment the delivery actually
@@ -301,6 +323,44 @@ class IngestStats:
 #: so is any vendor dataset that declares an arrival column: Verity's rows carry their own
 #: stamp and never reach the fallback at all.
 EPOCH_STAMP = "1970-01-01T00:00:00Z"
+
+
+#: The instant :data:`EPOCH_STAMP` names, as a moment rather than as a string.
+_EPOCH_INSTANT = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _is_epoch(stamp: str) -> bool:
+    """Is this delivery stamp the Unix epoch, under **any** spelling of it?
+
+    Compares an *instant*, not a spelling, and that is the whole reason this is a function
+    rather than a ``==``.  The guard in :func:`_read_rows` used to be
+    ``fetched_at == EPOCH_STAMP``, exact string equality against one literal — so a caller
+    who wrote ``datetime.fromtimestamp(0, UTC).isoformat()`` handed in
+    ``"1970-01-01T00:00:00+00:00"``, which is the same moment with ``+00:00`` where the
+    literal has ``Z``, walked straight past the guard, and dated the entire delivery to 1970
+    exactly as an omitted argument would have.  Identical failure, different spelling, and
+    silent in both directions.
+
+    No caller in this repository does that today, so this is latent rather than live.  It is
+    hardened anyway because the guard's entire value is that it cannot be got round by
+    accident, and "which of the two legal spellings of midnight 1970 did you send" is
+    precisely the kind of accident a caller has no reason to think about.
+
+    A stamp with no zone is read as UTC, which is the conservative direction: every timestamp
+    in this fabric is UTC, and treating a naive epoch as the epoch makes the guard fire rather
+    than let a delivery through.  Anything that will not parse as ISO-8601 is **not** the
+    epoch — a caller passing a real delivery manifest's opaque id is not making this mistake,
+    and refusing it here would block a load for a reason that has nothing to do with dates.
+    """
+    if stamp == EPOCH_STAMP:
+        return True
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed == _EPOCH_INSTANT
 
 
 def load_from_sources(
@@ -395,6 +455,7 @@ def load_from_sources(
                     source_id=source.source_id,
                     document=document.name,
                     fetched_at=fetched_at,
+                    received_at_field=source.received_at_field,
                 )
             )
             # F2.  Before the batch row exists, not after.  A batch written first and then
@@ -414,6 +475,14 @@ def load_from_sources(
             # nothing, and loading is idempotent on the file hash, so a corrected
             # re-delivery resumes exactly here.  ``_checkpoint()`` is not reached, which is
             # also correct: a refused document was never taken.
+            #
+            # ``len(rows)`` is the number of *records* the document yielded, which is what
+            # ``reconcile_or_fail`` asks for and is not the same as the number of lines in the
+            # file — the header and the trailer are not records.  On a vendor export it is
+            # detail plus unrecognised, i.e. exactly
+            # ``vendors.ParsedDocument.observed_record_count``; the ``VENDOR_CSV`` branch of
+            # ``_read_rows`` says why an unrecognised row counts and what it costs when the
+            # vendor's own trailer counts differently.
             control_totals.reconcile_or_fail(
                 conn,
                 source_id=source.source_id,
@@ -436,9 +505,16 @@ def load_from_sources(
                 source_id=source.source_id,
             )
             raw_rows = []
-            for line_no, (payload_text, record_id, received_at, source_system) in enumerate(
-                rows, start=1
-            ):
+            # ``line_no`` is carried out of ``_read_rows`` rather than re-derived here, and
+            # the difference is a person opening the wrong line of a real file.  This loop
+            # used to be ``enumerate(rows, start=1)`` — the record's *position* in the yielded
+            # stream — stored into ``source_line_no``, which is the column the dossier and
+            # ``agents/tools.py`` read back as "the line this came in on".  Position and line
+            # coincide only on JSONL: a bank CSV row was reported one line early on every row
+            # of every file, and a vendor export was too, plus arbitrarily far off for any
+            # unrecognised row, which the reader appends after every detail row regardless of
+            # where it sat in the file.
+            for payload_text, record_id, received_at, source_system, line_no in rows:
                 raw_rows.append(
                     {
                         "batch_id": batch_id,
@@ -520,8 +596,17 @@ def _read_rows(
     source_id: str = "<unregistered>",
     document: str = "<unnamed>",
     fetched_at: str = EPOCH_STAMP,
-) -> Iterable[tuple[str, str | None, str, SourceSystem]]:
-    """Yield ``(payload_json, record_id, received_at, source_system)`` per source row.
+    received_at_field: str = "received_at",
+) -> Iterable[tuple[str, str | None, str, SourceSystem, int]]:
+    """Yield ``(payload_json, record_id, received_at, source_system, line_no)`` per source row.
+
+    ``line_no`` is the **line of the file** the record was read from, not its position in this
+    stream, and every branch yields its own because every branch already knows it: the bank
+    CSV counts from 2 past its header, JSONL counts from 1, and ``vendors.read`` counts from 2
+    and hands the number back on each row.  It is carried rather than re-derived by the caller
+    because the two numbers are not the same on any format with a header — and
+    ``source_line_no`` is read back by the dossier and by the agent layer's record tool to
+    tell a person which line to open.
 
     The bank CSV is re-encoded as JSON so the raw layer holds one uniform payload shape.  The
     original CSV row survives losslessly — every column becomes a key — so lineage back to
@@ -560,6 +645,7 @@ def _read_rows(
                     document=document,
                     line_no=line_no,
                 ),
+                line_no,
             )
         return
 
@@ -570,16 +656,36 @@ def _read_rows(
         mapping = vendor_mappings.mapping_for(source_id)
 
         # Checked once per document, before a single row is parsed, because it is a fact about
-        # the dataset and the call rather than about any row — reporting it per row would be 43
+        # the dataset and the call rather than about any row — reporting it per row would be 39
         # copies of one mistake.  A dataset that declares an arrival column never reaches this:
         # its rows carry their own stamp and the fallback is unused, which is why Verity keeps
         # loading on the default.
-        if mapping.received_at_column is None and fetched_at == EPOCH_STAMP:
+        #
+        # ``_is_epoch`` and not ``fetched_at == EPOCH_STAMP``: the test is whether the caller
+        # named the epoch *instant*, not whether they spelled it the way this module does.
+        # See that function for the spelling that used to get through.
+        #
+        # **The guard covers an absent column, never an empty cell, and that hole is held
+        # shut by a different module.**  ``vendors.received_at`` falls back to this stamp
+        # whenever the declared cell is *blank*, not only when the mapping declares no column
+        # at all.  So a Verity accumulation with an empty ``qualification_received_at`` would
+        # inherit the fetch stamp — and land at 1970 under the default — with
+        # ``received_at_column`` not ``None`` and this guard never firing.  It cannot happen
+        # today for a reason that lives in ``connectors/schema_registry.py``: that module
+        # declares ``qualification_received_at`` and ``batch_received_at`` **required**, so a
+        # blank arrival cell is quarantined by the contract before it can reach a stamp.  The
+        # dependency is named here rather than left to be rediscovered, because the thing that
+        # reopens it is ordinary — a future vendor dataset whose arrival column is genuinely
+        # optional — and when it does, the fix belongs in the contract, not in a wider guard
+        # here that would start refusing Verity's every call.
+        if mapping.received_at_column is None and _is_epoch(fetched_at):
             raise MissingDeliveryStampError(
                 f"{mapping.source_id!r} ({mapping.vendor} {mapping.dataset!r}) publishes no "
                 "per-row arrival time, so every row of "
-                f"{document!r} inherits the delivery's fetch stamp — and no delivery stamp was "
-                f"supplied, so it is still the {EPOCH_STAMP} default. Pass load_from_sources "
+                f"{document!r} inherits the delivery's fetch stamp — and the stamp it would "
+                f"inherit is {fetched_at!r}, which is the Unix epoch: either no delivery stamp "
+                f"was supplied and this is the {EPOCH_STAMP} default, or one was supplied that "
+                "names the same instant under a different spelling. Pass load_from_sources "
                 "the moment this delivery actually landed. Defaulting would date the whole "
                 "file to 1970, which sorts it to the very front of the timeline where no "
                 "episode exists yet: the rows resolve against nothing and park as "
@@ -597,8 +703,41 @@ def _read_rows(
         # An unrecognised row is the opposite case: it may well be a claim under a
         # ``record_type`` this mapping has never seen, and dropping it would remove a record
         # from the count the trailer is about to be checked against — a silent shortfall in
-        # the one number that exists to catch shortfalls. So it lands with its bytes intact
-        # and fails the contract at adaptation, which is a quarantine somebody can read.
+        # the one number that exists to catch shortfalls.
+        #
+        # **What lands here is exactly ``ParsedDocument.observed_record_count``**, detail plus
+        # unrecognised, which is the count ``load_from_sources`` then hands to
+        # ``control_totals.reconcile_or_fail`` as ``observed_count``. That is the right count
+        # and it must stay that way: every row yielded here becomes a ``raw_record``, so the
+        # control total is comparing the trailer against what actually landed. Narrowing it to
+        # ``parsed_record_count`` — detail only — to make the two names agree would mean a
+        # DETAIL row whose ``record_type`` was mangled in transfer lands as a raw record and
+        # is not counted, so a genuine shortfall reconciles clean. That is the silent record
+        # loss this whole mechanism exists to catch, bought for tidier arithmetic.
+        #
+        # The two counts are therefore two questions, not two answers to one, and the names
+        # are the fix: ``parsed_record_count`` is "how many rows did the mapping recognise as
+        # claims", ``observed_record_count`` is "how many records arrived". They are equal on
+        # every healthy file and differ on exactly the file where it matters.
+        #
+        # **What remains wrong is the failure message, and it is not this function's to fix.**
+        # An earlier version of this comment said an unrecognised row "lands with its bytes
+        # intact and fails the contract at adaptation, which is a quarantine somebody can
+        # read". That is true only when the vendor's trailer already counts the row. When it
+        # does not — a vendor adds a ``HEADER`` row and declares a count covering only the
+        # rows it thinks of as records, 1 HEADER + 34 DETAIL + a trailer declaring 34 —
+        # ``reconcile_or_fail`` sees 35 against 34 and refuses the delivery before
+        # ``insert_ingest_batch`` is reached: no batch, no raw rows, no quarantine, and
+        # ``load_from_sources`` does not catch ``ControlTotalMismatch``, so every source queued
+        # behind this one stops too. Refusing is correct — F2's acceptance is that the short
+        # feed does not land. What is wrong is that the operator reads *"declared 34 records,
+        # 35 arrived (1 more than declared)"* and goes hunting a phantom duplicate, when the
+        # truth is "one row carried a ``record_type`` this mapping does not recognise, at line
+        # N". That detail string is built in ``control_totals.check`` and this module cannot
+        # reach it; naming the unrecognised rows and their line numbers there is the open work.
+        # Until then the recovery is at least intact: no checkpoint is written, so a corrected
+        # re-delivery resumes exactly here.
+        #
         # The row is stored in the **vendor's** spelling, not this fabric's. Renaming here
         # would defeat the check that has not run yet: ``_process_raw_record`` validates every
         # payload against the contract registered for its source id, and that contract
@@ -610,29 +749,51 @@ def _read_rows(
                 key: (value if value != "" else None) for key, value in row.items()
             }
             stamp = vendor_mappings.received_at(mapping, row, fallback=fetched_at)
-            # Three keys this fabric adds to the vendor's own. The contract ignores fields it
+            # Five keys this fabric adds to the vendor's own. The contract ignores fields it
             # does not declare, so they travel without being mistaken for columns.
             #
             # ``received_at`` is the one that mattered: a vendor export publishes no column by
             # that name, the pipeline orders everything it holds by it, and resolving it needs
             # the per-dataset declaration plus the fetch stamp — neither of which an adapter
             # holding only a payload can see. Resolving it here is what unblocked the leg.
+            #
+            # ``document`` and ``line_no`` are here for one reason and it is worth naming: an
+            # adapter is handed a payload and nothing else, and for a dataset the vendor
+            # stamps no row id on, where the row sat in which delivery is the only thing left
+            # that tells two otherwise identical rows apart. See ``_adapt_vendor_export``,
+            # which spends them and says what the fallback costs.
             record["received_at"] = stamp
             record["source_id"] = mapping.source_id
             record["dataset"] = mapping.dataset
+            record["document"] = document
+            record["line_no"] = line_no
             yield (
                 json.dumps(record, separators=(",", ":"), sort_keys=True),
-                # No source record id. Verity stamps an ``accumulation_id`` on every row and
-                # Craneware stamps nothing, so the only spelling available across both vendors
-                # is the natural key — and that is the crosswalk's business, not the raw
-                # layer's. Identity here is the payload hash, as it is for every bank row.
-                None,
+                # The vendor's own row id when the mapping declares one, and ``None`` when it
+                # does not. This used to be an unconditional ``None`` on the argument that the
+                # only spelling available across both vendors was the natural key — which was
+                # true of the two vendors and false of the column. Verity stamps an
+                # ``accumulation_id`` on every accumulation; that is a source record id in
+                # exactly the sense this column means, and discarding it for cross-vendor
+                # uniformity threw away the one identity the vendor itself uses. Craneware
+                # stamps nothing, so its rows keep the ``None`` and the payload hash, as every
+                # bank row does.
+                vendor_mappings.row_id(mapping, row),
                 stamp,
                 # Attributed from the registry row and never from the payload. A vendor export
                 # publishes no ``source_system`` column, so consulting the payload for one
                 # would read ``None`` on every row of every file and then fall back here
                 # anyway — with a lookup in between that could only ever go wrong.
                 default_source_system,
+                # The line the row actually sits on, header counted — not its position in this
+                # stream. ``vendors.read`` enumerates from 2 because line 1 is the header, and
+                # that number used to be computed here and thrown away: the caller re-derived
+                # a position with ``enumerate(rows, start=1)`` and stored *that* as
+                # ``source_line_no``. Off by one on every row of every vendor file even with
+                # no unrecognised rows, and badly wrong with them, since unrecognised rows are
+                # appended after every detail row regardless of where they sat in the file. A
+                # quarantine row's whole job is to send a person to a line they can open.
+                line_no,
             )
         return
 
@@ -641,10 +802,36 @@ def _read_rows(
             if not line.strip():
                 continue
             payload = adapters.parse_jsonl_line(line)
+            # Read from the name the SOURCE declares, not from a name this reader assumes.
+            # Every generated feed spells it ``received_at`` and the default keeps them
+            # byte-identical; Beacon spells it four different ways across four payloads, and
+            # only one of them agrees.
+            #
+            # **A missing key and a null value are different, and only one of them is a
+            # mistake.** An absent key means the source is not shaped the way its registry
+            # row claims, and that raises here, loudly, because every row of the file will
+            # have the same problem. A key present and null is a fact: Beacon's validation
+            # outcome carries ``decided_at``, and on a PENDING outcome it is null because
+            # Beacon has not decided. That record is perfectly readable and perfectly true,
+            # so it lands, dated to the delivery — we know when the file arrived and we know
+            # nothing has been decided yet, which is exactly what the row says.
+            stamp = payload[received_at_field] or fetched_at
+            if received_at_field != "received_at":
+                # A source that keeps its arrival time under its own name gets the resolved
+                # stamp written back under the canonical one, so an adapter reads a single
+                # spelling and never re-derives what this reader already decided. The
+                # VENDOR_CSV branch injects for the same reason; the six generated feeds take
+                # the default, inject nothing, and are byte-identical to before.
+                #
+                # This also settles the PENDING case in one place rather than two: the
+                # adapter cannot see that ``decided_at`` was null, so it cannot disagree
+                # about what to do with it.
+                payload["received_at"] = stamp
+                line = json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str)
             yield (
                 line,
                 payload.get("record_id"),
-                payload["received_at"],
+                stamp,
                 _attributed_source_system(
                     payload.get("source_system"),
                     default_source_system,
@@ -652,6 +839,7 @@ def _read_rows(
                     document=document,
                     line_no=line_no,
                 ),
+                line_no,
             )
         return
 
@@ -796,10 +984,41 @@ def _insert_tree(
     summed.  Summing it would double-count real money, which is the single most expensive
     mistake available in this layer.
 
-    Idempotency deliberately keys on the **source record id**, never on a natural key.  A-17
-    (duplicate payment) and B-16 (duplicate 835) are *genuine* duplicate business events with
-    different record ids; collapsing on a natural key would merge them and delete two track
-    states from the reachable space.
+    Idempotency keys on the **source record id** wherever there is one, and never on a natural
+    key alone.  A-17 (duplicate payment) and B-16 (duplicate 835) are *genuine* duplicate
+    business events with different record ids; collapsing on a natural key would merge them
+    and delete two track states from the reachable space.
+
+    **The vendor leg is the case where "wherever there is one" does work**, and this paragraph
+    exists because the sentence above used to read "never on a natural key" while the vendor
+    adapter beside it keyed on exactly that.  A docstring that forbids what the code does is
+    worse than no docstring: it is the thing a reader trusts instead of reading the code.
+
+    Three regimes, and which one applies is a property of the dataset rather than a choice
+    made here:
+
+    * **The six generated feeds** carry a ``record_id`` and key on it, unchanged.
+    * **A vendor dataset that stamps its own row id** keys on that id.  Verity writes an
+      ``accumulation_id`` on every accumulation, and it is a source record id in precisely
+      this sense — the identity Verity itself uses when it re-sends, corrects, or is asked
+      about that row.  Its invoices do the same under ``invoice_number``.  Both were being
+      discarded for cross-vendor uniformity, and the cost was the exact failure the paragraph
+      above warns about, one door over: two ``DETAIL`` rows with distinct ``accumulation_id``
+      and identical ``(rx_number, pharmacy_npi, provider_npi, ndc_11, fill_date)`` — a partial
+      fill and its completion on one Rx, same NDC, same day — collapsed into one.  Both raw
+      rows land, the control total reconciles, and the second record disappears with no
+      quarantine, no park and no shortfall.  The only trace is ``stats.duplicates_collapsed``
+      going up by one.
+
+      **Latent in today's data, which is why it is worth fixing rather than worth waiting
+      for.**  Every natural key on both Verity exports is distinct as they stand — 34 of 34
+      accumulations, 23 of 23 invoices — so nothing collapses today and no test can observe
+      the loss without constructing the colliding pair on purpose.  A defect that costs
+      nothing until a pharmacy splits one fill is not a defect that will be found by running
+      the suite.
+    * **A vendor dataset that stamps nothing** — Craneware's Claims Report — has no identity
+      to key on, so ``_adapt_vendor_export`` invents one and says so.  That fallback's terms
+      are stated there, on the code that builds it, not here.
     """
     from recon.db import repository
 

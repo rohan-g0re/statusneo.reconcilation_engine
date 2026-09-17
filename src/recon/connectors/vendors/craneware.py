@@ -177,18 +177,41 @@ CLAIMS_REPORT = SecureFileMapping(
     declared_count_column="declared_record_count",
     schema_version_column="schema_version",
     # No ``received_at_column``, and that absence is the finding rather than an oversight.
-    # The Claims Report publishes four temporal columns and every one of them is a *date*:
-    # ``fill_date``, ``reversal_date``, ``rebate_submitted_date``, ``rebate_payment_date``.
-    # None of them says when Craneware delivered the row. Promoting one — ``fill_date`` is
+    # The Claims Report publishes four temporal columns and **three** of them are dates:
+    # ``fill_date``, ``rebate_submitted_date``, ``rebate_payment_date``. The fourth,
+    # ``reversal_date``, is a full *timestamp* despite its name — it is written from the
+    # reversal event's ``received_at``, the registered contract types it ``timestamp``, and
+    # the four reversed rows in the demo export carry stamps like ``2026-04-09T13:00:00Z``.
+    # The field comment above says the same thing, and this comment used to contradict it.
+    #
+    # None of the four says when Craneware delivered the row. Promoting one — ``fill_date`` is
     # the tempting one, since it is the only required column of the four — would date a row
     # to the day the drug left the shelf and hide every day of TPA lag behind it, which is
     # the lag a 340B reconciliation exists to measure.
     #
-    # So these rows inherit the delivery's fetch stamp. That is weaker than Verity's per-row
-    # timestamp and it is honestly weaker: we know when the file landed and we do not know
-    # when the row did. ``CRANEWARE-005`` records that no column list is published at all,
-    # so this may change the day a real customer sends a real file — and it changes here, in
-    # one declaration, not in the reader.
+    # **So the fetch stamp is inherited by un-reversed rows only, and that follows from the
+    # timestamp above rather than from anything declared here.**
+    # :func:`~recon.connectors.vendors.received_at` builds its candidates from this column
+    # *and*, on a flagged row, from ``reversal.received_at_column`` — which the
+    # :class:`~recon.connectors.vendors.FlagReversal` above names as ``reversal_date``. So a
+    # reversed Craneware row is dated by its own reversal timestamp and never reaches the
+    # fallback at all; only an un-reversed row, which carries no timestamp anywhere, does.
+    #
+    # That is weaker than Verity's per-row stamp and it is honestly weaker: we know when the
+    # file landed and we do not know when the row did. ``CRANEWARE-005`` records that no
+    # column list is published at all, so this may change the day a real customer sends a real
+    # file — and it changes here, in one declaration, not in the reader.
+    #
+    # No ``row_id_column`` either, declared explicitly so it reads as a finding rather than a
+    # field somebody forgot. Craneware stamps no id on a claims row: the file's twenty-two
+    # columns are the nineteen mapped in ``fields`` above plus the three control columns, and
+    # not one of them names the row. The nearest candidate is ``rx_number``, empty on 14 of the
+    # thirty-nine demo rows because a clinic-administered drug has no prescription, and
+    # ``rebate_allocation_code`` is only present on the paid ones. So
+    # :func:`~recon.connectors.vendors.row_id` returns ``None`` for every row of this dataset,
+    # and whatever identity these rows get has to be invented by the caller and named as an
+    # invention there — see :attr:`~recon.connectors.vendors.SecureFileMapping.row_id_column`.
+    row_id_column=None,
 )
 
 #: Every Craneware report this fabric can read, by source id.

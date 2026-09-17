@@ -36,6 +36,45 @@ def _require_fastapi():
         ) from exc
 
 
+#: The Beacon payloads this build ingests, and the one it deliberately does not.
+#:
+#: ``beacon_rebate_status`` is held out. It maps to ``TPA_MANUFACTURER_DECISION``, which
+#: ``dimensions._KIND_BUCKETS`` *does* bucket, so landing it would move rebate verdicts —
+#: turning C-05 into C-07 wherever the 340B feed was silent and Beacon says rejected. That
+#: is a real improvement and it is a separate, measurable step: mixed in here the verdict
+#: delta would be unattributable, and this wave's whole claim is that nothing moved.
+#:
+#: ``beacon_submissions`` is outbound and fetches nothing.
+_BEACON_INBOUND = ("beacon_acknowledgements", "beacon_validation_outcomes",
+                   "beacon_payment_references")
+
+
+def _beacon_inbound_sources(settings: Settings) -> tuple[Any, ...]:
+    """Beacon's inbound payloads, read as files off the directory the build just wrote.
+
+    **Files rather than HTTP, and the reason is the demo rather than laziness.**  The loopback
+    Beacon server exists and is well tested, but it is instantiated in exactly one place in
+    the repository — a test. Wiring the demo to it would give the demo a port to bind, a
+    process to start and stop, and a new way to fail, for a build whose defining property is
+    that the same seed produces the same bytes. ``LocalDirectoryTransport`` also carries the
+    ground-truth refusal, which an HTTP client does not need and would not have.
+
+    Requirement A2's claim is that a document is a document however it arrived, so proving
+    the Beacon leg over files and the HTTP transport separately is a stronger demonstration
+    than coupling them — and ``tests/test_api_pattern.py`` already proves the HTTP half
+    against a real socket.
+    """
+    from recon.connectors import registry
+    from recon.connectors.transport import LocalDirectoryTransport
+
+    beacon_dir = settings.vendor_dir() / "beacon"
+    return registry.beacon_sources(
+        {source_id: str(beacon_dir) for source_id in _BEACON_INBOUND},
+        transport=LocalDirectoryTransport(beacon_dir),
+        enabled=True,
+    )
+
+
 def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any]:
     """Generate the feeds, load them, reconcile, and return what happened.
 
@@ -76,6 +115,19 @@ def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any
     migrate.stamp_meta(conn, settings, fingerprint())
     try:
         stats = pipeline.load_feeds(conn, settings.feeds_dir())
+        # Loaded after the feeds and before ingest, which is the only order that works: a
+        # Beacon acknowledgement resolves against an episode, and the episodes do not exist
+        # until the anchors from the six feeds have been adapted. Landing raw rows first and
+        # adapting everything once keeps that ordering the arrival cursor's business rather
+        # than this function's.
+        # ``fetched_at`` is the end of the generation window rather than a wall clock. It is
+        # used for exactly one thing — a PENDING validation outcome, whose ``decided_at`` is
+        # null because Beacon has not decided — and it says the true thing about such a row:
+        # as of the end of the window, no decision had arrived. A real clock here would make
+        # the same seed produce different bytes on two different days.
+        stats.raw_records += pipeline.load_from_sources(
+            conn, _beacon_inbound_sources(settings), fetched_at=settings.max_cursor
+        ).raw_records
         pipeline.ingest(conn, stats=stats)
 
         # Evaluate at a series of cursors across the window, not only at the end.

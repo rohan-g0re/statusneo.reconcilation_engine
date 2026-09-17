@@ -136,8 +136,17 @@ def _counts_by_record_type(text: str, mapping) -> dict[str, int]:
     return counts
 
 
-def _read(document: Document, mapping) -> list[tuple[str, str | None, str, SourceSystem]]:
-    """``_read_rows`` under ``VENDOR_CSV``, called the way ``load_from_sources`` calls it."""
+def _read(
+    document: Document, mapping
+) -> list[tuple[str, str | None, str, SourceSystem, int]]:
+    """``_read_rows`` under ``VENDOR_CSV``, called the way ``load_from_sources`` calls it.
+
+    Five elements, not four.  ``_read_rows`` now carries the **file line** each record was
+    read from out to its caller, because ``load_from_sources`` used to re-derive a position
+    with ``enumerate(rows, start=1)`` and store that as ``source_line_no`` — which is off by
+    one on any format with a header, and arbitrarily further off for an unrecognised row,
+    since the reader appends those after every detail row regardless of where they sat.
+    """
     return list(
         pipeline._read_rows(
             PayloadFormat.VENDOR_CSV,
@@ -390,13 +399,13 @@ def test_read_rows_yields_the_vendors_own_spelling_not_the_canonical_rename(vend
 
 
 @pytest.mark.parametrize("source_id", SOURCE_IDS)
-def test_read_rows_injects_exactly_three_keys_beyond_the_vendors_own(
+def test_read_rows_injects_exactly_five_keys_beyond_the_vendors_own(
     vendor_files, source_id: str
 ):
-    """``received_at``, ``source_id`` and ``dataset`` — and nothing else.
+    """``received_at``, ``source_id``, ``dataset``, ``document``, ``line_no`` — nothing else.
 
     "Exactly" is the assertion.  The contract ignores fields it does not declare, so an extra
-    key travels silently rather than failing anything, and a fourth one added here would ride
+    key travels silently rather than failing anything, and a sixth one added here would ride
     every payload of every vendor into the raw layer with nobody to notice.  The mirror case
     matters just as much: a vendor column *missing* from the payload is a column the contract
     reads as absent, which is a required-field quarantine on a row that was perfectly fine.
@@ -405,15 +414,38 @@ def test_read_rows_injects_exactly_three_keys_beyond_the_vendors_own(
     name, the pipeline orders everything it holds by it, and resolving it needs the
     per-dataset declaration plus the delivery's fetch stamp — neither of which an adapter
     holding only a payload can see.
+
+    **``document`` and ``line_no`` were the third and fourth additions, and this test went
+    from three to five with them**, which is the only honest way for it to move: the count is
+    the assertion, so raising it is a decision that has to be visible in a diff rather than a
+    number quietly edited to match.  They are here because an adapter is handed a payload and
+    nothing else, and for a dataset the vendor stamps no row id on — Craneware's Claims Report
+    — where the row sat in which delivery is the only thing left that tells two rows apart
+    when their claim facts are identical.  ``_adapt_vendor_export`` spends them and
+    ``_vendor_idempotency_key`` states what the resulting key is worth.
+
+    **``record_id`` is now asserted per dataset rather than asserted to be absent.**  It was
+    ``assert record_id is None`` with a message reading *"only Verity stamps one"* — a message
+    that contradicted the assertion above it, and the contradiction was the bug: Verity's
+    ``accumulation_id`` is a source record id in exactly the sense that column means, and it
+    was being thrown away so that both vendors could be handled identically.  Checked against
+    ``vendors.row_id``, this asserts the strong case *and* the weak one: a string for Verity,
+    ``None`` for Craneware, and neither invented.
     """
     mapping = vendors.mapping_for(source_id)
     document = _document(vendor_files, mapping)
     header = set(_header(document.text))
 
-    payload_text, record_id, stamp, source_system = _read(document, mapping)[0]
+    payload_text, record_id, stamp, source_system, line_no = _read(document, mapping)[0]
     payload = json.loads(payload_text)
 
-    assert set(payload) - header == {"received_at", "source_id", "dataset"}
+    assert set(payload) - header == {
+        "received_at",
+        "source_id",
+        "dataset",
+        "document",
+        "line_no",
+    }
     assert not header - set(payload), (
         f"{sorted(header - set(payload))} were dropped on the way in; the contract reads a "
         "missing column as an absent field and quarantines the row"
@@ -421,14 +453,36 @@ def test_read_rows_injects_exactly_three_keys_beyond_the_vendors_own(
 
     assert payload["source_id"] == mapping.source_id
     assert payload["dataset"] == mapping.dataset
+    assert payload["document"] == document.name
     assert payload["received_at"] == stamp, (
         "the payload and the raw row disagree about when this record arrived"
     )
     assert stamp == vendors.received_at(
         mapping, _detail_rows(document, mapping)[0], fallback=FETCH_SENTINEL
     )
-    assert record_id is None, (
-        "a source record id was invented; only Verity stamps one, so identity here is the "
-        "payload hash, as it is for every bank row"
+
+    # The first detail row of a file whose line 1 is the header, so 2 and not 1 — and the
+    # payload's own copy has to agree with the tuple's, or an adapter and the raw layer would
+    # disagree about which line this record came in on.
+    assert line_no == 2, (
+        f"the first detail row reports line {line_no}; line 1 is the header, so a reader "
+        "sent to that line opens the wrong row"
     )
+    assert payload["line_no"] == line_no
+
+    expected_record_id = vendors.row_id(mapping, _detail_rows(document, mapping)[0])
+    assert record_id == expected_record_id, (
+        f"{source_id} yielded source_record_id {record_id!r} where its mapping's "
+        f"row_id_column gives {expected_record_id!r}"
+    )
+    if mapping.row_id_column is None:
+        assert record_id is None, (
+            "a source record id was invented for a dataset that stamps none; identity there "
+            "is the payload hash, as it is for every bank row"
+        )
+    else:
+        assert record_id, (
+            f"{source_id} declares row_id_column {mapping.row_id_column!r} and yielded no id, "
+            "so the identity the vendor itself uses is being discarded on the way in"
+        )
     assert source_system is SOURCE_SYSTEMS[source_id]

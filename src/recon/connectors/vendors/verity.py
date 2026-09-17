@@ -163,6 +163,13 @@ ACCUMULATIONS = SecureFileMapping(
     # ``fill_date``, which is when the drug was dispensed — days to weeks earlier, and not a
     # fact about when Verity told us anything.
     received_at_column="qualification_received_at",
+    # Verity stamps every accumulation with its own id, so identity is a fact this vendor
+    # supplies rather than one we have to infer. All 34 detail rows of the demo export carry
+    # a distinct ``ACC-`` value, and none is empty. The natural key happens to be distinct
+    # across those same 34 rows too, which is exactly why this is worth declaring now: the
+    # collision it prevents — a partial fill and its completion on one Rx, same NDC, same day
+    # — is absent from today's data and costs an accumulation the day it appears.
+    row_id_column="accumulation_id",
 )
 
 #: The rebate money: one row per paid dispense, drawn from the lines inside a payment batch.
@@ -201,6 +208,14 @@ INVOICES = SecureFileMapping(
     # *what did we know by now* — so dating these rows by effective date would let an
     # evaluation see a payment before the batch announcing it had landed.
     received_at_column="batch_received_at",
+    # ``invoice_number`` and not ``accumulation_id``, even though this dataset carries both and
+    # both are distinct across all 23 detail rows of the demo export. ``accumulation_id`` is
+    # the accumulation this line *pays* — the right foreign key and the wrong identity. An
+    # invoice line is a payment event and the invoice number is what names it; two lines
+    # against one accumulation is an ordinary thing for a vendor to send, and keying on the
+    # accumulation would merge them and lose a payment. Right foreign key, wrong identity, is
+    # a distinction nothing downstream can recover once it has been made in this direction.
+    row_id_column="invoice_number",
 )
 
 #: Every Verity dataset this fabric can read, by source id.

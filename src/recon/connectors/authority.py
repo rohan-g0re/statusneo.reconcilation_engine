@@ -293,7 +293,11 @@ _REBATE_SUBMISSION_IDENTIFIER = AuthorityDomain(
     # Beacon on submission.  A source that sets one has not relayed an identifier, it has
     # minted one, and a fabricated join key is worse than a missing one: it resolves.
     authoritative=frozenset({SourceSystem.BEACON}),
-    record_kinds=frozenset(),
+    # Realised by the Beacon acknowledgement, which is the one payload that assigns the
+    # identifier.  This set was empty and described as "vacuously true for the rows nothing
+    # realises yet"; a row now realises it, and with the kind named here the check refuses
+    # an acknowledgement delivered by any source but Beacon.
+    record_kinds=frozenset({RecordKind.BEACON_ACKNOWLEDGMENT}),
     fields=frozenset({"beacon_id"}),
     rationale=(
         "``normalized_record.beacon_id`` is the column requirement C5 added for exactly this "
@@ -327,6 +331,18 @@ _REBATE_STATUS = AuthorityDomain(
             RecordKind.TPA_MANUFACTURER_DECISION,
             RecordKind.REBATE_BATCH,
             RecordKind.REBATE_DISPENSE_LINE,
+            # The clause names "validation outcomes" and "Beacon-side reconciliation data"
+            # alongside rebate status, so both Beacon kinds belong to this domain.
+            #
+            # **Stated because it is looser than it looks.**  Putting the validation outcome
+            # here also entitles MANUFACTURER_REBATE to deliver one, and a manufacturer does
+            # not validate a Beacon submission.  A third domain off the same DOC2-004 row
+            # would need its own argument -- this module's own rule is that the Beacon row
+            # yields two domains because it names two separably ownable things, and a third
+            # split has not been argued.  The looseness is bounded: the kind check still
+            # refuses every TPA source, the bank, and all four reimbursement systems.
+            RecordKind.BEACON_VALIDATION_OUTCOME,
+            RecordKind.BEACON_PAYMENT_REFERENCE,
         }
     ),
     fields=frozenset(
