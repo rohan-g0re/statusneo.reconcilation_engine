@@ -622,7 +622,7 @@ def test_a_secret_never_renders_its_value(render):
 #: is a deliberate edit with a reviewer attached; a module revealing a secret without joining
 #: it fails.  ``sftp.py`` is the first entry — before wave 3 the list was empty and the test
 #: said so, which is how the transition stayed visible instead of being absorbed.
-CREDENTIAL_USE_SITES = frozenset({"credentials.py", "sftp.py"})
+CREDENTIAL_USE_SITES = frozenset({"credentials.py", "sftp.py", "http.py"})
 
 
 def test_revealing_a_secret_is_a_single_greppable_call():
@@ -1031,3 +1031,56 @@ def _evaluated_names(source: str) -> set[str]:
             if id(node) not in docstrings:
                 names.add(node.value)
     return names
+
+
+def test_no_http_error_chains_an_exception_that_could_carry_a_token():
+    """httpx masks two header names, and ours is not one of them.
+
+    ``httpx._utils._obfuscate_sensitive_headers`` replaces the value of ``authorization`` and
+    ``proxy-authorization`` with ``[secure]`` in a ``Headers`` repr — and nothing else. Beacon's
+    header names are INVENTED (``BEACON-011`` establishes only that two tokens exist; the
+    exchange itself is one of the eight items ``beacon.md`` lists as UNKNOWN), so ours are
+    ``X-Beacon-*`` and render in full.
+
+    ``httpx.RequestError`` carries ``.request``, and ``request.headers`` holds both tokens. So a
+    chained httpx exception puts both on any traceback that prints it. ``raise ... from None``
+    does not help: it clears ``__cause__`` and leaves ``__context__``.
+
+    ``sftp.py`` *does* chain its connection errors, and that is fine there — paramiko's text
+    holds nothing secret. The argument does not survive the move to HTTP, which is why the two
+    sibling modules deliberately differ.
+    """
+    httpx = pytest.importorskip("httpx")
+
+    # The premise, verified rather than asserted from memory — if httpx ever masks by default
+    # this test should be reconsidered, not silently kept.
+    rendered = repr(httpx.Headers({"X-Beacon-Access-Token": "tok-abc-123"}))
+    assert "tok-abc-123" in rendered, (
+        "httpx now masks non-standard headers; the reason http.py refuses to chain may have "
+        "gone away, and the docstring above should be revisited rather than left stale"
+    )
+
+    tree = ast.parse((CONNECTORS_DIR / "http.py").read_text(encoding="utf-8"))
+
+    # Only raises inside a function are interesting. The module-level guard that turns a
+    # missing httpx into an actionable ImportError chains deliberately, and it runs at import
+    # time when no request — and therefore no token — exists yet. Flagging it would have
+    # bought nothing and cost the one chained traceback in the file that genuinely helps.
+    inside_functions = [
+        node
+        for parent in ast.walk(tree)
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for node in ast.walk(parent)
+        if isinstance(node, ast.Raise)
+    ]
+    chained = [
+        node.lineno
+        for node in inside_functions
+        if node.cause is not None
+        # `raise X from None` is the safe form and parses as a Constant None cause.
+        and not (isinstance(node.cause, ast.Constant) and node.cause.value is None)
+    ]
+    assert not chained, (
+        f"http.py chains an exception at line(s) {chained}; an httpx error reached that way "
+        "carries request.headers, and both Beacon tokens render in full inside them"
+    )

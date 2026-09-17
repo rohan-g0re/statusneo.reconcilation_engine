@@ -38,6 +38,9 @@ __all__ = [
     "local_sources",
     "VENDOR_SOURCE_IDS",
     "vendor_sources",
+    "BEACON_SOURCE_IDS",
+    "BEACON_SUBMISSION_SOURCE_ID",
+    "beacon_sources",
     "enabled",
     "by_id",
 ]
@@ -379,6 +382,183 @@ def vendor_sources(
             )
         )
     return tuple(rows)
+
+
+# ═══ the Beacon rows ════════════════════════════════════════════════════════
+#
+# Requirements C2 and C3.  Beacon is the only bidirectional source in the assessment
+# (``DOC2-007``: *"Direction — Outbound eligible pharmacy / medical claims; inbound
+# acknowledgements, validation outcomes, Beacon IDs, rebate status and reconciliation
+# data."*), so it is the only vendor whose rows are not all pull rows.
+#
+# A separate table and a separate function rather than more entries in ``_VENDOR_ROWS``,
+# because that table is the secure-file half of requirement D1 and every row in it is
+# SFTP-delivered, delimited text with a trailer.  Folding an HTTP/JSON source into it would
+# mean ``vendor_sources`` growing a branch on transport kind — and D1's acceptance is that
+# the *file* vendors differ by a config row and nothing else, which stops being checkable the
+# moment the function serving them also serves an API.
+#
+# Nothing here imports ``connectors/vendors/beacon.py`` and that module imports nothing here:
+# the mapping reads ``source.source_id`` off the row it is handed and never names one.  So a
+# source id exists in exactly one place in the repository and there is nothing to keep in
+# step.
+
+
+#: One row per inbound payload kind, plus the outbound leg, keyed by source id.
+#:
+#: **One source per payload kind rather than one Beacon source holding four documents**, for
+#: the reason :func:`local_sources` gives: ``insert_ingest_batch`` records one batch per
+#: document, so a source fetching four would want to be one batch and the four would lose
+#: their separate control of cadence and checkpoint.  The four are genuinely independent — an
+#: acknowledgement arrives on submission, a payment reference arrives when a rebate settles
+#: weeks later.
+#:
+#: ``source_system`` is ``MANUFACTURER_REBATE`` on every row.  Requirement §4.7 names a
+#: ``SourceSystem.BEACON`` member and it does not exist in ``domain.enums`` yet — only the
+#: four ``KeyType`` members landed — so until it does, a Beacon record is attributed to the
+#: system whose decision it carries.  That is exactly how the 340B feed attributes its own
+#: ``MANUFACTURER_DECISION`` and ``REBATE_PAYMENT_BATCH`` records, so the attribution is
+#: consistent rather than merely available.
+_BEACON_ROWS: dict[str, _VendorRow] = {
+    "beacon_submissions": _VendorRow(
+        vendor="beacon",
+        source_system=SourceSystem.MANUFACTURER_REBATE,
+        # Empty, and not an oversight.  There is nothing to *fetch* from the submission
+        # endpoint: this row exists to say where Beacon lives and which credential name to
+        # resolve, which is what requirement C2's outbound adapter needs and all it needs.
+        # A transport pointed at it returns no documents, which is correct.
+        filenames=(),
+        mapping_version="beacon-api-1.0.0",
+    ),
+    "beacon_acknowledgements": _VendorRow(
+        vendor="beacon",
+        source_system=SourceSystem.MANUFACTURER_REBATE,
+        filenames=("acknowledgement.jsonl",),
+        mapping_version="beacon-api-1.0.0",
+    ),
+    "beacon_validation_outcomes": _VendorRow(
+        vendor="beacon",
+        source_system=SourceSystem.MANUFACTURER_REBATE,
+        filenames=("validation_outcome.jsonl",),
+        mapping_version="beacon-api-1.0.0",
+    ),
+    "beacon_rebate_status": _VendorRow(
+        vendor="beacon",
+        source_system=SourceSystem.MANUFACTURER_REBATE,
+        filenames=("rebate_status.jsonl",),
+        mapping_version="beacon-api-1.0.0",
+    ),
+    "beacon_payment_references": _VendorRow(
+        vendor="beacon",
+        source_system=SourceSystem.MANUFACTURER_REBATE,
+        filenames=("payment_reference.jsonl",),
+        mapping_version="beacon-api-1.0.0",
+    ),
+}
+
+#: Every Beacon source this fabric can declare, outbound first — ``DOC2-007``'s own order.
+BEACON_SOURCE_IDS: tuple[str, ...] = tuple(_BEACON_ROWS)
+
+#: The one outbound row.  Named because the outbound adapter has to be handed exactly this
+#: row and a caller should not have to know the spelling.
+BEACON_SUBMISSION_SOURCE_ID = "beacon_submissions"
+
+
+def beacon_sources(
+    endpoints: Mapping[str, str],
+    *,
+    credential_refs: Mapping[str, str] | None = None,
+    filenames: Mapping[str, Sequence[str]] | None = None,
+    transport: Transport | None = None,
+    enabled: bool = False,
+) -> tuple[Source, ...]:
+    """Registry rows for Beacon, one per source id named in ``endpoints``.
+
+    The same shape as :func:`vendor_sources` and for the same reasons: ``endpoints`` says
+    both where each source lives *and* which ones this deployment has onboarded at all, a key
+    that is not a registered Beacon source raises rather than silently never arriving, and
+    the rows default to **disabled**.
+
+    That default is sharper here than it is for the file vendors.  ``DOC2-008`` states
+    plainly that Beacon's *"SDK package, API reference, rate limits, versioning policy,
+    non-production endpoint and support SLA are not exposed in full public documentation and
+    must be obtained through Beacon Support"*, and ``BEACON-012`` adds that each covered
+    entity must separately authorise partner access, *"repeated across applicable 340B IDs"*.
+    A row that declared itself ready would be asserting two things nobody has been given: a
+    credential, and an entity's permission.
+
+    ``payload_format`` is ``JSONL`` on every row, including the outbound one.  Beacon is an
+    API (``BEACON-010``: an SDK is the intended submission path), so its payloads are objects
+    with nested nulls and no natural column order; flattening them to a delimited shape would
+    invent a structure the transport never has.
+
+    Args:
+        endpoints: source id to the base URL that source is served from.  Per deployment and
+            per covered entity, which is why it belongs on the row and never in a mapping
+            module.
+        credential_refs: source id to the *name* of the credential to resolve at request
+            time, overriding the default ``beacon_http_api``.  Never a secret — requirement
+            A3, and it is what lets this registry be committed at all.
+        filenames: source id to the documents to fetch, overriding the default.  The defaults
+            are the payload-kind names ``recon.mocks.beacon_payloads`` writes, which is what
+            a local stand-in directory offers; an HTTP transport maps them to its own paths.
+        transport: bound to every row, or ``None`` to leave them unbound.
+        enabled: whether the vendor-access gate has cleared for this deployment.  Shadows the
+            module-level :func:`enabled` inside this function only, which is not called here.
+
+    Raises:
+        KeyError: an ``endpoints`` key that is not a registered Beacon source.
+    """
+    unknown = sorted(set(endpoints) - set(_BEACON_ROWS))
+    if unknown:
+        known = ", ".join(BEACON_SOURCE_IDS)
+        raise KeyError(
+            f"{unknown} are not registered Beacon sources; known sources: {known}. "
+            "A mistyped config key is a source that silently never arrives, which is why "
+            "this raises rather than skipping it."
+        )
+
+    credential_overrides = dict(credential_refs or {})
+    filename_overrides = dict(filenames or {})
+
+    rows: list[Source] = []
+    for source_id, declared in _BEACON_ROWS.items():
+        if source_id not in endpoints:
+            continue
+        rows.append(
+            Source(
+                source_id=source_id,
+                vendor=declared.vendor,
+                transport_kind=TransportKind.HTTP_API,
+                source_system=declared.source_system,
+                filenames=tuple(filename_overrides.get(source_id, declared.filenames)),
+                endpoint=endpoints[source_id],
+                payload_format=PayloadFormat.JSONL,
+                credential_ref=credential_overrides.get(
+                    source_id, _default_api_credential_ref(declared.vendor)
+                ),
+                mapping_version=declared.mapping_version,
+                enabled=enabled,
+                transport=transport,
+            )
+        )
+    return tuple(rows)
+
+
+def _default_api_credential_ref(vendor: str) -> str:
+    """``<vendor>_http_api`` — the credential *name* an API row resolves at request time.
+
+    The same convention :func:`_default_credential_ref` uses one transport over, and derived
+    rather than written per row for the same two reasons: five hand-written strings are five
+    chances to typo one, and a field with no hand-written value is a field that never becomes
+    somewhere to paste a token.
+
+    What it resolves to is a **token pair**, not an SSH key — ``BEACON-011``: *"Partner
+    onboarding yields an Access Token plus a separate Private Token used to authenticate API
+    requests."*  That is single-sourced and recorded as such; the pages that would confirm it
+    are ``BEACON-001`` through ``BEACON-007`` and every one is a 403.
+    """
+    return f"{vendor}_{TransportKind.HTTP_API.value.lower()}"
 
 
 def enabled(sources: Sequence[Source]) -> tuple[Source, ...]:

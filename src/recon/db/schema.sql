@@ -63,7 +63,9 @@ CREATE TABLE raw_record (
   batch_id         INTEGER NOT NULL REFERENCES ingest_batch(batch_id),
   source_system    TEXT    NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
-                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK')),
+                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',
+                     -- named vendors, added by the connector layer per requirement 4.7
+                     'BEACON','TPA_VERITY','TPA_CRANEWARE')),
   source_record_id TEXT,                   -- record_id as given; NULL for bank CSV rows
   source_line_no   INTEGER NOT NULL,       -- 1-based position in the file
   payload          TEXT    NOT NULL,       -- verbatim JSONL line, or CSV row re-encoded as JSON
@@ -113,7 +115,9 @@ CREATE TABLE normalized_record (
                      'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION')),
   source_system    TEXT NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
-                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK')),
+                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',
+                     -- named vendors, added by the connector layer per requirement 4.7
+                     'BEACON','TPA_VERITY','TPA_CRANEWARE')),
   adapter_version  TEXT NOT NULL,
   received_at      TEXT NOT NULL,
   -- Idempotency is the SOURCE record_id, never a natural key.  A-17 (duplicate
@@ -144,6 +148,12 @@ CREATE TABLE normalized_record (
   ach_trace_number     TEXT,
   allocation_code      TEXT,
   authorization_number TEXT,
+  -- connector-layer identifiers (4.6). All nullable: a record from before the connector
+  -- layer carries none of these, and writing a value it never had would be fabrication.
+  beacon_id            TEXT,    -- C5: what Beacon assigned on submission
+  hcpcs                TEXT,    -- E2: the J-code a medical-benefit drug is billed under
+  site_id              TEXT,    -- E4: contract pharmacy within an NPI-holding entity
+  payment_reference    TEXT,    -- E3: the manufacturer's own reference, not TRN02
   payer_id             TEXT,   -- resolved reference id, NULL if unresolvable
   amount_cents         INTEGER,
   quantity_milli       INTEGER,
@@ -203,6 +213,8 @@ CREATE TABLE episode (
   billing_provider_npi     TEXT,
   -- 340B
   is_340b_flagged          INTEGER NOT NULL DEFAULT 0 CHECK (is_340b_flagged IN (0,1)),
+  hcpcs                    TEXT,    -- E2
+  site_id                  TEXT,    -- E4
   covered_entity_id        TEXT,
   created_from_received_at TEXT    NOT NULL,
   -- Exactly one reimbursement track.  Never both, never neither.  This is what makes
@@ -244,7 +256,9 @@ CREATE TABLE crosswalk_key (
   key_type              TEXT NOT NULL CHECK (key_type IN (
                           'NCPDP_CLAIM','MEDICAL_CLM01','PAYER_ICN','TRN02',
                           'ALLOCATION_CODE','NATURAL_340B_PHARMACY','NATURAL_340B_MEDICAL',
-                          'PBM_AUTH')),
+                          'PBM_AUTH',
+                          -- added by the connector layer per requirement 4.7; the eight above are unchanged
+                          'BEACON_ID','COVERED_ENTITY_340B','HCPCS','PAYMENT_REFERENCE')),
   key_value             TEXT NOT NULL,     -- canonical normalized string form
   episode_id            TEXT REFERENCES episode(episode_id),
   remittance_norm_id    INTEGER REFERENCES normalized_record(norm_id),  -- bank hop 1
@@ -381,7 +395,8 @@ CREATE TABLE parked_record_key (
   key_type  TEXT    NOT NULL CHECK (key_type IN (
               'NCPDP_CLAIM','MEDICAL_CLM01','PAYER_ICN','TRN02',
               'ALLOCATION_CODE','NATURAL_340B_PHARMACY','NATURAL_340B_MEDICAL',
-              'PBM_AUTH')),
+              'PBM_AUTH',
+              'BEACON_ID','COVERED_ENTITY_340B','HCPCS','PAYMENT_REFERENCE')),
   key_value TEXT    NOT NULL,
   PRIMARY KEY (parked_id, key_type, key_value)
 ) STRICT;
@@ -528,4 +543,4 @@ CREATE TABLE connector_checkpoint (
   PRIMARY KEY (source_id, document_name)
 ) STRICT;
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;

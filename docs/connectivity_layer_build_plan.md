@@ -373,13 +373,32 @@ requirement ids closed, what was discovered, and the test delta.
 | 0 Evidence | V1–V5 | ✅ *(see V1 caveat)* | +14 (599) | `b2e0d11` |
 | 1 Data layer | M1–M6, D2, D3, C1a | ✅ | +29 (628) | `dcafce5` |
 | 2 Framework | A1, **A2 partial**, A3, A5†, B1, B2† | 🔄 | +28 (656) | `9bd79aa` |
-| 3 File pattern | A4, D1, B3, **A2 (SFTP)** | 🔄 | — | — |
-| 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ⬜ | — | — |
+| 3 File pattern | A4, D1, B3, **A2 (SFTP)** | ✅ | +14 (705) | `302b3bd` |
+| 4 API pattern | C1b, C2–C5, **A2 (HTTP)** | ✅ | +15 (720) | pending |
 | 5 Mapping | E1–E5 | ⬜ | — | — |
 | 6 Proof | F1–F3 | ⬜ | — | — |
-| 7 UI | goal item 5 | ⬜ | — | — |
+| 7.1 UI restyle | goal item 5 | ✅ | — | `5eafe36` |
+| 7.2 Connectivity page + browser | goal item 5 | ⬜ | — | — |
 
-Baseline was **585**. All 585 still pass **unedited**.
+Baseline was **585**.
+
+**One pre-existing test has been edited, and only one.** `tests/test_decisions.py`'s
+Decision-A24 enum pin asserted set equality against exactly eight `KeyType` members, which
+no new key type can satisfy — and §4.7 requires four. Ruling 1 above anticipated this. The
+edit is an *addition*: the eight are still pinned exactly, the four connector types are
+pinned exactly in their own constant, and both directions still fail on drift. Strictly more
+is checked than before. Every other pre-existing test remains untouched.
+
+**Environment note.** The suite runs on Python 3.12 / SQLite 3.50, because the 3.11
+interpreter available on this machine is ARM64 and has no `cryptography` wheel — so paramiko
+cannot load on it and wave 3's SFTP work could not be exercised at all. On SQLite 3.50's
+query planner, `test_query_plans.py::test_latest_verdict_walks_the_index_not_the_table`
+selects `sqlite_autoindex_verdict_1` over `ix_verdict_latest` and fails. **This is not a
+regression:** it fails identically at `dbb129e`, the commit before this branch began,
+verified in a worktree on the same interpreter. The query is still an index seek; the planner
+simply prefers a different index. Reported as "705 passed, 1 pre-existing environmental
+failure" rather than as green, because rounding it to green is how a real failure later gets
+mistaken for this one.
 
 ### Corrections after adversarial review
 

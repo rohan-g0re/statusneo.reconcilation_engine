@@ -89,6 +89,21 @@ class SourceSystem(StrEnum):
     MEDICAL_REMITTANCE = "MEDICAL_REMITTANCE"
     BANK = "BANK"
 
+    # ── named vendors, added by the connector layer (requirement §4.7) ───────
+    #
+    # ``TPA_PORTAL`` deliberately stays as it is and is NOT repurposed. It attributes the
+    # existing generated 340B feed, which is a *generic* TPA export; re-pointing it at Verity
+    # would silently reclassify every record already stored under it, and a source system is
+    # how a reader answers "who told us this".
+    #
+    # Beacon is its own system rather than a flavour of ``MANUFACTURER_REBATE`` because
+    # ``DOC2-004`` gives it its own row in the source-of-truth table: it is authoritative for
+    # rebate submission identifiers, validation outcomes and rebate status, which is a
+    # different authority from the manufacturer's own payment.
+    BEACON = "BEACON"
+    TPA_VERITY = "TPA_VERITY"
+    TPA_CRANEWARE = "TPA_CRANEWARE"
+
 
 class RecordKind(StrEnum):
     """Canonical normalized shapes.
@@ -165,6 +180,40 @@ class KeyType(StrEnum):
     NATURAL_340B_PHARMACY = "NATURAL_340B_PHARMACY"
     NATURAL_340B_MEDICAL = "NATURAL_340B_MEDICAL"
     PBM_AUTH = "PBM_AUTH"
+
+    # ── added by the connector layer (requirement §4.7) ──────────────────────
+    #
+    # The eight above are Decision A24 and are unchanged; these four are additive, and
+    # ``tests/test_decisions.py`` now asserts the two sets separately so that adding one can
+    # never quietly redefine the other. Existing members keep their string values, so no
+    # stored row changes meaning.
+    #
+    # Beacon assigns BEACON_ID on submission (``BEACON-013``, ``DOC2-007``), and it is what
+    # joins our episode to the manufacturer's rebate decision and that decision to the
+    # payment reference on the bank leg (requirement C5).
+    BEACON_ID = "BEACON_ID"
+    # Beacon permissions are granted per 340B ID (``BEACON-012``, ``DOC2-008``), which is why
+    # the covered entity has to be a key and not just a column nobody populates (E1).
+    COVERED_ENTITY_340B = "COVERED_ENTITY_340B"
+    # ``DOC2-002`` step 4 reads "NDC/HCPCS": a medical-benefit drug is billed by J-code, and
+    # modelling only NDC loses it (E2).
+    HCPCS = "HCPCS"
+    # Named explicitly in ``DOC2-002`` step 4. Today a payment reference exists only as
+    # ``TRN02`` or ``allocation_code``, neither of which a manufacturer's own reference is (E3).
+    PAYMENT_REFERENCE = "PAYMENT_REFERENCE"
+
+
+#: Key types the connector layer adds (requirement §4.7).
+#:
+#: Kept visually separate from Decision A24's original eight above, because the eight are a
+#: ratified decision about what a *claim* joins on and these four are about what a *connector*
+#: joins on — and ``tests/test_decisions.py`` asserts each set independently so that adding
+#: one can never quietly redefine the other.
+#:
+#: ``BEACON_ID`` is requirement C5: Beacon assigns it on submission, and it is what joins our
+#: episode to the manufacturer's rebate decision and that decision to the payment reference on
+#: the bank leg.  The other three are wave 5's (E1, E2, E3) and are declared here rather than
+#: added later, so the schema's two CHECK lists move exactly once.
 
 
 class ParkReason(StrEnum):

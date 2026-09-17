@@ -605,11 +605,104 @@ def band_wave_3(b: Band, y: int) -> None:
     )
 
 
+def band_wave_4(b: Band, y: int) -> None:
+    b.text("h", x=LEFT_X, y=y, body="WAVE 4  ·  API PATTERN", size=20, colour=INK_HEADING)
+    b.text(
+        "n",
+        x=LEFT_X,
+        y=y + 28,
+        body="Beacon  —  the only bidirectional connector in the whole assessment",
+        size=13,
+    )
+
+    b.box(
+        "srv",
+        x=LEFT_X,
+        y=y + 56,
+        width=260,
+        height=74,
+        label="beacon_server\nstdlib http · seeded",
+        stroke=MOCK_STROKE,
+        fill=MOCK_FILL,
+        ink=MOCK_INK,
+        size=13,
+    )
+    b.box(
+        "http",
+        x=LEFT_X + 280,
+        y=y + 56,
+        width=270,
+        height=74,
+        label="HttpApiTransport (A2)\nAccess + Private token",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=13,
+    )
+    b.box(
+        "out",
+        x=LEFT_X + 570,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="outbound (C2)\nclaim → Beacon ID",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=13,
+    )
+    b.box(
+        "in",
+        x=LEFT_X + 840,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="inbound (C3)\nreason kept VERBATIM",
+        stroke=BOX_STROKE,
+        fill=BOX_FILL,
+        ink=BOX_INK,
+        size=13,
+    )
+    b.box(
+        "mode",
+        x=LEFT_X + 1110,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="mode A / mode B (C4)\nB ⇒ outbound UNREACHABLE",
+        stroke="#be123c",
+        fill="#ffe4e6",
+        ink="#881337",
+        size=12,
+    )
+    b.box(
+        "key",
+        x=LEFT_X + 1380,
+        y=y + 56,
+        width=250,
+        height=74,
+        label="KeyType.BEACON_ID (C5)\njoins episode → rebate → cash",
+        stroke=EVIDENCE_STROKE,
+        fill=EVIDENCE_FILL,
+        ink=EVIDENCE_INK,
+        size=12,
+    )
+    b.text(
+        "f",
+        x=LEFT_X,
+        y=y + 140,
+        body="VERITY-004 is first-hand: a shipping TPA offers the covered entity exactly this A/B choice  —  so C4 guards a real double submission",
+        size=13,
+        colour="#881337",
+    )
+
+
 BANDS = {
     0: ("c0_", band_wave_0),
     1: ("c1_", band_wave_1),
     2: ("c2_", band_wave_2),
     3: ("c3_", band_wave_3),
+    4: ("c4_", band_wave_4),
 }
 
 

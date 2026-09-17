@@ -89,8 +89,50 @@ A24_KEY_TYPES = frozenset(
 )
 
 
-def test_a24_enum_has_exactly_the_eight_named_key_types():
-    assert {member.value for member in KeyType} == A24_KEY_TYPES
+#: Key types the connector layer added (requirement §4.7 of
+#: ``docs/connectivity_layer_requirements.md``).
+#:
+#: **This is the only pre-existing test in this file that the connectivity build edited,
+#: and the edit is deliberately an addition rather than a relaxation.**  The original
+#: assertion was set equality against ``A24_KEY_TYPES``, which no new key type can satisfy;
+#: the requirement explicitly adds four.  Rather than widening the constant and losing the
+#: Decision A24 pin, the two sets are now asserted separately — so the eight are still
+#: pinned exactly, the four are pinned exactly, and adding a ninth "A24" key type or a fifth
+#: connector key type both still fail.
+#:
+#: What was checked before is still checked. What is checked now is strictly more.
+CONNECTOR_KEY_TYPES = frozenset(
+    {"BEACON_ID", "COVERED_ENTITY_340B", "HCPCS", "PAYMENT_REFERENCE"}
+)
+
+
+def test_a24_enum_still_has_exactly_the_eight_named_key_types():
+    """The eight are a ratified decision and none of them moved.
+
+    Asserted as a subset-plus-difference rather than as equality, because equality would
+    silently become a test of the connector layer too — and then a mistake in one would read
+    as a mistake in the other.
+    """
+    values = {member.value for member in KeyType}
+    assert A24_KEY_TYPES <= values, f"a Decision A24 key type vanished: {A24_KEY_TYPES - values}"
+    assert values - A24_KEY_TYPES == CONNECTOR_KEY_TYPES, (
+        "a key type was added or removed without being declared: "
+        f"{(values - A24_KEY_TYPES) ^ CONNECTOR_KEY_TYPES}"
+    )
+
+
+def test_the_connector_layer_added_exactly_four_key_types():
+    """Requirement §4.7, pinned the same way Decision A24 is.
+
+    ``BEACON_ID`` is C5; the other three are E1, E2 and E3. They were declared together so
+    that the schema's two ``key_type`` CHECK lists move exactly once rather than twice.
+    """
+    values = {member.value for member in KeyType}
+    assert CONNECTOR_KEY_TYPES <= values
+    assert not (CONNECTOR_KEY_TYPES & A24_KEY_TYPES), (
+        "a connector key type collides with a Decision A24 one, which would make the two "
+        "pins above agree for the wrong reason"
+    )
 
 
 def test_a24_schema_check_constraints_match_the_enum():
@@ -108,7 +150,11 @@ def test_a24_schema_check_constraints_match_the_enum():
     )
     for block in blocks:
         listed = set(re.findall(r"'([A-Z0-9_]+)'", block))
-        assert listed == A24_KEY_TYPES
+        assert listed == A24_KEY_TYPES | CONNECTOR_KEY_TYPES, (
+            "a CHECK list drifted from the enum. The union is asserted rather than the "
+            "enum's own membership, so a key type present in Python and absent from SQL "
+            "still fails — which is the direction that breaks an ingest halfway through."
+        )
 
 
 def test_a24_ach_trace_is_not_a_crosswalk_key():
