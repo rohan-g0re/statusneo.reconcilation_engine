@@ -163,6 +163,33 @@ class RecordKind(StrEnum):
     BEACON_VALIDATION_OUTCOME = "BEACON_VALIDATION_OUTCOME"
     BEACON_PAYMENT_REFERENCE = "BEACON_PAYMENT_REFERENCE"
 
+    #: One line of a TPA's own rebate invoice -- ``verity_invoices``, the only vendor dataset
+    #: that reports money rather than a decision.
+    #:
+    #: **Not ``REBATE_DISPENSE_LINE``, and the reason is the authority table rather than a
+    #: preference.**  ``connectors.authority._REBATE_STATUS`` lists ``REBATE_BATCH`` and
+    #: ``REBATE_DISPENSE_LINE`` among its ``record_kinds`` with ``authoritative =
+    #: {BEACON, MANUFACTURER_REBATE}``, so a ``TPA_VERITY`` source emitting either is refused
+    #: at the kind check before a single field is read: *"a TPA_VERITY source may not assert
+    #: rebate status: a REBATE_DISPENSE_LINE record is the claim itself."*  DOC2-004 gives
+    #: rebate status to Beacon and the manufacturer, and a TPA's invoice is that TPA telling
+    #: us what it billed -- which is a real fact, owned by Verity, about a decision Verity did
+    #: not make.
+    #:
+    #: Both failure modes ``BEACON_PAYMENT_REFERENCE`` names apply here verbatim, which is why
+    #: this kind is shaped the same way.  ``REBATE_BATCH`` sits in
+    #: ``pipeline._RESOLUTION_ROOTS``, where ``_attach`` returns before it reaches
+    #: ``looks_up``, so an invoice line modelled as a batch would resolve to no episode at all.
+    #: ``REBATE_DISPENSE_LINE`` is worse: ``dimensions._read_rebate_lines`` sums across rebate
+    #: lines, and ``recon.mocks.verity_export`` formats the same generated dispense the 340B
+    #: feed already reports -- so one payment read through two doors stamps C-14 "duplicate
+    #: rebate payment" on every paid episode.
+    #:
+    #: Deliberately absent from ``dimensions._KIND_BUCKETS`` and present in
+    #: ``engine.run._ROLE_BY_KIND``: gathered, cited, visible on the trace, contributing to no
+    #: dimension.
+    TPA_INVOICE_LINE = "TPA_INVOICE_LINE"
+
 
 class KeyType(StrEnum):
     """The eight crosswalk key types (Decision A24), one per bridge in
@@ -331,6 +358,14 @@ class EvidenceRole(StrEnum):
     #: one.  Unlike ``record_kind`` this has no SQL ``CHECK`` behind it; ``schema.sql`` says
     #: the column is "validated against domain.enums.EvidenceRole in Python".
     REBATE_SUBMISSION = "REBATE_SUBMISSION"
+
+    #: What a ``TPA_INVOICE_LINE`` was cited as.  Its own role rather than ``REBATE_LINE``,
+    #: which belongs to ``REBATE_DISPENSE_LINE`` and means *this is money the engine counted*.
+    #: An invoice line is money the engine deliberately did not count -- what the TPA says it
+    #: billed, shown beside what the manufacturer actually paid -- and borrowing the rebate
+    #: role would put the two on a trace under one name and invite exactly the reading the
+    #: separate kind exists to prevent.
+    TPA_INVOICE = "TPA_INVOICE"
 
 
 class ReasonCode(StrEnum):

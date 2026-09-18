@@ -712,15 +712,12 @@ def _adapt_tpa(payload: dict[str, Any]) -> CanonicalRecord:
 #: The vendor datasets that describe a qualification decision, and therefore the ones
 #: :func:`_adapt_vendor_export` can adapt.
 #:
-#: ``verity_invoices`` is mapped, contract-checked and deliberately **not** here.  It is the
-#: rebate money — ``invoice_line_amount`` against ``batch_total_rebate_amount`` — which is a
-#: ``REBATE_BATCH`` parent with ``REBATE_DISPENSE_LINE`` children, not a qualification.
-#: Pushing it through this adapter would produce a record whose ``status_code`` is null and
-#: whose money is nowhere, and the batch/line split it actually needs is a decision about how
-#: one invoice row relates to the batch above it that no evidence we hold answers.  A loud
-#: refusal is worth more than a plausible record: this is the same call as leaving the
-#: prescriber-affiliation inference out, where a weak answer proved worse than no answer.
+#: ``verity_invoices`` is not here because it is not a qualification; it has its own adapter
+#: below and its own record kind.
 _QUALIFICATION_DATASETS = frozenset({"verity_accumulations", "craneware_claims_report"})
+
+#: The vendor datasets that report money rather than a decision.  One, today.
+_INVOICE_DATASETS = frozenset({"verity_invoices"})
 
 
 def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
@@ -752,6 +749,8 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
     from recon.connectors import vendors as vendor_mappings
 
     mapping = vendor_mappings.mapping_for(payload["source_id"])
+    if mapping.source_id in _INVOICE_DATASETS:
+        return _adapt_vendor_invoice(mapping, payload)
     if mapping.source_id not in _QUALIFICATION_DATASETS:
         raise AdapterError(
             f"{mapping.source_id} is mapped and readable but has no adapter: it does not "
@@ -866,6 +865,167 @@ def _adapt_vendor_export(payload: dict[str, Any]) -> CanonicalRecord:
             )
         )
     return parent
+
+
+def _adapt_vendor_invoice(mapping: Any, payload: dict[str, Any]) -> CanonicalRecord:
+    """One line of a TPA's own rebate invoice — the only vendor row that reports money.
+
+    ``verity_invoices`` was mapped and contract-checked for two waves and refused at this
+    point with "it does not describe a qualification decision", which was true and left the
+    rebate money unreachable through the vendor door.  This is the adapter that resolves it,
+    and what shape it takes was decided by the authority table rather than by preference.
+
+    ═══ Why this is not a rebate line ══════════════════════════════════════════════
+
+    The obvious modelling is a ``REBATE_BATCH`` parent with ``REBATE_DISPENSE_LINE`` children,
+    matching what ``_adapt_rebate_batch`` builds out of the 340B feed.  **The system refuses
+    it, in as many words.**  ``connectors.authority._REBATE_STATUS`` lists both kinds with
+    ``authoritative = {BEACON, MANUFACTURER_REBATE}``, and asking it directly returns:
+
+        a TPA_VERITY source may not assert rebate status: a REBATE_DISPENSE_LINE record is
+        the claim itself, and Beacon is authoritative per DOC2-004
+
+    That is the same boundary that quarantined nine Craneware rows when this package first
+    let a TPA author ``manufacturer_status``, arriving one level up: not a field a TPA may
+    not set, but a *kind* a TPA may not be.  And it is the correct boundary.  A TPA's invoice
+    is a real fact that Verity owns — this is what we billed, against this batch — about a
+    payment decision Verity did not make.  Relaying it is honest; asserting it is not.
+
+    Two mechanical failures sit behind the same wall, either of which would be silent:
+
+    * ``REBATE_BATCH`` is in ``pipeline._RESOLUTION_ROOTS``, where ``_attach`` returns before
+      it reads ``looks_up`` — so an invoice line modelled as a batch would publish its
+      allocation code and then resolve to no episode at all.  One invoice row per batch would
+      also mean N parents publishing one ``ALLOCATION_CODE``, and a second publisher does not
+      produce a wrong answer, it produces *no* answer: every deposit carrying that code parks
+      as ``AMBIGUOUS_KEY_MATCH``.
+    * ``REBATE_DISPENSE_LINE`` is worse, and it is the C-14 guard in a new place.
+      ``dimensions._read_rebate_lines`` sums across the bucket and flags ``DUPLICATE`` on
+      ``line_count > 1 and len(amounts) == 1``.  ``recon.mocks.verity_export`` formats the
+      same generated dispense the 340B feed already reports, so the invoice line's amount *is*
+      the rebate line's amount — one payment through two doors, stamping C-14 "duplicate
+      rebate payment" on every paid episode in the profile.
+
+    So :class:`~recon.domain.enums.RecordKind.TPA_INVOICE_LINE` is its own kind, mapped in
+    ``engine.run._ROLE_BY_KIND`` and deliberately absent from ``dimensions._KIND_BUCKETS``:
+    gathered, cited, visible on the trace, moving no verdict.  Exactly the arrangement the
+    Beacon inbound leg landed under, for exactly the same reason.
+
+    ═══ The batch total is carried and never summed ════════════════════════════════
+
+    Every row repeats ``batch_total_rebate_amount``, and the plan this work follows warned
+    that lines need not sum to it, citing ``RBT-20251031-44202`` — 26,500.00 of lines against
+    a declared 30,094.00.  **That measurement came out of a superseded export** and the file
+    it came from no longer exists; see ``verity_export.remove_superseded``.  In the live
+    export every batch's lines sum to its declared total exactly.
+
+    The handling is unchanged by that, because it never depended on the disagreement being
+    real.  Both figures are carried verbatim as text and neither is added to anything: a row
+    that claimed the batch total as its own amount would multiply the batch by its line count,
+    and an adapter that *checked* the two against each other would be deciding a control total
+    one row at a time, without the file.  ``connectors.control_totals`` owns that comparison
+    and has the whole document; this has one line of it.
+
+    ``amount_cents`` is therefore ``None``, which is the property the tests pin.
+
+    ═══ A reversed invoice line emits no reversal child ════════════════════════════
+
+    ``_adapt_vendor_export`` gives a reversed row a ``TPA_REVERSAL`` child, and this
+    deliberately does not, though the mapping carries the same four reversal columns.
+    ``TPA_REVERSAL`` *is* bucketed, and ``dimensions`` reads ``clawed_back =
+    bool(evidence.tpa_reversals) and paid > 0`` — so a second reversal arriving through the
+    invoice door would move episodes to C-13 "clawed back".  The reversal of a dispense is a
+    fact about the dispense, and ``verity_accumulations`` is where this vendor reports it;
+    repeating it here is the same event through a second door, which is the hazard this whole
+    function is shaped around.  The columns are carried in ``canonical`` so a dossier can show
+    that the invoice agreed.
+    """
+    from recon.connectors import vendors as vendor_mappings
+
+    record = vendor_mappings.canonical(mapping, payload)
+
+    ndc11 = record.get("ndc11")
+    if not ndc11:
+        raise AdapterError(
+            f"{mapping.source_id} row identifies no drug: an invoice line with no NDC has no "
+            "key on which it could ever reach the dispense it bills for"
+        )
+    fill_date = keys.wire_date_to_iso(record["fill_date"])
+
+    # Shaped for ``_tpa_lookup_keys`` in the feed's own spelling, exactly as
+    # ``_adapt_vendor_export`` does it, so both vendor doors key one dispense one way.
+    for_keys = {
+        "rx_number": record.get("rx_number"),
+        "pharmacy_npi": record.get("pharmacy_npi"),
+        "provider_npi": record.get("provider_npi"),
+    }
+
+    return CanonicalRecord(
+        record_kind=RecordKind.TPA_INVOICE_LINE,
+        source_system=SourceSystem(payload["source_system"])
+        if payload.get("source_system")
+        else _VENDOR_SOURCE_SYSTEMS[mapping.vendor],
+        received_at=payload["received_at"],
+        idempotency_key=_vendor_idempotency_key(mapping, payload),
+        canonical={
+            "invoice_number": record.get("invoice_number"),
+            "accumulation_id": record.get("accumulation_id"),
+            "manufacturer": record.get("manufacturer"),
+            "covered_entity_id": record.get("covered_entity_id"),
+            # The batch this line bills against. Carried, not published as a crosswalk key:
+            # the manufacturer's own REBATE_BATCH already publishes ALLOCATION_CODE, and a
+            # second publisher of one key value parks every deposit that carries it.
+            "rebate_allocation_code": record.get("rebate_allocation_code"),
+            # Relayed, and the authority table asked for it in those words. ``beacon_id`` is
+            # governed by ``_REBATE_SUBMISSION_IDENTIFIER`` with ``authoritative = {BEACON}``,
+            # whose own rationale reads: *"a Verity export echoes a beacon_id as a lookup
+            # handle, and a caller resolving a key rather than asserting a fact should not
+            # pass it here."* Writing the plain key -- or promoting it to the
+            # ``normalized_record.beacon_id`` column, which ``pipeline._GOVERNED_COLUMNS``
+            # also checks -- quarantines every invoice row. It was doing exactly that until
+            # this comment existed.
+            "relayed_beacon_id": record.get("beacon_id"),
+            # **Relayed, never asserted**, under the same prefix the qualification adapter
+            # uses. Verity reads this off the payment batch line; DOC2-004 gives the decision
+            # itself to Beacon and the manufacturer.
+            "relayed_manufacturer_status": record.get("batch_line_manufacturer_status"),
+            # Money, verbatim as the file spells it, in both directions. Text on purpose --
+            # see the docstring. Named so that no key here collides with
+            # ``rebate_amount_cents``, which ``dimensions._read_rebate_lines`` reads.
+            "relayed_invoice_line_amount": record.get("rebate_amount"),
+            "relayed_batch_total_amount": record.get("batch_total_rebate_amount"),
+            "payment_effective_date": (
+                keys.wire_date_to_iso(record["payment_effective_date"])
+                if record.get("payment_effective_date")
+                else None
+            ),
+            "batch_received_at": record.get("batch_received_at"),
+            # Carried, not emitted as a TPA_REVERSAL child -- see the docstring.
+            "reversal_status": record.get("reversal_status"),
+            "reversal_received_at": record.get("reversal_received_at"),
+            "reversal_reason": record.get("reversal_reason"),
+            "reversal_quantity": record.get("reversal_quantity"),
+            "vendor": mapping.vendor,
+            "dataset": mapping.dataset,
+            "source_id": mapping.source_id,
+        },
+        pharmacy_npi=record.get("pharmacy_npi"),
+        provider_npi=record.get("provider_npi"),
+        rx_number=record.get("rx_number"),
+        ndc11=ndc11,
+        date_of_service=fill_date,
+        covered_entity_id=record.get("covered_entity_id"),
+        # ``beacon_id`` is left unset for the reason given in ``canonical`` above: the column
+        # is governed, and Beacon alone may fill it.
+        # **Deliberately absent.** Promoting the line amount here is the single change that
+        # would turn this record into money the engine counts.
+        amount_cents=None,
+        # Verity owns no status on this row. The one status it prints is the manufacturer's,
+        # and ``status_code`` is explicitly ungoverned by ``authority.py`` -- so writing it
+        # here would slip past the guard rather than satisfy it.
+        status_code=None,
+        looks_up=_tpa_lookup_keys(for_keys, ndc11, fill_date),
+    )
 
 
 def _vendor_idempotency_key(mapping: Any, payload: dict[str, Any]) -> str:

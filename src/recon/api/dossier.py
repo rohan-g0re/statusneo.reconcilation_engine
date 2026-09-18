@@ -531,6 +531,27 @@ RECORD_PROJECTIONS: dict[RecordKind, Projection] = {
         # different things, and only the first is safe here.
         simple=("rebate_amount", "payment_effective_date"),
     ),
+    # A TPA's own rebate invoice line, and the projection is most of the point of landing it.
+    # This record moves no verdict by construction, so the only thing it can ever be is
+    # *shown* -- what Verity says it billed, beside what the manufacturer actually paid. A
+    # kind that contributes to no dimension and appears on no timeline would have been worth
+    # nothing at all.
+    RecordKind.TPA_INVOICE_LINE: Projection(
+        body=(
+            "invoice_number", "manufacturer", "rebate_allocation_code",
+            "relayed_manufacturer_status", "relayed_invoice_line_amount",
+            "relayed_batch_total_amount", "payment_effective_date", "covered_entity_id",
+            "reversal_status", "reversal_reason",
+        ),
+        # Identity and the handles that tie this line to the rest of the story: the
+        # accumulation it pays, and the Beacon submission it was billed under.
+        row=("accumulation_id", "relayed_beacon_id"),
+        # The line amount, never the batch total. The batch total is repeated on every row of
+        # a batch, so a story that led with it would read as though each line were paid the
+        # whole payment -- which is exactly the fragmentation this kind exists to avoid, and
+        # it would be avoided in the data and reintroduced in the UI.
+        simple=("relayed_invoice_line_amount", "relayed_manufacturer_status"),
+    ),
 }
 
 #: Backward-compatible alias -- see the note on `RECORD_PROJECTIONS` above.

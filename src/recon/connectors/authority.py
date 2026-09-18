@@ -532,6 +532,17 @@ RECORD_KINDS_WITHOUT_DOC2_AUTHORITY: dict[RecordKind, str] = {
     RecordKind.MEDICAL_ACKNOWLEDGMENT: (
         "A 277CA acknowledgement; reimbursement leg, no DOC2-004 row."
     ),
+    RecordKind.TPA_INVOICE_LINE: (
+        "A line of a TPA's own rebate invoice.  DOC2-004 has no row for what a TPA billed, "
+        "because it apportions the *decisions* -- qualification to the TPA, rebate status to "
+        "Beacon and the manufacturer -- and an invoice is neither.  It is the TPA's account "
+        "of a payment somebody else decided, which is why this kind exists at all: "
+        "REBATE_DISPENSE_LINE is governed by REBATE_STATUS and a TPA source is refused it "
+        "outright.  Ungoverned here is not a licence.  Every field this kind carries that "
+        "another party owns is relayed under a prefixed name -- relayed_manufacturer_status, "
+        "relayed_beacon_id -- and the field rules below still apply to it, which is exactly "
+        "how the plain beacon_id spelling was caught."
+    ),
 }
 
 

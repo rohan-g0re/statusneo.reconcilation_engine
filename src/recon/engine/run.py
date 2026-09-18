@@ -278,6 +278,11 @@ _ROLE_BY_KIND = {
     str(RecordKind.BEACON_ACKNOWLEDGMENT): EvidenceRole.REBATE_SUBMISSION,
     str(RecordKind.BEACON_VALIDATION_OUTCOME): EvidenceRole.REBATE_SUBMISSION,
     str(RecordKind.BEACON_PAYMENT_REFERENCE): EvidenceRole.REBATE_SUBMISSION,
+    # A TPA's own invoice line, under the same arrangement and for the same reason: mapped
+    # here so it is cited as itself, left out of ``dimensions._KIND_BUCKETS`` so it moves no
+    # verdict.  Its own role rather than ``REBATE_LINE``, because the money on this row is
+    # what the TPA says it billed and not what the engine counted.
+    str(RecordKind.TPA_INVOICE_LINE): EvidenceRole.TPA_INVOICE,
 }
 
 

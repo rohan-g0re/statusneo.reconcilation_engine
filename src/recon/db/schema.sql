@@ -151,7 +151,11 @@ CREATE TABLE normalized_record (
                      'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION',
                      -- Beacon's inbound shapes, added by the connector layer per DOC2-007.
                      'BEACON_ACKNOWLEDGMENT','BEACON_VALIDATION_OUTCOME',
-                     'BEACON_PAYMENT_REFERENCE')),
+                     'BEACON_PAYMENT_REFERENCE',
+                     -- A TPA's own rebate invoice line.  Not REBATE_DISPENSE_LINE: DOC2-004
+                     -- gives rebate status to Beacon and the manufacturer, and authority.py
+                     -- refuses a TPA source that kind outright.
+                     'TPA_INVOICE_LINE')),
   source_system    TEXT NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
                      'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',
@@ -584,4 +588,4 @@ CREATE TABLE connector_checkpoint (
   PRIMARY KEY (source_id, document_name)
 ) STRICT;
 
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;

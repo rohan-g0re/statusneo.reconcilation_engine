@@ -444,50 +444,56 @@ def test_redelivering_the_same_export_ingests_nothing_new(conn, vendor_files, so
 # ═══ the dataset that is mapped and still refuses to adapt ═══
 
 
-def test_verity_invoices_is_readable_and_still_refuses_to_adapt(conn, vendor_files):
-    """Rebate money is not a qualification, and the adapter says so by name.
+def test_verity_invoices_lands_as_its_own_kind_and_never_as_a_qualification(conn, vendor_files):
+    """Rebate money is not a qualification, and it is not a rebate line either.
 
-    ``verity_invoices`` is fully wired up to the point of adaptation: a mapping module claims
-    it, a schema contract is registered for it, and every row passes that contract.  It is left
-    out of ``_QUALIFICATION_DATASETS`` on purpose.  The dataset carries
-    ``invoice_line_amount`` against ``batch_total_rebate_amount`` — a ``REBATE_BATCH`` parent
-    with ``REBATE_DISPENSE_LINE`` children — and pushing it through this adapter would produce
-    a qualification whose status is null and whose money is nowhere.
+    This test used to assert that ``verity_invoices`` **refused** to adapt, on the grounds
+    that nobody had decided how an invoice row relates to the batch above it.  The decision
+    got made, and the authority table made it: ``_REBATE_STATUS`` lists ``REBATE_BATCH`` and
+    ``REBATE_DISPENSE_LINE`` with ``authoritative = {BEACON, MANUFACTURER_REBATE}``, so the
+    modelling the old docstring proposed was never available to a TPA source in the first
+    place.  ``TPA_INVOICE_LINE`` is what a TPA may say: this is what we billed.
 
-    The refusal is the assertion, and so is the message.  A quarantine reading *"could not be
-    adapted"* sends somebody looking for a malformed file that is in fact perfectly well
-    formed; one naming the dataset says the thing that is actually true, which is that nobody
-    has decided how an invoice row relates to the batch above it.
+    What that older test was really protecting is asserted here instead, and asserted harder.
+    Its stated fear was *"rebate money on the ledger twice: once from the invoice row and once
+    from the accumulation that is the same dispense."*  That is still the failure that matters,
+    so this checks the two properties that make it impossible — the kind is not one the money
+    dimensions read, and no row carries an ``amount_cents`` — rather than checking that the
+    rows never arrived at all.
 
-    If this ever starts passing silently — rows landing as qualifications — the leg has begun
-    inventing meaning, and the first visible symptom is rebate money on the ledger twice: once
-    from the invoice row and once from the accumulation that is the same dispense.
+    The full argument, including what a bucketed kind would have cost, lives in
+    ``tests/test_vendor_invoices.py``.
     """
     mapping, path, parsed = _export(vendor_files, REBATE_SOURCE_ID)
     assert schema_registry.REGISTRY.get(REBATE_SOURCE_ID) is not None
-    assert parsed.parsed_record_count > 0, f"{path.name} has no rows to refuse"
+    assert parsed.parsed_record_count > 0, f"{path.name} has no rows to adapt"
     violations = [
         detail
         for _line_no, row in parsed.rows
         if (detail := vendors.schema_violation(mapping, row)) is not None
     ]
     assert not violations, (
-        f"{path.name} fails its own contract, so the refusal below would be the contract "
+        f"{path.name} fails its own contract, so anything below would be the contract "
         f"talking rather than the adapter: {violations[:2]}"
     )
     assert REBATE_SOURCE_ID not in adapters._QUALIFICATION_DATASETS
 
     stats = _run(conn, [_source(vendor_files, REBATE_SOURCE_ID)])
-    assert stats.raw_records == parsed.parsed_record_count, "the rows must land before refusal"
-    assert stats.normalized_records == 0, (
-        f"{stats.normalized_records} invoice rows were adapted as qualification decisions"
+    assert stats.raw_records == parsed.parsed_record_count
+    assert stats.quarantined == 0, "every invoice row should adapt cleanly now"
+    assert stats.normalized_records == parsed.parsed_record_count
+
+    rows = conn.execute(
+        "SELECT record_kind, amount_cents FROM normalized_record"
+    ).fetchall()
+    assert {row["record_kind"] for row in rows} == {str(RecordKind.TPA_INVOICE_LINE)}, (
+        "an invoice row landed under some other kind; if that kind is TPA_QUALIFICATION the "
+        "leg is inventing a decision, and if it is REBATE_DISPENSE_LINE the money is now "
+        "counted twice"
     )
-    rows = conn.execute("SELECT reason_code, detail FROM quarantined_record").fetchall()
-    assert len(rows) == parsed.parsed_record_count == stats.quarantined
-    assert {row["reason_code"] for row in rows} == {str(QuarantineReason.UNPARSEABLE)}
-    assert all(REBATE_SOURCE_ID in row["detail"] for row in rows), (
-        "the quarantine detail does not name the dataset, so an operator reading the queue "
-        f"cannot tell which file this was: {rows[0]['detail'][:160]!r}"
+    assert all(row["amount_cents"] is None for row in rows), (
+        "an invoice line carries an amount the engine can sum, which is the ledger-twice "
+        "failure the previous version of this test existed to prevent"
     )
 
 

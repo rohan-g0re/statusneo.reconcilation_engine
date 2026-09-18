@@ -400,9 +400,16 @@ def test_adapter_coverage_finds_the_real_dispatch_table_and_the_real_allow_list(
         "the shape probe and the dispatch table disagree about which source systems have an "
         "adapter"
     )
-    assert coverage.datasets == frozenset(adapters._QUALIFICATION_DATASETS), (
-        "the shape probe and the per-dataset allow list disagree; either the probe missed the "
-        "table, or it absorbed a second collection of strings that is not an allow list"
+    # Both allow lists, named individually. There were two datasets and one table when this
+    # was written; ``verity_invoices`` now has an adapter of its own and lives in a second.
+    # Naming each one keeps the asymmetry the comment above insists on -- the probe finds
+    # tables by shape, this finds them by name -- where a union built by the same
+    # shape-matching rule would just be the probe again, agreeing with itself.
+    assert coverage.datasets == frozenset(
+        adapters._QUALIFICATION_DATASETS | adapters._INVOICE_DATASETS
+    ), (
+        "the shape probe and the per-dataset allow lists disagree; either the probe missed a "
+        "table, or it absorbed a collection of strings that is not an allow list"
     )
     # Not a tautology: two empty sets are equal, and the whole hazard here is emptiness.
     assert coverage.source_systems and coverage.datasets
@@ -502,28 +509,46 @@ def test_a_reshaped_allow_list_cannot_silently_unadapt_a_working_source(
     )
 
     # And the door that a caller actually uses, after the behaviour-preserving refactor.
-    monkeypatch.setattr(
-        adapters, "_QUALIFICATION_DATASETS", tuple(adapters._QUALIFICATION_DATASETS)
-    )
+    #
+    # BOTH allow lists have to be reshaped, and the reason is the guard working rather than a
+    # test detail. The probe matches by shape and unions what it finds, so while any one
+    # non-empty set of strings survives in the adapter module the answer is not empty and
+    # there is nothing to raise about -- which is the correct behaviour. Reshaping only
+    # ``_QUALIFICATION_DATASETS`` stopped triggering the guard the moment ``_INVOICE_DATASETS``
+    # existed, and the test would have gone on passing for the wrong reason if the assertion
+    # had been "does not raise".
+    for table in ("_QUALIFICATION_DATASETS", "_INVOICE_DATASETS"):
+        monkeypatch.setattr(adapters, table, tuple(getattr(adapters, table)))
     with pytest.raises(ValueError) as excinfo:
         readiness.build_report(env={}, secrets_file=no_secrets, adapters=adapters)
     assert "allow list" in str(excinfo.value)
 
 
 def test_the_connectivity_endpoint_tells_no_adapter_apart_from_no_decision(tmp_path):
-    """Registry row to probe to cell to JSON, over HTTP, on the three states that matter.
+    """Registry row to probe to cell to JSON, over HTTP, on the states that matter.
 
-    *Not adapted* covers two opposite findings and the payload has to keep them apart.  One
-    vendor dataset here is mapped, contract-checked, perfectly readable and deliberately has no
-    adapter — the rows are rebate money rather than a qualification decision, and adapting them
-    as one would land a record whose meaning was invented.  The other two have a reader.  A
-    boolean renders those identically; ``refusal`` is what does not.
+    *Not adapted* covers two opposite findings — a reader nobody wrote, and a reader withheld
+    because nobody decided what the rows mean — and the payload has to keep them apart.
 
-    The names are written out rather than derived, and that is deliberate here.  Deriving the
-    expected set from ``_QUALIFICATION_DATASETS`` would assert the allow list against itself and
-    keep passing if a dataset silently dropped out of it.  ``readiness.py`` may not name a
-    vendor; a test may, and this is where one has to.  The last assertion ties the pinned names
-    back to the registry, so a seventh vendor row fails here rather than going unchecked.
+    **This test no longer has a live example of the second one, and that is a fact about the
+    build rather than about the test.**  ``verity_invoices`` was it: mapped, contract-checked,
+    readable and deliberately unadapted, on the grounds that nobody had decided how an invoice
+    row related to the batch above it.  The decision got made — the authority table made it,
+    by refusing a TPA source the rebate kinds outright — so the dataset now lands as
+    ``TPA_INVOICE_LINE`` and every declared vendor source adapts.
+
+    So the endpoint half asserts what is now true, and the distinction it existed to protect
+    is asserted directly against ``_adapter_for`` below, where a refusal can still be
+    constructed.  Dropping that half instead would have been the quiet mistake: the two
+    refusals would stay distinguishable in the code and stop being distinguished by anything,
+    until the next dataset arrived without a decision and nobody noticed the cell had gone
+    generic.
+
+    The names are written out rather than derived.  Deriving them from the allow lists would
+    assert those lists against themselves and keep passing if a dataset silently dropped out.
+    ``readiness.py`` may not name a vendor; a test may, and this is where one has to.  The
+    assertion against ``VENDOR_SOURCE_IDS`` ties the pinned names back to the registry, so a
+    fourth vendor row fails here rather than going unchecked.
     """
     pytest.importorskip(
         "fastapi", reason="the API layer is an optional extra: pip install -e '.[api]'"
@@ -533,8 +558,8 @@ def test_the_connectivity_endpoint_tells_no_adapter_apart_from_no_decision(tmp_p
     from recon.api.app import create_app
     from recon.config import load_settings
 
-    adapted = {"verity_accumulations", "craneware_claims_report"}
-    refused = {"verity_invoices"}
+    adapted = {"verity_accumulations", "craneware_claims_report", "verity_invoices"}
+    refused: set[str] = set()
     assert adapted | refused == set(registry.VENDOR_SOURCE_IDS), (
         "the secure-file registry rows have changed; this test pins which of them have an "
         "adapter and the pinned list no longer covers them"
@@ -555,22 +580,39 @@ def test_the_connectivity_endpoint_tells_no_adapter_apart_from_no_decision(tmp_p
         assert row["ingest"] == "READS_AND_ADAPTS"
         assert row["adapter"]["refusal"] is None
 
-    for source_id in sorted(refused):
-        row = rows[source_id]
-        assert row["adapter"]["adapts"] is False
-        assert row["ingest"] == "READS"
-        # Readable, mapped, and refused on purpose — three facts a single cell would collapse.
-        assert row["transport"]["implemented"]
-        assert row["mapping"]["per_source"] is True
-        refusal = row["adapter"]["refusal"]
-        assert "not a reader" in refusal, (
-            f"{source_id} is refused without saying why; 'nobody wrote a reader' and 'nobody "
-            "has decided what these rows mean' are opposite findings"
-        )
-        assert "no adapter is registered" not in refusal, (
-            f"{source_id} is reported as having no adapter at all, which is the other refusal "
-            "and is not true of it"
-        )
+    assert not refused, (
+        "a declared vendor source is refused again; add it to the loop below so the endpoint "
+        "is checked on a real refusal rather than only on a constructed one"
+    )
+
+    # The distinction itself, kept under test now that no real source exhibits it. Both
+    # refusals are asked of the same rule with the same source, varying only what the adapter
+    # layer is said to cover -- which is the only difference that should produce them.
+    source = next(
+        item for item in readiness.declared_sources() if item.source_id == "verity_invoices"
+    )
+    no_reader = readiness._adapter_for(
+        source,
+        readiness.AdapterCoverage(
+            source_systems=frozenset({"BANK"}), datasets=frozenset({"anything"})
+        ),
+        True,
+    )
+    no_decision = readiness._adapter_for(
+        source,
+        readiness.AdapterCoverage(
+            source_systems=frozenset({str(source.source_system)}),
+            datasets=frozenset({"some_other_dataset"}),
+        ),
+        True,
+    )
+    assert no_reader.adapts is False and no_decision.adapts is False
+    assert "no adapter is registered" in str(no_reader.refusal)
+    assert "not a reader" in str(no_decision.refusal)
+    assert str(no_reader.refusal) != str(no_decision.refusal), (
+        "'nobody wrote a reader' and 'nobody has decided what these rows mean' are opposite "
+        "findings and now read identically, so the payload has stopped telling them apart"
+    )
 
 
 # ═══ derivation: mock fidelity ═══
