@@ -84,6 +84,7 @@ __all__ = [
     "declared_record_count",
     "export_filename",
     "generated_stamp",
+    "remove_superseded",
     "render",
     "write",
 ]
@@ -305,7 +306,57 @@ def write(settings: Settings, source: VendorSource) -> dict[str, Path]:
         path = directory / export_filename(dataset, stamp)
         path.write_text(text, encoding="utf-8", newline="")
         written[dataset] = path
+    remove_superseded(directory, keep=frozenset(path.name for path in written.values()))
     return written
+
+
+def remove_superseded(directory: Path, *, keep: frozenset[str]) -> tuple[str, ...]:
+    """Delete this vendor's exports from runs that have been superseded.
+
+    Every other writer in this package names its output from a constant — Craneware's five
+    reports and Beacon's five payload files overwrite themselves on every run — so this
+    problem is Verity's alone, and it is created by the very thing that makes Verity's names
+    good.  :func:`generated_stamp` derives the name from the data so that identical data
+    produces an identical filename; the corollary nobody wrote down is that **different data
+    produces a different filename, and the old one is never overwritten.**
+
+    Three runs of the demo profile left three generations in
+    ``data/generated/demo/vendor/verity/`` — stamps ``20260314T080000Z``, ``20260409T130000Z``
+    and ``20260417T080000Z`` — and only the last one described the feeds sitting beside it.
+    Of the 37 rebate allocation codes in the two older invoice exports, **zero** appear in
+    ``tpa_340b_events.jsonl``.  They are not history; they are two runs that no longer
+    happened, indistinguishable on disk from the one that did.
+
+    **What that costs is not a tidy directory, it is a wrong answer.**  A reader matches
+    ``SecureFileMapping.filename_prefix``, because a data-derived name is not knowable in
+    advance — so every one of the three files matches ``verity_invoices_``.  Take the first
+    and you read the oldest; take them all and you ingest 37 rebate lines belonging to
+    batches that do not exist, which park as unmatched and read exactly like a crosswalk
+    failure.  The measurement that sent this plan looking for batch/line semantics —
+    ``RBT-20251031-44202``'s lines summing to 26,500.00 against a declared 30,094.00 — came
+    out of a superseded file, and in the live export every batch's lines sum to its declared
+    total exactly.  A stale artefact did not just clutter; it invented a defect.
+
+    **The writer is at fault, not the reader.**  Teaching the reader to prefer the newest
+    stamp would be the wrong repair and would break a real vendor: an SFTP directory legitimately
+    holds successive deliveries, and all of them are meant to be ingested.  What must not
+    happen is a delivery appearing that was never sent.
+
+    Scoped to the names this module itself produces — ``verity_<dataset>_*.csv`` for a dataset
+    in :data:`DATASETS` — so nothing else in the directory can be caught by it, and run
+    *after* the new files land so an interrupted write never empties the directory.
+
+    Returns:
+        The names removed, in order, so a caller can report them.
+    """
+    removed: list[str] = []
+    for dataset in DATASETS:
+        for path in sorted(directory.glob(f"{VENDOR_NAME}_{dataset}_*.csv")):
+            if path.name in keep:
+                continue
+            path.unlink()
+            removed.append(path.name)
+    return tuple(removed)
 
 
 def export_filename(dataset: str, stamp: str) -> str:
