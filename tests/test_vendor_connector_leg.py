@@ -146,9 +146,31 @@ def _natural(mapping: SecureFileMapping, row: Mapping[str, str]) -> tuple[str, .
     return tuple((record.get(name) or "") for name in mapping.natural_key_fields)
 
 
-def _idempotency_key(mapping: SecureFileMapping, row: Mapping[str, str]) -> str:
-    """``<source_id>|<natural key>`` — identity for a row the vendor gave no id."""
-    return f"{mapping.source_id}|" + "|".join(_natural(mapping, row))
+def _idempotency_key(
+    mapping: SecureFileMapping, row: Mapping[str, str], *, document: str, line_no: int
+) -> str:
+    """Identity for one vendor row, assembled from the *file* rather than from the adapter.
+
+    Two shapes, because vendors differ on whether they stamp a row id at all:
+
+    * ``<source_id>|<row id>`` when the mapping declares a ``row_id_column``. Verity does —
+      ``accumulation_id`` on accumulations, ``invoice_number`` on invoices — and both are
+      unique across every row on disk.
+    * ``<source_id>|<natural key>|<document>#<line>`` when it does not. Craneware stamps no
+      usable row id on any of its 22 columns, so identity falls back to the claim's own
+      facts plus where the row sat in the delivery.
+
+    The fallback's weakness is real and worth naming: a snapshot row that shifts line
+    between deliveries re-lands as a new record. That is the lesser evil. Keying on the
+    natural key alone collapsed two genuinely different rows into one — a partial fill and
+    its completion on the same Rx, same NDC, same day — with no quarantine, no park and no
+    control-total shortfall, the only trace being a counter. A visible duplicate can be
+    found; a silent deletion cannot.
+    """
+    vendor_row_id = row.get(mapping.row_id_column) if mapping.row_id_column else None
+    if vendor_row_id:
+        return f"{mapping.source_id}|{vendor_row_id}"
+    return f"{mapping.source_id}|" + "|".join(_natural(mapping, row)) + f"|{document}#{line_no}"
 
 
 def _kind_counts(conn: sqlite3.Connection) -> dict[tuple[str, str], int]:
@@ -314,8 +336,8 @@ def test_a_reversed_row_produces_exactly_one_reversal_record(conn, vendor_files,
     """
     mapping, path, parsed = _export(vendor_files, source_id)
     reversed_keys = {
-        f"{_idempotency_key(mapping, row)}|REVERSAL"
-        for _line_no, row in parsed.rows
+        f"{_idempotency_key(mapping, row, document=parsed.document, line_no=line_no)}|REVERSAL"
+        for line_no, row in parsed.rows
         if vendors.is_reversed(mapping, row)
     }
     assert reversed_keys, (
@@ -372,10 +394,19 @@ def test_redelivering_the_same_export_ingests_nothing_new(conn, vendor_files, so
     property somebody can read rather than a sentence in a docstring.
     """
     mapping, _path, parsed = _export(vendor_files, source_id)
-    expected_keys = {_idempotency_key(mapping, row) for _line_no, row in parsed.rows}
+    expected_keys = {
+        _idempotency_key(mapping, row, document=parsed.document, line_no=line_no)
+        for line_no, row in parsed.rows
+    }
+    # Distinct by construction now, and that is the point of the fix rather than a fact
+    # about this dataset: a declared row id is unique because the vendor made it so, and the
+    # fallback carries the line number, so two rows cannot share a key however alike their
+    # claims are. This assertion used to read "two DETAIL rows share a natural key, so
+    # collapsing them is correct and this test cannot tell a collapse from a duplicate" --
+    # which excused the silent-collapse defect instead of catching it.
     assert len(expected_keys) == parsed.parsed_record_count, (
-        "two DETAIL rows share a natural key, so collapsing them is correct and this test "
-        "cannot tell a collapse from a duplicate"
+        f"{len(expected_keys)} distinct keys for {parsed.parsed_record_count} detail rows: "
+        "two rows still collapse onto one identity"
     )
 
     source = _source(vendor_files, source_id)
@@ -573,8 +604,8 @@ def test_craneware_rows_inherit_the_fetch_stamp_because_the_report_declares_no_t
     _mapping, _path, parsed = _export(vendor_files, "craneware_claims_report")
     inherits: set[str] = set()
     own: dict[str, str] = {}
-    for _line_no, row in parsed.rows:
-        key = _idempotency_key(mapping, row)
+    for line_no, row in parsed.rows:
+        key = _idempotency_key(mapping, row, document=parsed.document, line_no=line_no)
         if vendors.is_reversed(mapping, row):
             # ``reversal_date`` is Craneware's spelling and it is a full timestamp despite the
             # name; the field map is what turns it into ``reversal_received_at``.
@@ -634,8 +665,8 @@ def test_verity_rows_carry_their_own_arrival_time_and_never_inherit_the_fetch_st
     _mapping, _path, parsed = _export(vendor_files, "verity_accumulations")
     expected: dict[str, str] = {}
     later_than_qualification = 0
-    for _line_no, row in parsed.rows:
-        key = _idempotency_key(mapping, row)
+    for line_no, row in parsed.rows:
+        key = _idempotency_key(mapping, row, document=parsed.document, line_no=line_no)
         stamp = row["qualification_received_at"]
         if vendors.is_reversed(mapping, row):
             reversal = row["reversal_received_at"]
