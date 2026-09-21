@@ -386,7 +386,7 @@ flowchart TD
 
 **One line does not mean one row.** An 835 batch is a single line of the feed file and becomes 27 rows — one `REMITTANCE` envelope carrying the deposit total and trace number, plus 24 `REMITTANCE_CLAIM_LINE` children, plus two `PROVIDER_LEVEL_ADJUSTMENT` children. The children point back at the envelope through `parent_norm_id`, which is a self-reference inside the same table. That split exists because the money identifier lives on the envelope while the claim identifier lives on the line.
 
-**And only two of the fourteen record kinds create an episode** — a pharmacy `B1` and an original medical `837`. The other twelve attach to one that already exists, which makes sense said out loud: an 835 does not create a claim, it *answers* one.
+**And only two of the eighteen record kinds create an episode** — a pharmacy `B1` and an original medical `837`. Two more, the `REMITTANCE` and `REBATE_BATCH` envelopes, are resolution roots that neither create nor attach. The remaining fourteen attach to an episode that already exists, which makes sense said out loud: an 835 does not create a claim, it *answers* one.
 
 Three design points here are worth defending.
 
@@ -408,7 +408,7 @@ This is the mechanism the whole architecture is organised around, so it gets the
 
 **What it is:** every record, on arrival, does two things. It **publishes** the keys it makes resolvable, and it **looks up** the keys it needs someone else to have published. Both go through one table, `crosswalk_key`, as a point seek on `(key_type, key_value)`.
 
-There are exactly eight key types under Decision A24, one per bridge. *(The connector layer later added four more — `BEACON_ID`, `COVERED_ENTITY_340B`, `HCPCS`, `PAYMENT_REFERENCE` — additively, leaving all eight below unchanged. Two of them, `COVERED_ENTITY_340B` and `HCPCS`, are published on an ordinary run; the other two need the Beacon connector, which is not wired into ingest.)*
+There are exactly eight key types under Decision A24, one per bridge. *(The connector layer later added four more — `BEACON_ID`, `COVERED_ENTITY_340B`, `HCPCS`, `PAYMENT_REFERENCE` — additively, leaving all eight below unchanged. All four are published on an ordinary run now that Beacon's three inbound payloads load with every build.)*
 
 ```mermaid
 flowchart LR

@@ -1414,12 +1414,127 @@ def wave_15_building_and_reviewing_the_connector():
     R("A design document can specify a mechanism the build never used", "describes", "Agent layer")
 
 
+def wave_16_vendor_sourced_ingest():
+    """Inverting the TPA source, and the assumptions that measuring it disproved.
+
+    The session that made the reconciliation engine run on a vendor's export rather
+    than on a generic feed this repository invented for itself.
+    """
+
+    # --- what the authority table decided, rather than us -------------------
+    E("A TPA may not assert rebate status", "Decision",
+      "connectors/authority.py lists REBATE_BATCH and REBATE_DISPENSE_LINE under _REBATE_STATUS with authoritative = {BEACON, MANUFACTURER_REBATE}, so a TPA source emitting either is refused at the kind check before any field is read",
+      "Asking it directly returns: a TPA_VERITY source may not assert rebate status: a REBATE_DISPENSE_LINE record is the claim itself",
+      "The plan framed verity_invoices as blocked on unsettled batch-versus-line semantics; the real blocker was prior, and the system already answered it",
+      "The same boundary that quarantined nine Craneware rows for authoring manufacturer_status, one level up: not a field a TPA may not set, but a kind a TPA may not be",
+      "A TPA invoice is a fact the TPA owns -- this is what we billed -- about a payment decision the TPA did not make",
+      "PROVENANCE: agent default, derived from the authority table rather than chosen")
+
+    E("TPA_INVOICE_LINE", "Mechanism",
+      "The record kind verity_invoices lands as, after refusing to adapt for two waves",
+      "Both money figures are carried verbatim as text under relayed_ names and neither is summed; amount_cents is null",
+      "Outside dimensions._KIND_BUCKETS and inside engine.run._ROLE_BY_KIND: gathered, cited, on the timeline, moving no verdict",
+      "Mapping it in _ROLE_BY_KIND is not housekeeping -- that lookup defaults to ADJUDICATION, so an unmapped kind is filed as the episode pharmacy adjudication evidence rather than refused",
+      "A reversed invoice row emits no TPA_REVERSAL child: TPA_REVERSAL is bucketed and dimensions reads clawed_back = bool(tpa_reversals) and paid > 0, so a second reversal through the invoice door would move episodes to C-13",
+      "beacon_id is relayed rather than set -- the authority domain rationale says a Verity export echoes a beacon_id as a lookup handle and a caller resolving a key should not pass it as a fact",
+      "Proven to move nothing by building the dataset with and without it and comparing a digest over dispositions, both verdict codes and the rebate money across all 60 episodes")
+
+    # --- what measurement disproved -----------------------------------------
+    E("A data-derived filename accumulates runs that never happened", "Trap",
+      "Verity export names are derived from the data so identical data lands an identical filename, which is what makes file-level idempotency testable",
+      "The corollary nobody wrote down: different data lands a different name, and the old one is never overwritten",
+      "Three generations sat side by side in data/generated/demo/vendor/verity/, and of the 37 rebate allocation codes in the two older invoice exports, ZERO appeared in any feed",
+      "A reader cannot know a data-derived name in advance so it matches by filename prefix -- all three matched, and taking the first read the oldest run",
+      "It manufactured a finding rather than merely cluttering: the batch-versus-line disagreement that sent this work looking for invoice semantics was read out of a superseded file, and in the live one every batch lines sum to its declared total exactly",
+      "The writer is at fault, not the reader -- a real vendor SFTP directory legitimately holds successive deliveries that should all be ingested; what must not appear is a delivery that was never sent",
+      "Craneware and Beacon are immune because they write to constant filenames")
+
+    E("The 340B feed carries two authorities", "Learning",
+      "tpa_340b_events.jsonl is not one feed: every row declares its own author",
+      "On the demo profile 78 rows say TPA_PORTAL (qualification decisions, rebate requests, dispense reversals) and 35 say MANUFACTURER_REBATE (payment batches, manufacturer decisions)",
+      "_adapt_tpa has honoured that split since before any connector existed, reading the row own source_system rather than the file",
+      "So inverting the TPA source swaps 78 rows, not a file -- a vendor export replaces what the TPA said and cannot replace what the manufacturer said",
+      "The plan step to demote the feed to generation-only is therefore not available as written: dropping the file takes the rebate money with it",
+      "Filtering rows at load is safe on this file for a checked reason, not a general one -- control_totals.declared_in returns NOTHING_DECLARED for any document with no record-type column, which covers every generated feed; on a vendor export, which declares a trailer count, excluding rows would manufacture a shortfall and fail the load")
+
+    E("No vendor export carries the rebate request", "Learning",
+      "_derive_rebate reads request = SUBMITTED if evidence.tpa_requests else NOT_SUBMITTED and returns immediately on NOT_SUBMITTED, short-circuiting manufacturer status, payment and cash at once",
+      "The generic feed carries 33 REBATE_REQUEST events; neither verity_accumulations nor craneware_claims_report has a column for it, because asking the manufacturer happens after qualification and is reported by whoever asked",
+      "So both vendor modes collapse 30 of 60 episodes to C-03",
+      "The filler exists and is already ingested: every episode holding a rebate request also holds a Beacon acknowledgement, zero orphans, and Beacon reaches 6 more besides",
+      "DOC2-004 makes Beacon authoritative for the rebate submission identifier, so in the inverted world we submitted is Beacon fact rather than the TPA word for it",
+      "Held open deliberately: BEACON_ACKNOWLEDGMENT is outside _KIND_BUCKETS by decision and bucketing it moves verdicts on those 6, which is a separately measurable step",
+      "PROVENANCE: agent default -- the default build stays on the generic feed until this gap closes, because flipping it first would make the demo strictly worse")
+
+    E("Verity cannot express a disqualification", "Learning",
+      "verity_accumulations is the dispenses that accumulated, a population selected on qualification_status, which vendors/verity.py says can only be QUALIFIED there",
+      "So a NOT_QUALIFIED decision has no row to sit on, and Verity lands 34 qualifications where the generic feed and Craneware land 39",
+      "Those 5 episodes reach C-00 track absent -- not this dispense was refused, but this dispense was never 340B",
+      "Craneware Claims Report is a report of claims rather than of accumulations, so a non-qualifying row has a home in it and the disqualifications survive",
+      "The sharpest reason one export is not interchangeable with another, and invisible at the row level: both files parse, contract-check and ingest perfectly")
+
+    E("Craneware lands a whole report at one instant", "Learning",
+      "The Claims Report publishes no per-row arrival time, so every row inherits the delivery stamp: 4 distinct arrival moments across 39 records against Verity 41 across 61",
+      "The engine evaluates at a cursor, so this changes what a verdict could have known -- a dispense qualified in August arrives when the next report was cut",
+      "Measured: Craneware reopens 64 previously-closed verdicts against the generic feed 34, on a DIFFERENT set of episodes, four of which the generic feed never reopens",
+      "Verity reopened episodes are a strict subset of the generic feed, because it carries its own stamps and moves nothing earlier or later than the fact justified",
+      "Not a connector defect -- a true fact about what the vendor ships, and invisible everywhere else because the rows parse, the control total agrees and the final exception count is the same either way")
+
+    E("A mock that repairs a defect is worse than one that adds a wrong value", "Trap",
+      "Landing vendor divergence defaulted rx_rendering_craneware to CANONICAL, which reads as the safe default and is the opposite",
+      "Where D-6 had already drifted the feed Rx, Verity reported the drifted spelling and Craneware reported the CORRECT one -- 22105567 against 221055677",
+      "A wrong value is visible; a repair hands the connector a join the real feed does not have, so the crosswalk miss vanishes through one vendor door and every count downstream agrees with itself",
+      "mocks/source.py had already warned about exactly this: the sidecar stores the key spelled the way the TPA feed spells it, drift included",
+      "Found by printing the diverged pairs, not by a test -- at that point no test looked",
+      "The fix is that Craneware inherits the feed rendering and diverges only when the generator says so")
+
+    E("Vendor divergence", "Mechanism",
+      "Verity and Craneware are formatted from one shared VendorSource, so without this they report the same qualification for the same dispense always, and the two vendors agree is a property of the generator rather than a finding",
+      "Follows the D-6 pattern because it has no choice: recon.mocks may not import recon.generators, so a formatter cannot make this call",
+      "Decide in _defect_directives, freeze onto EpisodePlan as rx_rendering_craneware, render into a NEW sidecar column, and let each formatter read its own",
+      "A new column rather than a diverted one: load_source joins TPA events onto the sidecar on five fields including rx_number, so changing that one would unjoin the dispense rather than produce a disagreement",
+      "Only planned where the TPA rendering is already canonical, or a vendor disagreement would be indistinguishable from D-6 -- the one thing it has to be told apart from",
+      "The modulus is coprime to both drift moduli so the two defects cannot land on the same episodes by arithmetic coincidence",
+      "There is no AST test banning decision logic in a formatter -- branching is legal and all three formatters do it. The guard that binds is that every two-decimal amount emitted must appear verbatim in the TPA feed, so a divergence may ride an identifier and may not ride an amount",
+      "PROVENANCE: agent default")
+
+    E("An unexplained verdict transition is the finding", "Learning",
+      "Replacing evidence cannot claim nothing moved the way adding evidence can, so the acceptance test for vendor-sourced ingest reconciles differences instead of asserting a matching digest",
+      "Every episode whose verdict changes must fall into a named bucket; an unexplained transition fails with the before and after codes in the message, because 35 episodes changed says nothing and C-09 became C-11 on four episodes says where to look",
+      "It worked: landing vendor divergence produced C-13 to C-01 on one episode, which the test refused as unexplained -- correct behaviour arriving through a cause the test did not yet know about",
+      "The third bucket is keyed to the specific episodes the generator disputed rather than to the transition, because allowing C-13 to C-01 generally would excuse it everywhere")
+
+    # --- corrections to earlier waves ---------------------------------------
+    UNOBS("The vendor adapters are written and unwired",
+          "NOTHING IN src/ IMPORTS IT",
+          "a full build produces 0 BEACON_ID rows and 0 PAYMENT_REFERENCE rows")
+    OBS("The vendor adapters are written and unwired",
+        "SUPERSEDED on the TPA side: build_dataset(tpa_source=verity|craneware) runs the whole engine on a vendor export, and vendor rows reach 25 episodes through Verity and 28 through Craneware",
+        "Beacon three inbound payloads are ingested on every build, so BEACON_ID and PAYMENT_REFERENCE are published on an ordinary run",
+        "What remains unwired is the dashboard: /api/regenerate takes no tpa_source and always builds generic, so the vendor door is reachable from Python and the suite and from nowhere a reviewer would click")
+
+    OBS("Connector-ready",
+        "The two-state split this entity names is closed on the TPA side: the vendor sources now reach the database, are asserted at verdict level rather than at normalized_record, and their differences from the generic feed are reconciled per verdict code")
+
+    R("A TPA may not assert rebate status", "constrains", "TPA_INVOICE_LINE")
+    R("TPA_INVOICE_LINE", "realises", "Connector-ready")
+    R("A data-derived filename accumulates runs that never happened", "threatens", "TPA_INVOICE_LINE")
+    R("The 340B feed carries two authorities", "constrains", "The vendor adapters are written and unwired")
+    R("No vendor export carries the rebate request", "threatens", "The vendor adapters are written and unwired")
+    R("Verity cannot express a disqualification", "threatens", "The vendor adapters are written and unwired")
+    R("Craneware lands a whole report at one instant", "threatens", "The vendor adapters are written and unwired")
+    R("Vendor divergence", "realises", "An unexplained verdict transition is the finding")
+    R("A mock that repairs a defect is worse than one that adds a wrong value", "threatens", "Vendor divergence")
+    R("An unexplained verdict transition is the finding", "constrains", "The 340B feed carries two authorities")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
          wave_11_agent_layer_built, wave_12_explaining_the_build,
          wave_13_trimmed_for_submission, wave_14_connectivity,
-         wave_15_building_and_reviewing_the_connector]
+         wave_15_building_and_reviewing_the_connector,
+         wave_16_vendor_sourced_ingest]
 
 
 def main():
