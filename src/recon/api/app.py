@@ -21,6 +21,7 @@ from typing import Any
 from recon import config
 from recon.api import service
 from recon.config import Profile, Settings, load_settings
+from recon.domain.enums import SourceSystem
 
 __all__ = ["create_app", "build_dataset"]
 
@@ -75,12 +76,97 @@ def _beacon_inbound_sources(settings: Settings) -> tuple[Any, ...]:
     )
 
 
-def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any]:
+#: The TPA source that reads ``tpa_340b_events.jsonl`` — today's behaviour, and the default.
+#:
+#: A name rather than ``None`` because "generic" is a real, nameable choice with a real
+#: drawback: that feed's shape is ours, invented under Doc 1, and no TPA ships anything like
+#: it. ``None`` would read as "unset", which is the one thing it is not.
+GENERIC_TPA_SOURCE = "generic"
+
+#: Which datasets carry a TPA's own account of a dispense, per vendor.
+#:
+#: Verity contributes two because it ships the qualification and the rebate invoice as
+#: separate exports; Craneware's Claims Report carries the qualification and Craneware
+#: publishes no invoice dataset we hold a shape for.  That asymmetry is the vendors', not
+#: ours, and it is one of the differences the parity measurement has to explain rather than
+#: smooth over.
+_VENDOR_TPA_DATASETS: dict[str, tuple[str, ...]] = {
+    "verity": ("verity_accumulations", "verity_invoices"),
+    "craneware": ("craneware_claims_report",),
+}
+
+
+def vendor_tpa_sources(settings: Settings, vendor: str) -> tuple[Any, ...]:
+    """The registry rows that make one vendor's export the TPA's voice in this build.
+
+    **One vendor at a time, deliberately.**  The claim worth making is not "the engine reads
+    vendor data" — it is "the engine reads *either* vendor's data and reaches the same
+    answer".  A mode that blended both would prove neither, and would hide exactly the
+    disagreement a reconciliation engine exists to catch.
+
+    ``enabled=True`` because the registry rows ship disabled behind DOC2-016's Week 3 access
+    gate.  Reading a directory this build just wrote is not reaching a vendor's SFTP server,
+    and the caller saying so explicitly is the honest version of that distinction.
+
+    The filenames are resolved by prefix because Verity stamps its export names from the data
+    (``DOC2-010``), so the landed name is not knowable in advance.  That resolution is
+    single-valued only because ``verity_export.remove_superseded`` keeps one generation on
+    disk; before it existed this would have picked whichever superseded run sorted first.
+
+    Raises:
+        KeyError: an unknown vendor name, rather than a silently empty source list — which
+            would load nothing, reach every episode with no 340B evidence at all, and read as
+            a dataset in which nothing qualified.
+    """
+    from recon.connectors import registry, vendors
+    from recon.connectors.transport import LocalDirectoryTransport
+
+    directory = settings.vendor_dir() / vendor
+    landed: dict[str, tuple[str, ...]] = {}
+    for source_id in _VENDOR_TPA_DATASETS[vendor]:
+        prefix = vendors.mapping_for(source_id).filename_prefix
+        names = sorted(
+            path.name for path in directory.glob("*.csv") if path.name.startswith(prefix)
+        )
+        if not names:
+            raise FileNotFoundError(
+                f"no export starting {prefix!r} in {directory}; the vendor files are written "
+                "by coverage.write_all during the build, so this means generation did not run"
+            )
+        landed[source_id] = tuple(names)
+
+    return registry.vendor_sources(
+        {source_id: str(directory) for source_id in landed},
+        filenames=landed,
+        transport=LocalDirectoryTransport(directory),
+        enabled=True,
+    )
+
+
+def build_dataset(
+    settings: Settings,
+    *,
+    rebuild: bool = False,
+    tpa_source: str = GENERIC_TPA_SOURCE,
+) -> dict[str, Any]:
     """Generate the feeds, load them, reconcile, and return what happened.
 
     This is the regenerate control's implementation, and it is deliberately the *whole* pipeline
     rather than a reset: the dataset is a derived artefact, so rebuilding it from the seed is both
     the cheapest way to get a clean state and a continuous proof that it is reproducible.
+
+    ``tpa_source`` chooses where the TPA's own account of a dispense comes from:
+    ``"generic"`` (the default, and today's behaviour) reads it from
+    ``tpa_340b_events.jsonl``; ``"verity"`` or ``"craneware"`` reads it from that vendor's
+    export instead.  In production there is no generic TPA feed — there is Verity's export,
+    or Craneware's, or a sixth TPA's — so the vendor modes are the shape the engine would
+    really run in, and the generic one is the synthetic convenience.
+
+    **The generic feed is still read in every mode**, because it is not only the TPA's.  Its
+    rows declare their own author and 35 of them are the *manufacturer's* — rebate payment
+    batches and manufacturer decisions, which DOC2-004 puts outside a TPA's authority
+    entirely and which no vendor export could carry.  Switching source swaps 78 rows, not a
+    file.
     """
     from recon.db import connection, migrate
     from recon.engine import run as engine
@@ -114,7 +200,24 @@ def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any
 
     migrate.stamp_meta(conn, settings, fingerprint())
     try:
-        stats = pipeline.load_feeds(conn, settings.feeds_dir())
+        # The TPA's own rows come out of the generic feed or out of a vendor's export, never
+        # both: ingesting each dispense's qualification twice would not merely duplicate
+        # evidence, it would make ``_read_rebate_lines``-style counting tests meaningless and
+        # leave the crosswalk resolving one dispense through two doors.
+        exclude = (
+            frozenset({SourceSystem.TPA_PORTAL})
+            if tpa_source != GENERIC_TPA_SOURCE
+            else frozenset()
+        )
+        stats = pipeline.load_feeds(
+            conn, settings.feeds_dir(), exclude_source_systems=exclude
+        )
+        if tpa_source != GENERIC_TPA_SOURCE:
+            stats.raw_records += pipeline.load_from_sources(
+                conn,
+                vendor_tpa_sources(settings, tpa_source),
+                fetched_at=settings.max_cursor,
+            ).raw_records
         # Loaded after the feeds and before ingest, which is the only order that works: a
         # Beacon acknowledgement resolves against an episode, and the episodes do not exist
         # until the anchors from the six feeds have been adapted. Landing raw rows first and

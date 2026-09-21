@@ -368,6 +368,7 @@ def load_from_sources(
     sources: Sequence["Source"],
     *,
     fetched_at: str = EPOCH_STAMP,
+    exclude_source_systems: frozenset[SourceSystem] = frozenset(),
 ) -> IngestStats:
     """Land every document a registered source currently offers into ``raw_record``.
 
@@ -392,6 +393,30 @@ def load_from_sources(
     carries a foreign key onto ``connector_source``, so a source that fetched first would
     fail its checkpoint write *after* the bytes had already moved — the one ordering where
     the failure costs something.
+
+    ═══ ``exclude_source_systems`` — one file, two authorities ══════════════════════
+
+    ``tpa_340b_events.jsonl`` is not one feed.  Every row declares who authored it, and on
+    the demo profile 78 say ``TPA_PORTAL`` (qualification decisions, rebate requests,
+    dispense reversals) while 35 say ``MANUFACTURER_REBATE`` (payment batches, manufacturer
+    decisions).  The adapter has always honoured that split — ``_adapt_tpa`` reads
+    ``payload["source_system"]`` rather than the file's — so the two authorities have been
+    distinguishable per row since before any connector existed.
+
+    That is what makes inverting the TPA source possible without touching the feed.  A
+    vendor export replaces what the *TPA* said; it does not replace what the manufacturer
+    said, and DOC2-004 gives rebate status to Beacon and the manufacturer, so a Verity file
+    could not carry it even if we wanted it to.  Excluding ``TPA_PORTAL`` here leaves the
+    manufacturer's 35 rows exactly where they are and lets the vendor export supply the rest.
+
+    **Filtering is safe against control totals specifically because these feeds declare
+    nothing.**  ``control_totals.declared_in`` returns ``NOTHING_DECLARED`` for any document
+    with no record-type column, "and that covers every format the pipeline loads today: the
+    six generated feeds are line-delimited JSON with no trailer".  So the reconciliation
+    below is vacuous for them and a smaller ``observed_count`` violates no declaration.  On a
+    document that *does* declare a count — every vendor export — excluding rows would
+    manufacture a shortfall and fail the load, loudly.  That is the correct behaviour and the
+    reason this is a parameter a caller must ask for rather than a default.
     """
     from recon.connectors import checkpoint as checkpoint_module
     from recon.connectors import control_totals
@@ -447,8 +472,9 @@ def load_from_sources(
                 _checkpoint()
                 continue
 
-            rows = list(
-                _read_rows(
+            rows = [
+                row
+                for row in _read_rows(
                     source.payload_format,
                     text,
                     source.source_system,
@@ -457,7 +483,15 @@ def load_from_sources(
                     fetched_at=fetched_at,
                     received_at_field=source.received_at_field,
                 )
-            )
+                # Index 3 is the system the row was ATTRIBUTED to, which is the row's own
+                # claim where it makes one and the source's default otherwise -- see
+                # ``_attributed_source_system``. Filtering on the attribution rather than on
+                # the raw field is what lets one document hold two authorities and still be
+                # split correctly: a row that declares nothing belongs to its source, and a
+                # row that declares MANUFACTURER_REBATE belongs to the manufacturer no matter
+                # which file carried it.
+                if row[3] not in exclude_source_systems
+            ]
             # F2.  Before the batch row exists, not after.  A batch written first and then
             # abandoned reads downstream as a file that arrived empty, which is the one
             # reading a truncated delivery must never get — and ``control_total`` carries no
@@ -533,7 +567,12 @@ def load_from_sources(
     return stats
 
 
-def load_feeds(conn: sqlite3.Connection, feeds_dir: Path) -> IngestStats:
+def load_feeds(
+    conn: sqlite3.Connection,
+    feeds_dir: Path,
+    *,
+    exclude_source_systems: frozenset[SourceSystem] = frozenset(),
+) -> IngestStats:
     """Read the six generated feed files into ``raw_record``, verbatim.
 
     Kept as a thin wrapper rather than edited away, so every existing call site — the API's
@@ -545,10 +584,18 @@ def load_feeds(conn: sqlite3.Connection, feeds_dir: Path) -> IngestStats:
     :class:`~recon.connectors.transport.LocalDirectoryTransport` still cannot reach
     ``truth/`` — it refuses a root inside it, refuses a name that traverses, and refuses a
     resolved path that lands there.  The guarantee moved; it did not weaken.
+
+    ``exclude_source_systems`` is passed straight through and defaults to excluding nothing,
+    so every existing call site reads all six feeds exactly as before.  See
+    :func:`load_from_sources` for what it is for and why it is only safe on these files.
     """
     from recon.connectors import registry
 
-    return load_from_sources(conn, registry.local_sources(Path(feeds_dir)))
+    return load_from_sources(
+        conn,
+        registry.local_sources(Path(feeds_dir)),
+        exclude_source_systems=exclude_source_systems,
+    )
 
 
 def _attributed_source_system(
