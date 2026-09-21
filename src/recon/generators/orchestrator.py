@@ -104,6 +104,14 @@ LATE_ARRIVAL_DAYS = (7, 45)
 #: Identifier drift, assigned to exactly one feed per episode so the defect is reproducible.
 RX_DRIFT_BPS = 600
 RX_TRUNCATION_BPS = 200
+
+#: How often the two TPAs disagree about how a dispense's Rx is spelled, in basis points.
+#:
+#: Lower than either drift rate on purpose.  A vendor disagreement is the expensive exception
+#: rather than routine noise, and a rate high enough to be convenient would make "the two
+#: vendors agree" the unusual case — which would misrepresent the programme to anyone reading
+#: the queue and would drown the D-6 misses it has to be told apart from.
+VENDOR_DIVERGENCE_BPS = 300
 #: D-7: an unreferenced forward balance on otherwise-clean remittances.
 FB_RESIDUAL_BPS = 500
 #: How many claims a remittance cycle bundles before spilling into a second file.
@@ -1320,6 +1328,25 @@ def _defect_directives(
             directives["rx_rendering_tpa"] = "ZERO_PADDED"
         else:
             directives["rx_rendering_pharmacy_835"] = "ZERO_PADDED"
+
+    # ── vendor disagreement ────────────────────────────────────────────────────────
+    #
+    # Verity and Craneware are formatted from one shared source object, so without this
+    # they report the same qualification for the same dispense, always. That makes the
+    # vendor layer incapable of the one failure a reconciliation engine exists to catch,
+    # and "both vendors agree" is then a property of the generator rather than a finding.
+    #
+    # **Only when the TPA rendering is already canonical.** If the feed itself drifted, both
+    # vendors read that drifted value off the sidecar and still agree with each other —
+    # stacking a second divergence on top would make a vendor disagreement indistinguishable
+    # from D-6, which is the one thing this has to be told apart from.
+    #
+    # A separate modulus from the drift above, and a coprime one, so the two defects do not
+    # land on the same episodes by arithmetic coincidence and leave the interaction untested.
+    if not directives.get("rx_rendering_tpa") and has_rebate:
+        diverge = sequence % 13 == 5 if curated else rng.randint(0, 9_999) < VENDOR_DIVERGENCE_BPS
+        if diverge:
+            directives["rx_rendering_craneware"] = "ZERO_PADDED"
     return directives
 
 
@@ -1892,6 +1919,17 @@ def _vendor_identifier_rows(
                 # spelling these its own way would look correct in review and join to
                 # nothing at runtime.
                 "rx_number": plan.rendered_rx(plan.rx_rendering_tpa) if is_pharmacy else None,
+                # Craneware's spelling of the same Rx, which is usually the same string and
+                # sometimes deliberately is not.
+                #
+                # **A new column rather than a changed one**, and that is load-bearing.
+                # ``mocks.source.load_source`` joins the TPA events onto this row on exactly
+                # five fields, ``rx_number`` among them, so diverting the existing column
+                # would not produce a vendor disagreement — it would silently unjoin the
+                # dispense and hand both vendors a row with no events at all.
+                "rx_number_craneware": (
+                    plan.rendered_rx(plan.rx_rendering_craneware) if is_pharmacy else None
+                ),
                 "pharmacy_npi": plan.pharmacy_npi if is_pharmacy else None,
                 "provider_npi": None if is_pharmacy else plan.billing_provider_npi,
                 "ndc_11": plan.ndc11,

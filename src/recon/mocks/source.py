@@ -85,6 +85,19 @@ class Dispense:
     covered_entity_id: str
     manufacturer: str
 
+    #: How Craneware spells this dispense's Rx, which is usually ``rx_number`` and sometimes
+    #: deliberately is not.
+    #:
+    #: Read straight off the sidecar like everything above it — the orchestrator decides
+    #: whether the two TPAs disagree and renders both spellings, exactly as it does for D-6.
+    #: Without it the two vendor exports could not disagree about anything, because they are
+    #: formatted from this one object.
+    #:
+    #: ``rx_number`` stays the join key and stays canonical: ``load_source`` matches TPA
+    #: events on it, so a dispense whose join key drifted would have no events rather than a
+    #: disagreement.
+    rx_number_craneware: str | None = None
+
     #: Every TPA event for this dispense, in arrival order, verbatim.
     events: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     #: The matching line inside a ``REBATE_PAYMENT_BATCH``, if the dispense was paid.
@@ -300,6 +313,9 @@ def load_source(settings: Settings) -> VendorSource:
                 fill_date=row["fill_date"],
                 covered_entity_id=row.get("covered_entity_id", ""),
                 manufacturer=row.get("manufacturer", ""),
+                # Falls back to the canonical spelling, so a sidecar written before this
+                # column existed reads as "the two vendors agree" rather than as None.
+                rx_number_craneware=row.get("rx_number_craneware") or row.get("rx_number"),
                 events=tuple(events_by_key.get(key, ())),
                 payment_line=line,
                 payment_batch=batch_record,

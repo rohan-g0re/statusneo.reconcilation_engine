@@ -10,7 +10,10 @@ and a vendor ships less than a feed we invented for ourselves.  So the deliverab
 reconciliation: every episode whose verdict changes has to fall into a bucket with a named
 field behind it, and an episode that changes for no nameable reason is the finding.
 
-Two buckets account for all of it, and both are facts about what a vendor's export can say.
+Three causes account for all of it.  The first two are facts about what a vendor's export can
+*say*; the third is the vendor layer being made able to disagree at all, and it was added
+because this file caught it — landing vendor divergence produced a ``C-13 -> C-01`` this test
+refused to accept until it had a name.
 
 **1. No TPA export carries the rebate request, so the track stops at C-03.**
 ``_derive_rebate`` reads ``request = "SUBMITTED" if evidence.tpa_requests else
@@ -38,6 +41,13 @@ disqualifications survive.
 This is the single sharpest argument in the file for why one export is not interchangeable
 with another, and it is invisible at the row level: both vendors' files parse, contract-check
 and ingest perfectly.
+
+**3. The two vendors now genuinely disagree about some dispenses.**  The generator plans an
+Rx-spelling divergence on a small number of episodes (``tests/test_vendor_divergence.py``), so
+Craneware's row for those matches no published key and parks.  The episode loses that evidence
+and can land anywhere, which is why this bucket is keyed to the *episodes* the generator
+disputed rather than to a transition: allowing ``C-13 -> C-01`` generally would excuse it
+everywhere, and it is only explainable here.
 """
 
 from __future__ import annotations
@@ -52,6 +62,7 @@ import pytest
 from recon.api.app import GENERIC_TPA_SOURCE, build_dataset
 from recon.config import CuratedSpine, load_settings
 from recon.domain.enums import RecordKind, SourceSystem
+from recon.mocks import source as source_module
 
 MODES = (GENERIC_TPA_SOURCE, "verity", "craneware")
 
@@ -67,9 +78,25 @@ TRACK_ABSENT_CODE = "C-00"
 class Built:
     """One finished build, queried rather than re-derived."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, settings=None) -> None:
+        self.settings = settings
         self._conn = sqlite3.connect(path)
         self._conn.row_factory = sqlite3.Row
+
+    def episodes_for_rx(self, rx_numbers: set[str]) -> set[str]:
+        """Every episode reached by a record carrying one of these Rx numbers."""
+        found: set[str] = set()
+        for rx in rx_numbers:
+            found |= {
+                row[0]
+                for row in self._conn.execute(
+                    "SELECT DISTINCT k.episode_id FROM crosswalk_key k"
+                    "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+                    " WHERE n.rx_number = ?",
+                    (rx,),
+                )
+            }
+        return found
 
     def latest_verdicts(self) -> dict[str, sqlite3.Row]:
         return {
@@ -136,7 +163,7 @@ def builds(tmp_path_factory) -> dict[str, Built]:
             curated_spine=CuratedSpine.RECORDED,
         )
         build_dataset(settings, rebuild=True, tpa_source=mode)
-        made[mode] = Built(settings.db_path)
+        made[mode] = Built(settings.db_path, settings)
     yield made
     for built in made.values():
         built.close()
@@ -285,19 +312,38 @@ def test_verity_cannot_express_a_disqualification_and_craneware_can(builds) -> N
 def test_every_verdict_difference_falls_into_a_named_bucket(builds, mode: str) -> None:
     """The deliverable: no episode may change for a reason this file cannot name.
 
-    Two transitions are accounted for, and nothing else is allowed:
+    Three causes are accounted for, and nothing else is allowed:
 
     * ``-> C-03`` — the rebate request is gone, so a qualified dispense stops at "not
       submitted".  Reachable by both vendors.
     * ``-> C-00`` — the qualification record itself is gone, so the track reads as absent.
       Verity only, and only for dispenses the TPA refused.
+    * **any transition on an episode the two vendors disagree about.**  Where Craneware
+      spells a dispense's Rx differently, its row matches no published key and parks, so the
+      episode loses that evidence entirely and can land anywhere.  This bucket is keyed to
+      the specific episodes the generator planned a divergence for, not to a transition —
+      allowing ``C-13 -> C-01`` generally would excuse that transition everywhere, and it is
+      only explainable *here*.
 
     An unexplained transition fails with the codes in the message, because the transition
     *is* the finding -- "37 episodes changed" says nothing, and "C-09 became C-11 on four
-    episodes" says where to look.
+    episodes" says where to look.  The third bucket was added because this test caught one:
+    landing vendor divergence produced ``C-13 -> C-01`` on one episode, which was correct
+    behaviour arriving through a cause the test did not yet know about.
     """
     baseline = builds[GENERIC_TPA_SOURCE].latest_verdicts()
     inverted = builds[mode].latest_verdicts()
+
+    # The episodes the two vendors disagree about, resolved through the BASELINE build where
+    # every dispense still reaches its episode. Asking the inverted build would be asking the
+    # database whose records went missing which records went missing.
+    source = source_module.load_source(builds[mode].settings)
+    disputed_rx = {
+        dispense.rx_number
+        for dispense in source.dispenses
+        if dispense.rx_number and dispense.rx_number != dispense.rx_number_craneware
+    }
+    disputed = builds[GENERIC_TPA_SOURCE].episodes_for_rx(disputed_rx)
 
     assert set(baseline) == set(inverted), (
         "the two builds produced different episodes, so their verdicts are not comparable. "
@@ -317,7 +363,10 @@ def test_every_verdict_difference_falls_into_a_named_bucket(builds, mode: str) -
             )
             continue
         transition = (before["rebate_verdict_code"], after["rebate_verdict_code"])
-        if after["rebate_verdict_code"] in {NOT_SUBMITTED_CODE, TRACK_ABSENT_CODE}:
+        if (
+            after["rebate_verdict_code"] in {NOT_SUBMITTED_CODE, TRACK_ABSENT_CODE}
+            or episode_id in disputed
+        ):
             explained[transition] += 1
         else:
             unexplained[transition] += 1

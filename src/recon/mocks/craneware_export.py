@@ -401,7 +401,7 @@ def _claims_rows(dispenses: Sequence[Dispense]) -> list[dict[str, str]]:
         rows.append(
             {
                 "covered_entity_id": _text(dispense.covered_entity_id),
-                "rx_number": _text(dispense.rx_number),
+                "rx_number": _text(dispense.rx_number_craneware),
                 "pharmacy_npi": _text(dispense.pharmacy_npi),
                 "provider_npi": _text(dispense.provider_npi),
                 "ndc11": _text(dispense.ndc_11),
@@ -491,7 +491,7 @@ def _ordering_problem_row(
     qualification = dispense.event("QUALIFICATION_DECISION")
     return {
         "covered_entity_id": _text(dispense.covered_entity_id),
-        "rx_number": _text(dispense.rx_number),
+        "rx_number": _text(dispense.rx_number_craneware),
         "pharmacy_npi": _text(dispense.pharmacy_npi),
         "provider_npi": _text(dispense.provider_npi),
         "ndc11": _text(dispense.ndc_11),
@@ -526,7 +526,7 @@ def _unreplenished_costs_rows(dispenses: Sequence[Dispense]) -> list[dict[str, s
             {
                 "ndc11": _text(dispense.ndc_11),
                 "covered_entity_id": _text(dispense.covered_entity_id),
-                "rx_number": _text(dispense.rx_number),
+                "rx_number": _text(dispense.rx_number_craneware),
                 "pharmacy_npi": _text(dispense.pharmacy_npi),
                 "provider_npi": _text(dispense.provider_npi),
                 "fill_date": _text(dispense.fill_date),
