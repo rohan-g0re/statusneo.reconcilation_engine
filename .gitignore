@@ -50,6 +50,9 @@ ui-review/
 # broken images. The .pptx embeds its copies and does not depend on these.
 !docs/pitch/diagrams/*.png
 !docs/pitch/deck/img/*.png
+# ...and the UI brief's screenshots. EXECUTIVE_UI_BRIEF.md references every one by
+# relative path; the .pdf embeds its own copies and does not depend on these.
+!docs/product/img/*.png
 
 # Office lock/owner files. PowerPoint drops a ~$name.pptx beside any open deck;
 # it is a few bytes of session state and never content.
