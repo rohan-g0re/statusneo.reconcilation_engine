@@ -104,7 +104,7 @@ function PortfolioAnalystPanel({ cursor }) {
         </button>
       </div>
       <p className="hint">
-        Aggregates the same counts and money the tiles below show, plus the exception queue's own
+        Aggregates the same counts and money the tiles above show, plus the exception queue's own
         deterministic ranking, into a narrative answer to "what is the state of the book right
         now, and what carries the most money" — every figure is quoted from a tool result and
         every ordering is a SQL sort the agent only explains; it never re-ranks a queue itself.
@@ -357,7 +357,7 @@ export default function App() {
             ) : null}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="masthead-tools">
           <div className="view-toggle" role="group" aria-label="Screen">
             <button
               type="button"
@@ -384,41 +384,67 @@ export default function App() {
             </span>
           ) : null}
           {/*
-            Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
-            the identical file again" surprised everyone who pressed it. A new seed means
-            new claims, new amounts, and defects landing on different episodes, and on the
-            demo profile a different mix of exceptions — while every named edge case is
-            still guaranteed to appear. Reproducibility did not go anywhere: the seed that
-            produced whatever you are looking at is in the masthead and in manifest.json,
-            and `Repeat seed` below replays it byte for byte.
+            The three rebuild controls now sit behind a disclosure rather than in the header
+            row itself. They are how you reseed or replay a dataset — build tooling, not
+            product — and one of them drops and rebuilds the database. Three buttons of equal
+            weight to the screen switcher read as the primary actions on the page, which put
+            the most destructive control in the most reachable spot. Folded, not removed:
+            every one is still one click away and the demo still opens with them.
           */}
-          <button
-            data-testid="regen-demo"
-            onClick={() => regenerate('demo', api.freshSeed())}
-            disabled={busy}
-            title="Rebuild the 60-episode walkthrough on a new seed: different claims, amounts and queue mix, with every named edge case still present."
-          >
-            Rebuild demo
-          </button>
-          <button
-            data-testid="regen-full"
-            onClick={() => regenerate('full', api.freshSeed())}
-            disabled={busy}
-            title="Rebuild the 1,500-episode profile on a new seed. All 372 verdict pairs are still covered — that is arithmetic, not luck."
-          >
-            Rebuild full
-          </button>
-          <button
-            data-testid="regen-same-seed"
-            className="primary"
-            onClick={() => regenerate(meta?.profile ?? 'demo', meta?.stored?.master_seed)}
-            disabled={busy || !meta?.stored?.master_seed}
-            title="Rebuild on the seed shown in the masthead. Byte-for-byte identical, which is how you check reproducibility rather than take it on trust — compare the feed hashes in manifest.json."
-          >
-            Repeat seed
-          </button>
+          <details className="tools-menu">
+            <summary title="Rebuild or replay the dataset">Data</summary>
+            <div className="tools-menu-body">
+              {/*
+                Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
+                the identical file again" surprised everyone who pressed it. A new seed means
+                new claims, new amounts, and defects landing on different episodes, and on the
+                demo profile a different mix of exceptions — while every named edge case is
+                still guaranteed to appear. Reproducibility did not go anywhere: the seed that
+                produced whatever you are looking at is in the masthead and in manifest.json,
+                and `Repeat seed` replays it byte for byte.
+              */}
+              <button
+                data-testid="regen-demo"
+                onClick={() => regenerate('demo', api.freshSeed())}
+                disabled={busy}
+                title="Rebuild the 60-episode walkthrough on a new seed: different claims, amounts and queue mix, with every named edge case still present."
+              >
+                Rebuild demo
+              </button>
+              <button
+                data-testid="regen-full"
+                onClick={() => regenerate('full', api.freshSeed())}
+                disabled={busy}
+                title="Rebuild the 1,500-episode profile on a new seed. All 372 verdict pairs are still covered — that is arithmetic, not luck."
+              >
+                Rebuild full
+              </button>
+              <button
+                data-testid="regen-same-seed"
+                className="primary"
+                onClick={() => regenerate(meta?.profile ?? 'demo', meta?.stored?.master_seed)}
+                disabled={busy || !meta?.stored?.master_seed}
+                title="Rebuild on the seed shown in the masthead. Byte-for-byte identical, which is how you check reproducibility rather than take it on trust — compare the feed hashes in manifest.json."
+              >
+                Repeat seed
+              </button>
+            </div>
+          </details>
         </div>
       </header>
+
+      {/*
+        The cursor sits in the header band rather than in a panel of its own. It governs every
+        figure on the screen below it, so a panel in the left column made it look like one more
+        thing to read on the way down — and put two paragraphs of explanation between the title
+        and the first dollar figure. Here it reads as a control on the whole page, which is what
+        it is, and the money starts at the top of the scroll.
+      */}
+      {view === 'operations' ? (
+        <div className="cursor-band">
+          <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
+        </div>
+      ) : null}
 
       {error ? (
         <div className="error" data-testid="error">
@@ -439,18 +465,13 @@ export default function App() {
       ) : (
       <div className="layout-grid">
         <div className="layout-left">
-          <section className="panel">
-            <h2>Replay cursor</h2>
-            <p className="hint">
-              The engine processes records whose arrival time is at or before this cursor. Moving it
-              backwards reproduces the answer as it stood then — the same code path in both directions,
-              which is why the audit question needs no separate feature.
-            </p>
-            <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
-          </section>
-
-          <PortfolioAnalystPanel cursor={cursor} />
-
+          {/*
+            Order on this column is deliberate and it is the money first. What an operator — or
+            anyone being shown the book — wants from this screen is "how much is outstanding and
+            what do I work", in that order. Everything below the queue answers a question you only
+            ask once you have seen those two: what could not be matched at all, what the agent
+            layer makes of it, what the team has already committed to.
+          */}
           <section className="panel">
             <h2>Queues at this cursor</h2>
             <p className="hint">
@@ -481,6 +502,15 @@ export default function App() {
             </p>
             <FeedExceptions data={feeds} />
           </section>
+
+          {/*
+            The analyst panel reads the same counts and money the tiles above already show. It
+            belongs after them: it answers "what do you make of this", which is a question you ask
+            once you have the numbers, not before. Above the queue it read as the primary feature
+            of the screen, which inverted the one rule the whole system is built on — the engine
+            decides, the agent explains.
+          */}
+          <PortfolioAnalystPanel cursor={cursor} />
 
           {/*
             The cross-episode to-do list answers "what am I doing about it", distinct from the

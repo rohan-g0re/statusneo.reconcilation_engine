@@ -147,8 +147,13 @@ header.masthead {
   flex-wrap: wrap;
   padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-7);
+  /* The cursor band sits directly under this and carries its own bottom border, so the
+   * masthead stops short rather than opening a second gap between two rules. */
+  margin-bottom: 0;
 }
+/* The control cluster. `center`, not the header's own `baseline`: these are boxes of
+ * differing heights and aligning their text baselines staggers the boxes themselves. */
+.masthead-tools { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
 .masthead h1 {
   font-size: var(--text-xl);
   margin: 0;
@@ -160,6 +165,51 @@ header.masthead {
 }
 .masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
 .masthead .sub code { font-family: var(--mono); font-size: var(--text-sm); }
+
+/* The rebuild controls, folded. A native <details> rather than a popover: no library, no
+ * focus trap to get wrong, and it closes on Escape for free. */
+.tools-menu { position: relative; }
+.tools-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-5);
+}
+.tools-menu > summary::-webkit-details-marker { display: none; }
+.tools-menu > summary:hover { background: var(--surface-2); border-color: var(--accent); }
+.tools-menu[open] > summary { background: var(--surface-2); border-color: var(--accent); }
+.tools-menu-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  min-width: 160px;
+}
+/* The one place the no-shadow rule bends, and only because this floats above content: with
+ * nothing but a border it reads as a box that has been pasted onto the page rather than
+ * lifted off it. Kept faint enough to stay a hairline's worth of separation. */
+.tools-menu-body { box-shadow: 0 4px 16px rgb(22 22 28 / 8%); }
+.tools-menu-body button { width: 100%; }
+
+/* The replay cursor's band. Full width under the masthead, because it governs every figure
+ * on the page rather than any one panel. */
+.cursor-band {
+  padding: var(--space-4) 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-7);
+}
 
 .panel {
   background: var(--surface-1);
