@@ -83,6 +83,14 @@ class EpisodeEvidence:
     tpa_decisions: tuple[Any, ...] = ()
     tpa_reversals: tuple[Any, ...] = ()
     rebate_lines: tuple[Any, ...] = ()
+    #: Beacon's acknowledgement that a rebate submission was received.
+    #:
+    #: Its own bucket rather than a share of ``tpa_requests``, because the two are different
+    #: parties' facts about the same step: the TPA's is *we asked*, Beacon's is *we have it,
+    #: and here is what it is called now*.  Collapsing them would make a dossier unable to say
+    #: which one it had, and DOC2-004 makes Beacon — not the TPA — authoritative for the
+    #: rebate submission identifier.
+    beacon_submissions: tuple[Any, ...] = ()
     #: Positive allocations attributable to this episode's reimbursement track.
     reimbursement_cash_in_cents: int = 0
     #: Negative allocations — money that left again.
@@ -177,6 +185,14 @@ _KIND_BUCKETS = {
     RecordKind.TPA_MANUFACTURER_DECISION: "tpa_decisions",
     RecordKind.TPA_REVERSAL: "tpa_reversals",
     RecordKind.REBATE_DISPENSE_LINE: "rebate_lines",
+    # Bucketed deliberately, and it is the one Beacon kind that is.
+    #
+    # The other two stay out: BEACON_VALIDATION_OUTCOME is Beacon's judgement of the
+    # submission's form, which has no verdict code yet, and BEACON_PAYMENT_REFERENCE carries
+    # money the 340B feed already reports, so reading it here would be C-14 on every paid
+    # episode. This one carries neither a judgement nor an amount -- only the fact that a
+    # submission exists, which is exactly what ``r_request`` asks.
+    RecordKind.BEACON_ACKNOWLEDGMENT: "beacon_submissions",
 }
 
 
@@ -265,6 +281,7 @@ def gather_evidence(conn: sqlite3.Connection, episode_row: Any, cursor: str) -> 
         tpa_decisions=tuple(buckets["tpa_decisions"]),
         tpa_reversals=tuple(buckets["tpa_reversals"]),
         rebate_lines=tuple(buckets["rebate_lines"]),
+        beacon_submissions=tuple(buckets["beacon_submissions"]),
         reimbursement_cash_in_cents=reimb_in,
         reimbursement_cash_out_cents=reimb_out,
         rebate_cash_in_cents=rebate_in,
@@ -663,7 +680,20 @@ def _derive_rebate(
     if qualification == "NOT_QUALIFIED":
         return replace(dimensions, r_present="PRESENT", r_qualification="NOT_QUALIFIED")
 
-    request = "SUBMITTED" if evidence.tpa_requests else "NOT_SUBMITTED"
+    # **Either party's word that the request exists.**  The TPA saying it asked, or Beacon
+    # acknowledging it holds the submission — and the second is the stronger evidence, since
+    # DOC2-004 makes Beacon authoritative for the rebate submission identifier while the
+    # TPA's claim is only a claim.
+    #
+    # Reading both is what makes a vendor-sourced build work at all. No TPA export carries a
+    # rebate request: qualification exports report qualification, and asking the manufacturer
+    # happens afterwards and is reported by whoever asked. With only ``tpa_requests`` here,
+    # running on Verity or Craneware short-circuited 30 of 60 episodes to C-03 "qualified,
+    # not submitted" — a statement about our data rather than about the claim.
+    #
+    # Safe because the acknowledgement is a strict superset, measured rather than assumed:
+    # every episode holding a rebate request also holds one, with zero orphans.
+    request = "SUBMITTED" if evidence.tpa_requests or evidence.beacon_submissions else "NOT_SUBMITTED"
     if request == "NOT_SUBMITTED":
         return replace(
             dimensions,

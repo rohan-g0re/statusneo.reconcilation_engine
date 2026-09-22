@@ -15,7 +15,7 @@ Three causes account for all of it.  The first two are facts about what a vendor
 because this file caught it — landing vendor divergence produced a ``C-13 -> C-01`` this test
 refused to accept until it had a name.
 
-**1. No TPA export carries the rebate request, so the track stops at C-03.**
+**1. No TPA export carries the rebate request — CLOSED, by reading Beacon instead.**
 ``_derive_rebate`` reads ``request = "SUBMITTED" if evidence.tpa_requests else
 "NOT_SUBMITTED"`` and returns immediately on ``NOT_SUBMITTED``, which short-circuits
 manufacturer status, payment and cash in one step.  The generic feed carries 33
@@ -23,12 +23,18 @@ manufacturer status, payment and cash in one step.  The generic feed carries 33
 has a column for "we asked the manufacturer", because asking is not something a TPA's
 qualification export reports.
 
-That is a gap with a known filler rather than a dead end, and the fourth test measures it:
-**every episode holding a rebate request also holds a Beacon acknowledgement**, and Beacon
-reaches more besides.  The acknowledgement is the submission receipt — DOC2-004 makes Beacon
-authoritative for the rebate submission identifier — so in the inverted world the "we
-submitted" fact belongs to Beacon and not to the TPA's word for it.  Closing it moves
-verdicts, so it is a separate measured step, exactly as ``beacon_rebate_status`` was.
+That gap had a known filler and it has been taken.  ``_derive_rebate`` now reads
+``tpa_requests or beacon_submissions``: the acknowledgement is the submission receipt, and
+DOC2-004 makes Beacon authoritative for the rebate submission identifier, so "we submitted"
+is Beacon's fact rather than the TPA's word for it.  The safety precondition is measured
+rather than assumed — **every episode holding a rebate request also holds an
+acknowledgement**, zero orphans, and Beacon reaches 6 more besides.
+
+Its delta was measured on its own before it landed, exactly as ``beacon_rebate_status``
+will be.  On the generic build it moves **one** episode, C-03 to C-05 — a dispense the TPA
+never recorded asking about and Beacon holds the submission for, which is a correction.  On
+the vendor builds it recovers 30, taking generic-to-Verity from 35 episodes changed to 4 and
+generic-to-Craneware from 30 to 1.  What remains is entirely causes 2 and 3.
 
 **2. Verity's accumulations cannot express a disqualification.**  The dataset is the
 dispenses that accumulated, and ``connectors/vendors/verity.py`` says the population is
@@ -245,10 +251,17 @@ def test_beacon_acknowledgements_already_cover_every_request_they_would_replace(
     acknowledgement, reading submission from Beacon would lose that episode's rebate track --
     so the assertion is on the direction of containment, not on the counts.
 
-    Deliberately not yet acted on.  ``BEACON_ACKNOWLEDGMENT`` is outside
-    ``dimensions._KIND_BUCKETS`` by decision, and bucketing it moves verdicts on the episodes
-    Beacon reaches and the request does not.  That is a real improvement and a separately
-    measurable one; folded in here its delta would be indistinguishable from the inversion's.
+    **This is now the precondition for a change that has been made**, not a survey of a
+    change being considered.  ``_derive_rebate`` reads the request as ``tpa_requests or
+    beacon_submissions``, so the containment below is what makes that safe: if one episode
+    held a request and no acknowledgement, the two sources would not be interchangeable and
+    a build without the TPA's own events would lose that episode's rebate track.
+
+    Its delta was measured on its own before it landed, which is the discipline this file
+    exists to enforce.  On the generic build, where both sources are present, the change moves
+    exactly **one** episode — C-03 to C-05, a dispense the TPA never recorded asking about
+    and Beacon holds the submission for, which is a correction rather than a drift.  On the
+    vendor builds it recovers 30.
     """
     built = builds[GENERIC_TPA_SOURCE]
     requests = built.episodes_reached_by(RecordKind.TPA_REBATE_REQUEST)
@@ -261,12 +274,51 @@ def test_beacon_acknowledgements_already_cover_every_request_they_would_replace(
         f"acknowledgement: {orphans[:3]}. Beacon cannot stand in for the request on those, so "
         "closing this gap would silently drop their rebate track"
     )
-    assert RecordKind.BEACON_ACKNOWLEDGMENT not in __import__(
-        "recon.engine.dimensions", fromlist=["_KIND_BUCKETS"]
-    )._KIND_BUCKETS, (
-        "the Beacon acknowledgement now feeds a dimension. That may well be right, but it is "
-        "the step this test is holding open, and its verdict delta has to be measured on its "
-        "own rather than inside the inversion's"
+    from recon.engine import dimensions
+
+    assert dimensions._KIND_BUCKETS.get(RecordKind.BEACON_ACKNOWLEDGMENT) == (
+        "beacon_submissions"
+    ), (
+        "the Beacon acknowledgement no longer feeds the submission dimension, so a "
+        "vendor-sourced build has nothing to read the request from and collapses to C-03"
+    )
+    # Its own bucket, not a share of the TPA's. The two are different parties' facts about
+    # the same step -- the TPA's is "we asked", Beacon's is "we have it" -- and a dossier
+    # that could not say which one it held would be worse than one that reads only the TPA.
+    assert dimensions._KIND_BUCKETS.get(RecordKind.TPA_REBATE_REQUEST) == "tpa_requests"
+
+
+def test_either_party_s_word_establishes_that_the_request_exists() -> None:
+    """The predicate itself, on constructed evidence rather than on a whole build.
+
+    Four cases, because the interesting one is the third: the TPA is silent and Beacon is
+    not, which is every episode in a vendor-sourced build and was ``NOT_SUBMITTED`` until
+    this landed.
+    """
+    from recon.engine import dimensions
+
+    def request_for(*, tpa: bool, beacon: bool) -> str:
+        evidence = dimensions.EpisodeEvidence(
+            episode=None,
+            cursor="2026-01-01T00:00:00Z",
+            anchor=None,
+            tpa_requests=(object(),) if tpa else (),
+            beacon_submissions=(object(),) if beacon else (),
+        )
+        return (
+            "SUBMITTED"
+            if evidence.tpa_requests or evidence.beacon_submissions
+            else "NOT_SUBMITTED"
+        )
+
+    assert request_for(tpa=True, beacon=True) == "SUBMITTED"
+    assert request_for(tpa=True, beacon=False) == "SUBMITTED"
+    assert request_for(tpa=False, beacon=True) == "SUBMITTED", (
+        "a Beacon acknowledgement alone no longer counts as a submission, which is the whole "
+        "of what a vendor-sourced build has to go on"
+    )
+    assert request_for(tpa=False, beacon=False) == "NOT_SUBMITTED", (
+        "everything now reads as submitted, so C-03 has become unreachable rather than rare"
     )
 
 
