@@ -45,6 +45,15 @@ web/dist/
 ui-review/
 # ...except the screenshots the design note presents from, which are content.
 !docs/images/*.png
+# ...and the pitch artwork. SOLUTION_PITCH.md and docs/pitch/deck/index.html both
+# reference these by relative path, so ignoring them commits two documents with
+# broken images. The .pptx embeds its copies and does not depend on these.
+!docs/pitch/diagrams/*.png
+!docs/pitch/deck/img/*.png
+
+# Office lock/owner files. PowerPoint drops a ~$name.pptx beside any open deck;
+# it is a few bytes of session state and never content.
+~$*
 
 # Agent layer: secrets and run journals
 .env
