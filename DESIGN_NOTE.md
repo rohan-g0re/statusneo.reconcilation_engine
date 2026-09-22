@@ -193,13 +193,13 @@ Anything finer than three dispositions belongs in reason codes, which are a *lis
 
 ## 7. Agent and tool design
 
-Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatible client.
+Three roles, nine tools, and a single-file custom harness — hand-rolled `httpx` against an OpenAI-compatible endpoint, no SDK and no framework.
 
 | Role                   | Question                      | Shape                                            |
 | ---------------------- | ----------------------------- | ------------------------------------------------ |
 | Exception Investigator | Why is this claim open?       | Single pass, 8 read tools, ≤5 rounds / 12 calls |
 | Workflow Coordinator   | What should a person do?      | Propose ⇄ Evaluate loop                         |
-| Portfolio Analyst      | What's the state of the book? | Single pass, aggregate tools                     |
+| Portfolio Analyst      | What's the state of the book? | Single pass, same 8 read tools, 4 rounds / 10 calls |
 
 ![Agent loop](docs/images/agent-loop.png)
 
@@ -207,7 +207,7 @@ Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatibl
 
 **Two agents, and the evaluator never sees the proposer's reasoning.** Self-critique is measured to *degrade* results; external verification improves them. The evaluator gets the proposed action, the evidence and the rubric on a fresh trace — the `reasoning` field does not exist on the object it receives, so it is unrepresentable rather than filtered. The critique fed back between rounds is built from findings only, and its function signature cannot accept a proposal at all.
 
-**The evaluator never emits a score.** It returns per-criterion findings — `SUPPORTED`, `CONTRADICTED`, `NOT_ADDRESSED` — and Python computes `score = 100 × gate × (earned/possible)`. A model asked for a number produces a plausible-looking one; a model asked "is this claim supported, and quote the bit that shows it" is doing something checkable. Sixteen criteria: 6 checked by Python, 8 by the judge, 2 recorded at zero weight. Four **vetoes**, all Python, any one of which zeroes the gate — action valid for the disposition (G1), every figure sourced (G3), every quoted span verbatim in its named source (G5), and no claim that money already moved (G8).
+**The evaluator never emits a score.** It returns per-criterion findings — `SUPPORTED`, `CONTRADICTED`, `NOT_ADDRESSED` — and Python computes `score = 100 × gate × (earned/possible)`. A model asked for a number produces a plausible-looking one; a model asked "is this claim supported, and quote the bit that shows it" is doing something checkable. Sixteen criteria: 6 checked by Python, 8 by the judge, 2 recorded at zero weight — though the default `core` profile grades four of those eight, and `RECON_AGENT_RUBRIC=full` grades all of them. Four **vetoes**, all Python, any one of which zeroes the gate — action valid for the disposition (G1), every figure sourced (G3), every quoted span verbatim in its named source (G5), and no claim that money already moved (G8).
 
 **Four outcomes, never collapsed to a boolean:** `complete` (≥80), `insufficient_data` (rendered as a *success* — more iterations cannot manufacture missing evidence), `stalled` (no improvement across three scored rounds), and `capped` (the hard ceiling, which is the loop bound itself rather than a check inside the body, so it wins ties by construction).
 
@@ -227,7 +227,7 @@ The write tool is never given to any model — role tool lists are built by *rem
 
 Scoped to the brief: no production deployment, no IAM buildout. `README.md` carries the full control table; these four shape the architecture.
 
-**The untrusted-text fence.** Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟧` with a per-run nonce before it reaches a prompt. You cannot sanitise a rejection reason — it *is* the data — so you mark its boundary and refuse instructions from inside it. The fenced-field list is derived from the projection table, so a newly projected field is fenced automatically rather than remembered.
+**The untrusted-text fence.** Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟦/UNTRUSTED:#nonce⟧` with a per-run nonce before it reaches a prompt — the nonce repeats in the closer because that is what the fence regex back-references to prove the pair belongs to this run. You cannot sanitise a rejection reason — it *is* the data — so you mark its boundary and refuse instructions from inside it. The fenced-field list is derived from the projection table, so a newly projected field is fenced automatically rather than remembered.
 
 **A structural provenance check.** A tool argument appearing only inside previously-returned untrusted text is refused and journalled as `injection_attempt_recorded`. That holds whether or not the model obeys the prompt, which is the only kind of guarantee worth having here.
 
