@@ -115,6 +115,11 @@ __all__ = [
     # control totals (F2) — declared against observed, immutable once written
     "record_control_total",
     "control_totals",
+    # Beacon reads.  No writer joins them -- see the section comment at the foot of the file.
+    "beacon_id_for_episode",
+    "beacon_payment_references_for_episode",
+    "episodes_awaiting_beacon_decision",
+    "beacon_validation_failures",
 ]
 
 
@@ -1344,3 +1349,145 @@ def control_totals(
             (source_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ═══ Beacon ═════════════════════════════════════════════════════════════════
+#
+# Four reads and no writer, and the absent writer is the finding rather than an omission.
+#
+# The question that produced this section was whether the connector fabric should be able to
+# write to the database, or whether the shared write capability should be pulled out into a
+# module both the fabric and the engine call.  Neither: the second already exists.  This
+# module is the only one in the system that writes SQL, ``connectors/`` is forbidden from
+# writing any — ``test_the_connector_package_writes_no_sql_at_all`` enforces it — and the
+# whole Beacon inbound leg was built with the fabric holding zero write capability:
+#
+#     Transport -> Document -> _read_rows -> _adapt_beacon -> CanonicalRecord
+#               -> pipeline._attach -> repository writes
+#
+# Giving the fabric write access would break the source-of-truth boundary rather than merely
+# duplicate code.  ``connectors/authority.py`` works precisely *because* vendor data must pass
+# through adaptation before anything is written: that is where a TPA is refused permission to
+# assert a manufacturer's decision, and it caught two real defects — nine Craneware rows
+# quarantined as ``SOURCE_AUTHORITY_BREACH``, and every Verity invoice row when the adapter
+# first wrote a plain ``beacon_id``.  A fabric that could write would let a vendor's file
+# author its own facts, and DOC2-004's boundary would become a comment rather than a
+# constraint.
+#
+# So what was missing was never a capability.  It was a *vocabulary*: 40 public functions and
+# one mention of Beacon, so a Beacon fact was reachable only by hand-written SQL at the call
+# site.
+
+
+def beacon_id_for_episode(conn: sqlite3.Connection, episode_id: str) -> str | None:
+    """The Beacon submission identifier this episode was acknowledged under, if any.
+
+    Read off ``normalized_record.beacon_id`` through the crosswalk rather than off ``episode``,
+    and that is forced rather than chosen: ``trg_episode_no_update`` aborts any UPDATE on
+    ``episode``, so an identifier that did not arrive with the anchor can never be added to
+    that row later.  The acknowledgement arrives long afterwards, so the episode table cannot
+    hold it and the join is the only route.
+
+    Returns the earliest by arrival when an episode has more than one, which is a real
+    possibility rather than a defensive default — a resubmission gets its own Beacon ID — and
+    the first is the one every other record's lookup resolved against.
+    """
+    row = conn.execute(
+        "SELECT n.beacon_id FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE k.episode_id = ? AND n.beacon_id IS NOT NULL"
+        " ORDER BY n.received_at, n.norm_id LIMIT 1",
+        (episode_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def beacon_payment_references_for_episode(
+    conn: sqlite3.Connection, episode_id: str
+) -> list[NormalizedRecord]:
+    """Beacon's payment-reference records for this episode, in arrival order.
+
+    These carry a rebate amount that is deliberately **not** promoted to ``amount_cents``:
+    Beacon reports the same payment the 340B feed already reports, so summing both would
+    stamp C-14 "duplicate rebate payment" on every paid episode.  The figure rides in
+    ``canonical`` for display, and this function hands back the whole record so a caller can
+    show it without any temptation to add it up.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT n.* FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE k.episode_id = ? AND n.record_kind = 'BEACON_PAYMENT_REFERENCE'"
+        " ORDER BY n.received_at, n.norm_id",
+        (episode_id,),
+    ).fetchall()
+    return [NormalizedRecord.from_row(row) for row in rows]
+
+
+def episodes_awaiting_beacon_decision(conn: sqlite3.Connection, cursor: str) -> list[str]:
+    """Episodes Beacon acknowledged by ``cursor`` and has not decided on.
+
+    "Has not decided" means no validation outcome carrying a decision — a ``PENDING`` outcome
+    counts as *not decided*, because Beacon writes one with a null ``decided_at`` precisely to
+    say so, and the reader dates it to the delivery.  Treating a PENDING row as an answer
+    would empty this list of the only episodes it exists to name.
+
+    Both halves are cursor-bounded.  Without that on the inner query an episode decided
+    *after* the cursor would read as decided now, which is the replay leak the whole system is
+    built to prevent: a question about 18 March would be answered with April's knowledge.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT k.episode_id FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE n.record_kind = 'BEACON_ACKNOWLEDGMENT'"
+        "   AND n.received_at <= :cursor AND k.first_seen_at <= :cursor"
+        "   AND NOT EXISTS ("
+        "     SELECT 1 FROM crosswalk_key k2"
+        "       JOIN normalized_record d ON d.norm_id = k2.resolved_from_norm_id"
+        "      WHERE k2.episode_id = k.episode_id"
+        "        AND d.record_kind = 'BEACON_VALIDATION_OUTCOME'"
+        "        AND d.received_at <= :cursor"
+        "        AND json_extract(d.canonical, '$.validation_outcome') IN"
+        "            ('ACCEPTED','REJECTED','REVERSED'))"
+        " ORDER BY k.episode_id",
+        {"cursor": cursor},
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def beacon_validation_failures(
+    conn: sqlite3.Connection, cursor: str
+) -> list[NormalizedRecord]:
+    """Submissions Beacon refused — the ones that never reached a manufacturer at all.
+
+    ``REJECTED`` is a submission Beacon would not accept; ``REVERSED`` is one it accepted and
+    then withdrew.  Both mean the same thing about the money: no manufacturer ever saw this
+    claim, so no manufacturer decision about it can ever arrive.
+
+    **This surfaces a gap rather than closing one, and the gap is smaller than predicted.**
+    ``BEACON_VALIDATION_OUTCOME`` is outside ``dimensions._KIND_BUCKETS``, so a refusal moves
+    no verdict.  The expectation was that those claims would therefore sit at C-05, "request
+    submitted, manufacturer pending", forever.  Measured on the demo profile, none does.
+
+    What they survive on is two different accidents, neither connected to Beacon.  Of the
+    eight episodes behind a refused submission, four carry a manufacturer decision that
+    arrived independently through the 340B feed and land on a real code that way.  The other
+    four have no such decision at all: three carry a reversal and reach C-13 "clawed back",
+    and one was never qualified and closes at C-02.
+
+    So no operator is currently told to wait for a decision that cannot arrive — and nothing
+    guarantees that.  Each of those routes is a separate record from a separate authority that
+    happens to exist here.  Closing it properly needs a ``Dimensions`` field, a branch in
+    ``_derive_rebate``, and either a new row in the state space or an argument for folding it
+    into C-07.  Named here so it is a decision rather than a discovery, and
+    ``tests/test_repository_beacon.py`` pins the property that matters: a refused submission
+    must never sit in ``PENDING``.
+    """
+    rows = conn.execute(
+        "SELECT * FROM normalized_record"
+        " WHERE record_kind = 'BEACON_VALIDATION_OUTCOME'"
+        "   AND received_at <= :cursor"
+        "   AND json_extract(canonical, '$.validation_outcome') IN ('REJECTED','REVERSED')"
+        " ORDER BY received_at, norm_id",
+        {"cursor": cursor},
+    ).fetchall()
+    return [NormalizedRecord.from_row(row) for row in rows]
