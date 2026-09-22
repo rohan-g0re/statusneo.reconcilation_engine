@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api.js'
+import * as labels from '../labels.js'
 
 // ═══ the cross-episode to-do list ═══════════════════════════════════════════════════════════
 // Every to-do (`work_item`) is written from exactly one place: the "Add to-do" button on an
@@ -172,7 +173,12 @@ export default function TodoListPanel({ cursor }) {
                         </a>
                       </td>
                       <td>
-                        <span className="verdict-code">{item.recommended_action}</span>
+                        {/* `.chip-action`, not `.verdict-code`: a decision somebody made is a
+                            different kind of thing from a verdict the engine computed, and the
+                            two rendered identically. */}
+                        <span className="chip chip-action" title={item.recommended_action}>
+                          {labels.action(item.recommended_action).label}
+                        </span>
                       </td>
                       <td className="todo-rationale">{item.summary}</td>
                       <td className="mono">{item.created_at?.slice(0, 10)}</td>

@@ -1,5 +1,6 @@
 import React from 'react'
 import { formatMoney } from '../api.js'
+import * as labels from '../labels.js'
 
 // Three dispositions, because "what do I do with this?" has three answers.
 //
@@ -10,28 +11,19 @@ import { formatMoney } from '../api.js'
 // for state, never reused as a series — and two of them sit below 3:1 contrast on a light surface by
 // design, so the icon-plus-label pairing is what keeps the meaning legible. Colour alone never
 // carries it.
+//
+// The label names the action, not the state. `Exception`, `Pending` and `Closed` are the
+// engine's enum members and they describe what a row *is*; an operator is deciding what to
+// *do*, and the whole reason there are exactly three buckets is that the question has exactly
+// three answers. The enum still shows, as a muted suffix, because it is what the API returns
+// and what anyone reading the design note will be looking for.
+//
+// The one-line meaning moves out of the `title` attribute and onto the tile. It was the most
+// valuable copy on the screen and it was invisible without a mouse.
 const TILES = [
-  {
-    key: 'EXCEPTION',
-    label: 'Exception',
-    icon: '▲',
-    color: 'var(--status-critical)',
-    blurb: 'A defect exists. Work it.',
-  },
-  {
-    key: 'PENDING',
-    label: 'Pending',
-    icon: '◷',
-    color: 'var(--status-warning)',
-    blurb: 'Waiting on an external party. No defect. Ranked by age.',
-  },
-  {
-    key: 'CLOSED',
-    label: 'Closed',
-    icon: '✓',
-    color: 'var(--status-good)',
-    blurb: 'Nothing to do.',
-  },
+  { key: 'EXCEPTION', icon: '▲', color: 'var(--status-critical)' },
+  { key: 'PENDING', icon: '◷', color: 'var(--status-warning)' },
+  { key: 'CLOSED', icon: '✓', color: 'var(--status-good)' },
 ]
 
 export default function QueueTiles({ overview, selected, onSelect }) {
@@ -40,6 +32,7 @@ export default function QueueTiles({ overview, selected, onSelect }) {
     <div className="tiles" role="group" aria-label="Episodes by disposition">
       {TILES.map((tile) => {
         const stats = byDisposition[tile.key] ?? { episodes: 0, variance_cents: 0, reopened: 0 }
+        const { label, detail } = labels.disposition(tile.key)
         return (
           <button
             key={tile.key}
@@ -48,11 +41,11 @@ export default function QueueTiles({ overview, selected, onSelect }) {
             aria-pressed={selected === tile.key}
             data-testid={`tile-${tile.key}`}
             onClick={() => onSelect(tile.key)}
-            title={tile.blurb}
           >
             <span className="label">
               <span className="icon" aria-hidden="true">{tile.icon}</span>
-              {tile.label}
+              {label}
+              <span className="tile-enum">{tile.key}</span>
             </span>
             <div className="count" data-testid={`tile-count-${tile.key}`}>{stats.episodes}</div>
             <div className="money">
@@ -64,6 +57,7 @@ export default function QueueTiles({ overview, selected, onSelect }) {
                 </>
               ) : null}
             </div>
+            <div className="tile-blurb">{detail}</div>
           </button>
         )
       })}

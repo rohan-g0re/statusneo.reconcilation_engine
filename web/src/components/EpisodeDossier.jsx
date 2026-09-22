@@ -1,5 +1,18 @@
 import React, { useState } from 'react'
 import Timeline, { Money } from './Timeline.jsx'
+import * as labels from '../labels.js'
+
+/** One track's verdict, named. The code stays as a quotable suffix. */
+function TrackVerdict({ kind, code }) {
+  const { label, detail } = labels.verdict(code)
+  return (
+    <div className="dossier-track" title={detail || code}>
+      <span className="dossier-track-kind">{kind}</span>
+      <span className="dossier-track-label">{label}</span>
+      <span className="verdict-code">{code}</span>
+    </div>
+  )
+}
 
 // The episode, read as a story.
 //
@@ -64,15 +77,20 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
           {current ? (
             <div className="dossier-verdict" style={{ '--d': DISPOSITION_COLOR[current.episode_disposition] }}>
               <div className="dossier-disposition" data-testid="dossier-disposition">
-                {current.episode_disposition}
+                {labels.disposition(current.episode_disposition).label}
+                <span className="dossier-enum">{current.episode_disposition}</span>
               </div>
-              <div>
-                <span className="verdict-code">{current.reimbursement_verdict}</span>{' '}
-                <span className="verdict-code">{current.rebate_verdict}</span>
-              </div>
+              {/*
+                Two labelled rows, not two adjacent pills. The pair this replaces was two
+                four-character codes side by side with nothing saying which was which — and the
+                only place that mapping appeared was a column header inside the collapsed
+                evidence accordion at the bottom of this same panel.
+              */}
+              <TrackVerdict kind="Insurance" code={current.reimbursement_verdict} />
+              <TrackVerdict kind="340B rebate" code={current.rebate_verdict} />
               {current.reopened_from ? (
                 <div className="chip reopened" style={{ marginTop: 6 }}>
-                  reopened from {current.reopened_from}
+                  was {labels.disposition(current.reopened_from).label.toLowerCase()}, reopened
                 </div>
               ) : null}
             </div>
@@ -86,21 +104,35 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
           )}
         </div>
 
-        {current && (current.reason_codes.length > 0 || current.cross_track_flags.length > 0) ? (
+        {current && current.reason_codes.length > 0 ? (
           <p className="dossier-reasons">
             {current.reason_codes.map((code) => (
-              <span className="chip" key={code}>{code}</span>
-            ))}
-            {current.cross_track_flags.map((flag) => (
-              <span className="chip flag" key={flag}>{flag}</span>
-            ))}
-            {current.cross_track_flags.length > 0 ? (
-              <span className="dossier-note">
-                cross-track — a story no single-track view can tell
+              <span className="chip" key={code} title={code}>
+                {labels.reason(code).label}
               </span>
-            ) : null}
+            ))}
           </p>
         ) : null}
+
+        {/*
+          Cross-track flags get a band of their own rather than a chip in the row above. They are
+          compliance findings, not diagnostics: X-1 means the insurer refused to pay and the
+          manufacturer paid the rebate anyway, which leaves the hospital holding money it may owe
+          back on a claim that paid nothing. Rendered as a third grey chip after two reason codes,
+          the single most valuable finding in the product read as the least.
+        */}
+        {current?.cross_track_flags.map((code) => {
+          const { label, detail } = labels.flag(code)
+          return (
+            <div className="dossier-flag" key={code} data-testid={`flag-${code}`}>
+              <span className="dossier-flag-head">
+                <span aria-hidden="true">▲</span> {label}
+                <span className="verdict-code">{code}</span>
+              </span>
+              <span className="dossier-flag-detail">{detail}</span>
+            </div>
+          )
+        })}
 
         <div className="view-toggle" role="group" aria-label="Timeline detail level">
           <button
@@ -191,8 +223,8 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
               <tbody>
                 {unresolved.map((row, index) => (
                   <tr key={index}>
-                    <td>{row.record_kind}</td>
-                    <td><span className="chip">{row.park_reason}</span></td>
+                    <td>{labels.recordKind(row.record_kind).label}</td>
+                    <td><span className="chip" title={row.park_reason}>{labels.parkReason(row.park_reason).label}</span></td>
                     <td className="mono">{row.key_value}</td>
                     <td className="mono">{row.received_at.slice(0, 10)}</td>
                   </tr>
@@ -247,7 +279,7 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
               <tbody>
                 {dossier.crosswalk_keys.map((row, index) => (
                   <tr key={index}>
-                    <td><span className="chip">{row.key_type}</span></td>
+                    <td><span className="chip" title={row.key_type}>{labels.keyType(row.key_type).label}</span></td>
                     <td className="mono">{row.key_value}</td>
                     <td className="mono">{row.first_seen_at.slice(0, 10)}</td>
                   </tr>
