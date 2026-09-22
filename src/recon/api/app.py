@@ -586,6 +586,14 @@ def create_app(settings: Settings | None = None):
                 "value for a genuinely different one."
             ),
         ),
+        tpa_source: str = Query(
+            GENERIC_TPA_SOURCE,
+            description=(
+                "Where the TPA's own account of a dispense comes from: 'generic' reads "
+                "tpa_340b_events.jsonl, 'verity' or 'craneware' reads that vendor's export "
+                "instead. The manufacturer's rows are read from the feed in every mode."
+            ),
+        ),
     ) -> dict[str, Any]:
         """Wipe and rebuild the whole dataset.
 
@@ -624,6 +632,19 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(
                 status_code=422, detail=f"seed must be a positive integer, got {seed}"
             )
+        # Validated against the table that actually serves it, so a fourth vendor becomes
+        # reachable here by adding a mapping rather than by editing this handler. Rejected
+        # loudly rather than falling back to generic: a typo that silently rebuilt the
+        # default would answer "which TPA is this?" with the wrong TPA, and the whole point
+        # of the control is that the answer differs.
+        if tpa_source != GENERIC_TPA_SOURCE and tpa_source not in _VENDOR_TPA_DATASETS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"unknown tpa_source {tpa_source!r}; expected {GENERIC_TPA_SOURCE!r} or "
+                    f"one of {sorted(_VENDOR_TPA_DATASETS)}"
+                ),
+            )
 
         current: Settings = app.state.settings
         rebuilt = current.for_profile(target)
@@ -633,8 +654,13 @@ def create_app(settings: Settings | None = None):
             rebuilt = replace(rebuilt, master_seed=seed)
         app.state.settings = rebuilt
 
-        result = build_dataset(app.state.settings, rebuild=True)
+        result = build_dataset(app.state.settings, rebuild=True, tpa_source=tpa_source)
         result["master_seed"] = app.state.settings.master_seed
+        # Echoed back because the rest of the payload cannot be read without it. Two rebuilds
+        # of the same profile and seed legitimately produce different verdicts depending on
+        # which TPA supplied the qualifications, so a response that did not say which one it
+        # used would be an unattributable measurement.
+        result["tpa_source"] = tpa_source
         return result
 
     # The agent layer's HTTP surface (docs/agent_layer_design.md S8.6). Always mounted:

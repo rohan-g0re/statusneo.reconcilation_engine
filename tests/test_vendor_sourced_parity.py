@@ -16,8 +16,8 @@ because this file caught it — landing vendor divergence produced a ``C-13 -> C
 refused to accept until it had a name.
 
 **1. No TPA export carries the rebate request — CLOSED, by reading Beacon instead.**
-``_derive_rebate`` reads ``request = "SUBMITTED" if evidence.tpa_requests else
-"NOT_SUBMITTED"`` and returns immediately on ``NOT_SUBMITTED``, which short-circuits
+``_derive_rebate`` *used to* read ``request = "SUBMITTED" if evidence.tpa_requests else
+"NOT_SUBMITTED"``, returning immediately on ``NOT_SUBMITTED`` and short-circuiting
 manufacturer status, payment and cash in one step.  The generic feed carries 33
 ``REBATE_REQUEST`` events; neither ``verity_accumulations`` nor ``craneware_claims_report``
 has a column for "we asked the manufacturer", because asking is not something a TPA's
@@ -456,4 +456,63 @@ def test_only_verity_loses_the_track_entirely(builds) -> None:
         "Verity no longer loses any track, so either the accumulations export gained a "
         "disqualified population or the demo profile stopped containing one -- either way the "
         "asymmetry this file documents is no longer being demonstrated"
+    )
+
+
+# ═══ the control a reviewer can actually reach ═══
+
+
+def test_the_regenerate_endpoint_can_choose_the_tpa_source(tmp_path) -> None:
+    """The vendor door has to be reachable from somewhere a person clicks.
+
+    Until this landed the whole path was Python-and-pytest only: ``/api/regenerate`` took no
+    ``tpa_source`` and always built generic, so a reviewer could read that the engine runs on
+    a vendor's export and had no way to see it do so.  A capability that only a test can
+    exercise is a capability nobody can be shown.
+
+    The response echoes the source back, and that is not decoration.  Two rebuilds of the
+    same profile at the same seed legitimately produce different verdicts depending on which
+    TPA supplied the qualifications, so a payload that did not say which one it used would be
+    an unattributable measurement.
+
+    An unknown vendor is a 422 rather than a fallback to generic.  Falling back would answer
+    "which TPA is this?" with the wrong TPA, and the entire point of the control is that the
+    answer differs.
+    """
+    pytest.importorskip(
+        "fastapi", reason="the API layer is an optional extra: pip install -e '.[api]'"
+    )
+    from fastapi.testclient import TestClient
+
+    from recon.api.app import create_app
+
+    client = TestClient(
+        create_app(
+            load_settings("demo", data_dir=tmp_path, db_path=tmp_path / "recon.sqlite")
+        )
+    )
+
+    for source in MODES:
+        response = client.post(f"/api/regenerate?profile=demo&tpa_source={source}")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["tpa_source"] == source, (
+            "the rebuild did not report which TPA it read, so its verdict counts cannot be "
+            "attributed to a source"
+        )
+        assert payload["episodes"] > 0
+
+    # Episode identity comes from the claim anchors, which no TPA source touches.
+    counts = set()
+    for source in MODES:
+        counts.add(
+            client.post(f"/api/regenerate?profile=demo&tpa_source={source}").json()["episodes"]
+        )
+    assert len(counts) == 1, f"switching the TPA source changed the episode count: {counts}"
+
+    refused = client.post("/api/regenerate?profile=demo&tpa_source=macrohelix")
+    assert refused.status_code == 422
+    assert "macrohelix" in refused.json()["detail"]
+    assert "craneware" in refused.json()["detail"], (
+        "the refusal does not name what it would have accepted, so a typo costs a round trip"
     )
