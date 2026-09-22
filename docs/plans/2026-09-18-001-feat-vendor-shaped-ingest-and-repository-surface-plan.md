@@ -1,6 +1,7 @@
 ---
-status: active
+status: complete
 created: 2026-09-18
+completed: 2026-09-21
 branch: connectivity_layer
 origin: docs/Assignment_Doc_2.pdf, and the session that built the Beacon inbound leg
 supersedes_scope_of: docs/plans/2026-09-17-001-feat-beacon-connectivity-completion-plan.md
@@ -250,3 +251,57 @@ on a **new** entity with a relation to it; add no observation to a routed one.
    difference explained per verdict code.
 3. Bank allocation, reopening and queue contents asserted on vendor-sourced data.
 4. `uv run --quiet python -c "... build_dataset ..."` clean on both profiles.
+
+---
+
+## Outcome — what this plan got wrong
+
+Both steps shipped. Five of the plan's own premises did not survive being measured, and
+they are recorded here because the corrections are worth more than the plan was.
+
+**1. The measurement that motivated §1.0 came from a file that should not have existed.**
+`RBT-20251031-44202`'s lines summing to 26,500.00 against a declared 30,094.00 was read out
+of a *superseded* Verity export. Verity names files from the data, nothing deleted old ones,
+and three generations were on disk — 37 of 37 allocation codes in the two stale ones appear
+in no feed. In the live export every batch's lines sum to its declared total exactly. The
+sweep that fixes it is commit `b9cfd99`; "never assume the lines sum to the batch total"
+remains sound advice about real vendors and was not evidence about this one.
+
+**2. §1.0's blocker was not batch/line semantics.** `authority.py` refuses a TPA source the
+rebate kinds outright — *"a TPA_VERITY source may not assert rebate status"*. The modelling
+the plan proposed was never available. `TPA_INVOICE_LINE` is what a TPA may say.
+
+**3. §1.5 is not available as written.** `tpa_340b_events.jsonl` cannot be demoted to
+generation-only: 78 of its rows are the TPA's and 35 are the *manufacturer's*, and DOC2-004
+puts the second set outside a TPA's authority entirely. Switching source swaps 78 rows, not a
+file. What shipped instead is `exclude_source_systems` plus a `tpa_source` mode, and
+`/api/regenerate` now takes it so the path is reachable from the dashboard rather than only
+from pytest.
+
+**4. §1.2 predicted explainable differences and under-predicted the cause.** The dominant one
+was that **no TPA export carries the rebate request**, so `_derive_rebate` short-circuited 30
+of 60 episodes to C-03. Closed by reading the submission from Beacon's acknowledgement, which
+DOC2-004 makes authoritative and which measurement showed is a strict superset — zero
+orphans. Its delta was taken alone: one episode on the generic build, C-03 to C-05. The vendor
+deltas fell from 35 and 30 episodes changed to **4 and 1**.
+
+**5. Step 2's gap is real but not the one described.** There is no hand-written Beacon SQL at
+any call site to replace, and refused submissions do not sit at C-05 forever. Of the eight
+episodes behind a refused submission, four are covered by a manufacturer decision arriving
+independently; the other four survive on a reversal or on never having qualified. Nothing
+reads the refusal, so the property now pinned is the one that matters: a refused submission
+must never sit in `PENDING`.
+
+**What the plan got right and is worth keeping:** the instruction to verify through the whole
+chain rather than at ingest, and the warning that arrival order was the sharpest risk. It was.
+Craneware publishes no per-row timestamp, lands a whole report at one instant, and reopens 64
+closed verdicts against the generic feed's 34 — on a different set of episodes.
+
+### Still open, named rather than discovered
+
+- `beacon_rebate_status` remains unenabled; it maps to `TPA_MANUFACTURER_DECISION`, which is
+  bucketed, so it moves verdicts and needs its own measured step.
+- A Beacon validation refusal has no verdict code. Closing it needs a `Dimensions` field, a
+  branch in `_derive_rebate`, and either a new state-space row or an argument for folding it
+  into C-07.
+- Whether the demo should default to a vendor source now that the vendor deltas are 4 and 1.
