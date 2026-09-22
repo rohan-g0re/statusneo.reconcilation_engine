@@ -39,11 +39,29 @@ def _require_fastapi():
 
 #: The Beacon payloads this build ingests, and the one it deliberately does not.
 #:
-#: ``beacon_rebate_status`` is held out. It maps to ``TPA_MANUFACTURER_DECISION``, which
-#: ``dimensions._KIND_BUCKETS`` *does* bucket, so landing it would move rebate verdicts —
-#: turning C-05 into C-07 wherever the 340B feed was silent and Beacon says rejected. That
-#: is a real improvement and it is a separate, measurable step: mixed in here the verdict
-#: delta would be unattributable, and this wave's whole claim is that nothing moved.
+#: ``beacon_rebate_status`` is held out, and the reason has been measured rather than
+#: assumed — the assumption was wrong and is worth recording.
+#:
+#: This comment used to say landing it would turn C-05 into C-07 "wherever the 340B feed was
+#: silent and Beacon says rejected". **Beacon is never saying anything the feed did not.**
+#: ``beacon_payloads.rebate_status`` reads ``manufacturer_decision`` off the very
+#: ``MANUFACTURER_DECISION`` event — or the ``REBATE_PAYMENT_BATCH`` line — that the engine
+#: already ingests. Checked across the demo profile: Beacon's decision agrees with the feed
+#: on 30 of 30 dispenses. Where the feed is silent, ``_manufacturer_decision`` returns
+#: ``None`` and Beacon is silent too, so the C-05 population it was supposed to rescue does
+#: not exist.
+#:
+#: Landing it would therefore add 30 duplicate ``TPA_MANUFACTURER_DECISION`` records carrying
+#: a decision already present, through a second door, for no informational gain — the same
+#: hazard ``BEACON_PAYMENT_REFERENCE`` is shaped to avoid on the money side.
+#:
+#: This is a limit of the **mock**, not of the architecture. DOC2-004 genuinely makes Beacon
+#: authoritative here; our Beacon is a re-dressing of the 340B feed, so it can only restate
+#: it. Making this demonstrable needs Beacon to be able to *disagree* with the feed — the
+#: same deliberate divergence the two TPAs now carry — at which point Beacon winning is a
+#: real demonstration instead of a duplicate row.
+#:
+#: ``beacon_submissions`` is outbound and fetches nothing.
 #:
 #: ``beacon_submissions`` is outbound and fetches nothing.
 _BEACON_INBOUND = ("beacon_acknowledgements", "beacon_validation_outcomes",
@@ -82,6 +100,24 @@ def _beacon_inbound_sources(settings: Settings) -> tuple[Any, ...]:
 #: drawback: that feed's shape is ours, invented under Doc 1, and no TPA ships anything like
 #: it. ``None`` would read as "unset", which is the one thing it is not.
 GENERIC_TPA_SOURCE = "generic"
+
+#: What a build reads when the caller does not say — **a vendor, not the generic feed**.
+#:
+#: In production there is no generic TPA feed. There is Verity's export, or Craneware's, or a
+#: sixth TPA's, and a prototype whose default is the one shape no vendor ships is
+#: demonstrating the wrong thing. The generic feed remains available and remains *generated*
+#: in every mode, because the vendor formatters read it.
+#:
+#: **Craneware rather than Verity**, and the reason is the state space rather than a
+#: preference. ``verity_accumulations`` is a population selected on ``qualification_status``,
+#: so it cannot express a disqualification at all: four episodes lose their 340B track
+#: entirely and read as "never 340B" rather than "refused". Craneware's Claims Report is a
+#: report of claims, a non-qualifying claim is still a claim, and every disqualification
+#: survives — one episode differs from the generic baseline instead of four.
+#:
+#: Verity is one query parameter away and exercises ``TPA_INVOICE_LINE``, which Craneware has
+#: no dataset for. Neither is "the" answer; that is the point of the switch.
+DEFAULT_TPA_SOURCE = "craneware"
 
 #: Which datasets carry a TPA's own account of a dispense, per vendor.
 #:
@@ -147,7 +183,7 @@ def build_dataset(
     settings: Settings,
     *,
     rebuild: bool = False,
-    tpa_source: str = GENERIC_TPA_SOURCE,
+    tpa_source: str = DEFAULT_TPA_SOURCE,
 ) -> dict[str, Any]:
     """Generate the feeds, load them, reconcile, and return what happened.
 
@@ -587,7 +623,7 @@ def create_app(settings: Settings | None = None):
             ),
         ),
         tpa_source: str = Query(
-            GENERIC_TPA_SOURCE,
+            DEFAULT_TPA_SOURCE,
             description=(
                 "Where the TPA's own account of a dispense comes from: 'generic' reads "
                 "tpa_340b_events.jsonl, 'verity' or 'craneware' reads that vendor's export "

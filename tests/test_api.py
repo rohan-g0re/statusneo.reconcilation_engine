@@ -458,20 +458,30 @@ def test_every_sourced_event_points_at_a_real_ingested_file(client):
     rather than in the file's own numbering -- which is the same reason ``raw_record``
     declares ``source_record_id`` nullable for the bank CSV.
     """
-    from recon.api.app import _BEACON_INBOUND
-    from recon.connectors import registry
+    from recon.api.app import _BEACON_INBOUND, _VENDOR_TPA_DATASETS
+    from recon.connectors import registry, vendors
 
     ingested = set(config.FEED_FILENAMES)
     for source_id in _BEACON_INBOUND:
         ingested.update(registry._BEACON_ROWS[source_id].filenames)
+    # The TPA's own rows come from a vendor export by default now, so a vendor file is a
+    # legitimate citation. Added by prefix rather than by name because Verity stamps its
+    # export names from the data and the landed name is not knowable in advance -- which is
+    # also why this compares by prefix below rather than by set membership alone.
+    vendor_prefixes = tuple(
+        vendors.mapping_for(source_id).filename_prefix
+        for datasets in _VENDOR_TPA_DATASETS.values()
+        for source_id in datasets
+    )
 
     payload = _richest_dossier(client)
     sourced = [e for e in payload["timeline"] if e.get("source") and e["source"].get("file")]
     assert sourced, "record-derived events must carry their provenance"
     for event in sourced:
-        assert event["source"]["file"] in ingested, (
-            f"{event['source']['file']!r} is cited on the timeline and is not a file this "
-            f"build reads; known: {sorted(ingested)}"
+        cited = event["source"]["file"]
+        assert cited in ingested or cited.startswith(vendor_prefixes), (
+            f"{cited!r} is cited on the timeline and is not a file this build reads; known: "
+            f"{sorted(ingested)} plus anything starting {list(vendor_prefixes)}"
         )
         assert event["source"]["line"] >= 1
 

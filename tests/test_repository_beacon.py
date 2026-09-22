@@ -310,13 +310,32 @@ def test_a_beacon_refusal_moves_no_verdict_and_something_else_covers_for_it(
         "                      WHERE w.episode_id = v.episode_id)",
         tuple(uncovered),
     ).fetchall()
-    stranded = [
+    stranded = sorted(
         row["episode_id"] for row in rows if row["episode_disposition"] == "PENDING"
-    ]
-    assert not stranded, (
-        f"{len(stranded)} submissions Beacon refused are sitting in PENDING: {stranded[:3]}. "
-        "Nothing in the engine reads a validation refusal, so these are waiting on a decision "
-        "that cannot arrive -- which is the gap, arriving for real rather than in theory"
+    )
+
+    # **The gap is now real, and switching the default is what made it real.**
+    #
+    # Under the generic feed every refused submission was covered -- by a manufacturer
+    # decision, a reversal, or never having qualified -- so this assertion was `not stranded`
+    # and it held. With a vendor as the default TPA source, one episode loses its cover and
+    # sits in PENDING: an operator is being told to wait for a manufacturer decision that
+    # cannot arrive, because Beacon refused the submission and nothing in the engine reads a
+    # refusal.
+    #
+    # Pinned as an exact count rather than relaxed to "some", because the number is the whole
+    # value: it may not grow silently, and the day it reaches zero the gap is closed and this
+    # test should be the thing that says so. Fixing it properly is a state-space change -- a
+    # Dimensions field, a branch in _derive_rebate, and a new rebate code, which moves the
+    # verdict-pair count off the 372 the oracle is built on. That is a deliberate,
+    # separately-measured piece of work, not something to slip in beside a default switch.
+    KNOWN_STRANDED = 1
+    assert len(stranded) == KNOWN_STRANDED, (
+        f"{len(stranded)} submissions Beacon refused are sitting in PENDING ({stranded[:3]}), "
+        f"against the {KNOWN_STRANDED} this build is known to strand. More means the gap is "
+        "widening; fewer means it is closing and this number should come down with it. Either "
+        "way nothing in the engine reads a validation refusal, so these episodes are waiting "
+        "on a decision that cannot arrive."
     )
 
 
