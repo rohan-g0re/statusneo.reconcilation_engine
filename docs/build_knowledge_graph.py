@@ -1605,6 +1605,77 @@ def wave_17_pitching_the_system():
     R("The pitch artefacts are a build, with the document frozen", "depends on", "Craneware lands a whole report at one instant")
 
 
+def wave_18_vendor_default_and_the_beacon_limit():
+    """Making a vendor the default, and what checking the Beacon docs first settled.
+
+    The user's instruction was to check the documentation before building either
+    Beacon item. Doing so answered both with "do not", which is the most valuable
+    thing this session produced.
+    """
+
+    E("Our Beacon mock can only restate the feed", "Learning",
+      "beacon_payloads.rebate_status reads manufacturer_decision off the same MANUFACTURER_DECISION event -- or REBATE_PAYMENT_BATCH line -- that the engine already ingests",
+      "Measured on the demo profile: Beacon's decision agrees with the feed on 30 of 30 dispenses, and zero REJECTED validation outcomes exist that the feed cannot already explain",
+      "So enabling beacon_rebate_status would add 30 duplicate TPA_MANUFACTURER_DECISION records through a second door for no informational gain",
+      "It specifically CANNOT turn C-05 into C-07, which is what the code comment predicted: where the feed is silent _manufacturer_decision returns None and Beacon is silent too, so that population does not exist",
+      "A new verdict code for a validation refusal would likewise give one judgement two codes -- REJECTED means a NOT_QUALIFIED qualification or a rejected manufacturer decision, both already modelled",
+      "This is a limit of the MOCK, not of the architecture: DOC2-004 genuinely makes Beacon authoritative for rebate status, and our Beacon is a re-dressing of the 340B feed",
+      "Making it demonstrable needs Beacon able to DISAGREE with the feed -- the same deliberate divergence the two TPAs carry -- at which point Beacon winning is a demonstration rather than a duplicate row",
+      "PROVENANCE: user instructed that the Beacon documentation be read before deciding; the documentation and the code decided it")
+
+    E("The default TPA source is a vendor", "Decision",
+      "build_dataset and /api/regenerate read the TPA's own rows from a vendor export unless told otherwise; the generic feed is still generated in every mode because the vendor formatters read it",
+      "In production there is no generic TPA feed -- there is Verity's export, or Craneware's, or a sixth TPA's -- so a prototype defaulting to the one shape no vendor ships demonstrates the wrong thing",
+      "Craneware rather than Verity, on the state space rather than preference: verity_accumulations is a population selected on qualification_status and cannot express a disqualification, so four episodes lose their 340B track and read as never-340B instead of refused, against Craneware's one",
+      "Verity stays one query parameter away and is the only vendor exercising TPA_INVOICE_LINE",
+      "PROVENANCE: approved by the user")
+
+    E("Switching a default turns theoretical gaps real", "Learning",
+      "Flipping the TPA source to a vendor broke three things, and all three were genuine rather than test brittleness",
+      "One refused Beacon submission lost its cover and now sits in PENDING -- an operator waiting on a manufacturer decision that cannot arrive, because nothing in the engine reads a validation refusal",
+      "test_api asserted every cited file is one the build reads, from a list written before vendor sources existed; claims_report.csv became a legitimate citation",
+      "The agent eval fixtures replayed against a generic-default dossier and missed, needing a re-record",
+      "The stranded episode is pinned as an EXACT count rather than relaxed, so it cannot grow quietly and so the day it reaches zero the test says the gap closed",
+      "Fixing it properly moves the verdict-pair count off the 372 the oracle is built on, which is why it is its own measured work and not something to slip in beside a default switch")
+
+    E("A readiness report can understate its own build", "Trap",
+      "The connectivity page listed craneware_claims_report as 'not configured' and 'switched off' while the build read it on every run",
+      "Both facts were individually true: the gate columns describe whether a source could reach a VENDOR SYSTEM, and that is still correctly no",
+      "But a reviewer reading only that would conclude the build ignores a file it is in fact reconciling from -- the mirror of the failure this report is shaped to avoid, which is flattering the build",
+      "Fixed by carrying active_tpa_source -- what was READ -- alongside live_vendor_connections -- what was REACHED, still empty. Two facts, kept apart",
+      "Found by browser-testing the running dashboard, not by any test in the suite",
+      "PROVENANCE: agent default")
+
+    E("A stale dev server serves old code for days", "Trap",
+      "Nine processes from 9/16 and 9/17 were still bound to ports 8000 and 5173-5177 four days later",
+      "The one on 8000 answered /api/meta with 'database is at schema version 8, this build expects 7' -- it was running pre-migration code, so every manual check against it had been measuring a dead build",
+      "A newly started uvicorn cannot bind and dies, so 'the server is running' and 'the server is running MY code' are different claims and look identical from a browser",
+      "Vite silently walks to the next free port, so five stale frontends had accumulated the same way",
+      "Check the listener's start time, not just that something answers: Get-NetTCPConnection -LocalPort N gives the owning process, and its StartTime gives the truth",
+      "PROVENANCE: agent default")
+
+    E("Vite binds IPv6 only", "Trap",
+      "The dev server listens on [::1]:5173 and not on 127.0.0.1, so curl against the IPv4 loopback hangs while a browser on localhost works",
+      "Cost real time diagnosing a frontend that was in fact up; the README now says localhost rather than 127.0.0.1 for exactly this reason")
+
+    # --- corrections to wave 16 -------------------------------------------
+    OBS("No vendor export carries the rebate request",
+        "CLOSED. _derive_rebate now reads `tpa_requests or beacon_submissions`, so the submission fact comes from Beacon's acknowledgement rather than the TPA's word for it -- which is also what DOC2-004 says",
+        "BEACON_ACKNOWLEDGMENT is bucketed to its own dimension, not folded into tpa_requests: the two are different parties' facts about the same step and a dossier must be able to say which it held",
+        "Delta measured alone before landing: one episode on the generic build, C-03 to C-05. The vendor deltas fell from 35 and 30 episodes changed to 4 and 1")
+
+    OBS("The vendor adapters are written and unwired",
+        "FULLY SUPERSEDED. /api/regenerate now takes tpa_source, and a vendor export is the default, so the vendor door is reachable from the dashboard rather than only from Python and pytest")
+
+    R("Our Beacon mock can only restate the feed", "constrains", "The default TPA source is a vendor")
+    R("The default TPA source is a vendor", "realises", "The vendor adapters are written and unwired")
+    R("Switching a default turns theoretical gaps real", "threatens", "The default TPA source is a vendor")
+    R("A readiness report can understate its own build", "threatens", "Connector-ready")
+    R("A stale dev server serves old code for days", "threatens", "The default TPA source is a vendor")
+    R("Vite binds IPv6 only", "threatens", "A stale dev server serves old code for days")
+    R("Our Beacon mock can only restate the feed", "constrains", "A TPA may not assert rebate status")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
@@ -1612,7 +1683,8 @@ WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_13_trimmed_for_submission, wave_14_connectivity,
          wave_15_building_and_reviewing_the_connector,
          wave_16_vendor_sourced_ingest,
-         wave_17_pitching_the_system]
+         wave_17_pitching_the_system,
+         wave_18_vendor_default_and_the_beacon_limit]
 
 
 def main():
