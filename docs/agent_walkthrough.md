@@ -1,19 +1,35 @@
 # One Request, End to End — The Agent Layer
 
-> **Correction, added by an audit against the running code.** The worked example below —
-> claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00 rebate — **does not
-> match the data this repository generates.** On the frozen demo spine, `E-000042` is `A-02`/`C-00`,
-> and the pair `A-07`/`C-09` lands on no episode at all.
+> **Correction, added by an audit against the running code, and re-audited since.** The worked
+> example below — claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00
+> rebate — **does not match the data this repository generates.** The pair `A-07`/`C-09` lands on
+> no episode at all.
 >
 > **This is not connectivity-layer drift.** It was checked at `dbb129e`, before any of that work:
-> the example was already wrong there. Episode identity is byte-identical between the two commits.
-> The figures are a hand-composed illustration that was never re-derived from a run.
+> the example was already wrong there. The figures are a hand-composed illustration that was never
+> re-derived from a run.
 >
 > The narrative is still a faithful description of *how the system works* — that is what it is for.
-> But **do not click `E-000042` during a walkthrough.** The closest real episode on the frozen demo
-> spine is **`E-000007`** (`A-04`/`C-09`, EXCEPTION): reimbursement fully reconciled at $6,638.63,
-> and a rebate approved and never paid — $1,929.00 expected, $0.00 received. That is a real
-> "approved but unpaid rebate" to point at.
+> But **do not click `E-000042` during a walkthrough.** On the demo spine as it stands it is
+> `A-13`/`C-14`, a different claim than the one described here.
+>
+> **Point at `E-000004` instead.** It is the episode that tells the approved-but-unpaid-rebate
+> story: reimbursement expected and received at $14,540.39 with the bank deposit matched, and a
+> rebate of $4,149.00 approved in September and still unpaid ten cursors later — `A-04`/`C-01`
+> every month until the age threshold trips it to `A-04`/`C-09`, EXCEPTION, at the final cursor.
+> It is the only `C-09` in the database.
+>
+> **An episode id in prose is perishable, and this banner is the proof.** Its first version named
+> `E-000007` as the episode to click, at $6,638.63 reconciled and $1,929.00 outstanding. That was
+> true when it was written and is false now: the generator reassigns ids on every reseed, and
+> `E-000007` is today `A-02`/`C-00`, PENDING, nothing received. Re-derive any id before quoting it:
+>
+> ```sql
+> SELECT episode_id, reimbursement_verdict_code, rebate_verdict_code, expected_rebate_cents
+> FROM verdict v
+> WHERE rebate_verdict_code = 'C-09'
+>   AND cursor_at = (SELECT MAX(cursor_at) FROM verdict v2 WHERE v2.episode_id = v.episode_id);
+> ```
 >
 > **Why the body below was not renumbered, stated so it reads as a decision and not as neglect.**
 > Assignment Doc 2 — the connectivity assessment, the connector fabric, the six-step build method,

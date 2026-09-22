@@ -1528,13 +1528,91 @@ def wave_16_vendor_sourced_ingest():
     R("An unexplained verdict transition is the finding", "constrains", "The 340B feed carries two authorities")
 
 
+# ===========================================================================
+# WAVE 17 -- pitching the system to people who did not build it
+# ===========================================================================
+
+def wave_17_pitching_the_system():
+    E("A correction banner is perishable in both directions", "Trap",
+      "PROVENANCE: agent default, found by re-auditing a correction that a previous audit had written",
+      "Both walkthroughs carried a banner saying 'the worked example is wrong, point at E-000007 instead'. Re-run against the database, BOTH halves had rotted: the thing it corrected FROM and the thing it corrected TO",
+      "E-000042 is no longer A-02/C-00 as the banner asserts -- it is A-13/C-14. E-000007 is no longer A-04/C-09 at $6,638.63 and $1,929.00 -- it is A-02/C-00, PENDING, nothing received",
+      "The E-000007 figures were STALE, NOT INVENTED, and the distinction matters because it changes the fix. docs/images/01-dashboard.png shows them, so they were true of the generation that was live when the banner was written",
+      "The generator reassigns episode ids on every reseed, so any id quoted in prose is a snapshot of one dataset generation and nothing tells the prose when that generation is replaced",
+      "The same rot hits committed screenshots: docs/images/ shows queue counts 34/11/15 where the database now answers CLOSED 10, EXCEPTION 40, PENDING 10. A screenshot is a dataset generation too, and it is the kind nobody re-derives",
+      "Fixed by making the banner self-refreshing rather than by finding a better id -- it now names E-000004 AND carries the SQL that re-derives the pointer, and says outright that its own first version rotted",
+      "E-000004 is the whole approved-but-unpaid-rebate story and the only C-09 on the spine: $14,540.39 expected and received with the deposit matched, then a $4,149.00 rebate approved and sitting at C-01 for ten cursors before the age threshold trips it to C-09 at the last one",
+      "A correction inherits the defect it corrects. Writing one without a way to re-derive it just moves the expiry date")
+
+    E("Proving the engine is not serving mock verdicts", "Learning",
+      "PROVENANCE: user challenge -- 'have we created verdict mock data as well, or is our engine really generating that data' -- with the proof method an agent default",
+      "The doubt is reasonable and recurs: a demo whose verdicts look this tidy is exactly what a seeded fixture table would look like",
+      "Reading the code does not settle it, because a reader cannot tell a computed row from a loaded one by looking at the schema",
+      "The proof is destructive and must be run on a COPY: drop the append-only triggers (they exist precisely to forbid this), DELETE every row from verdict, then replay engine.run_all over the monthly cursors",
+      "The rebuilt table came back byte-identical to the original, verdicts and reasons both. Verdicts are computed from (episode, cursor) and nothing else",
+      "The second half of the proof is a grep: nothing outside generators/ reads ground_truth.json except a test and the docstrings that forbid it",
+      "State the method, not the row count, when recording this. The counts move with every reseed -- the byte-identity does not")
+
+    E("A broad ignore rule can commit a document with broken images", "Trap",
+      "PROVENANCE: agent default, introduced and then caught while assembling the pitch folder",
+      ".gitignore carried a blanket `*.png` to keep Playwright screenshot debris out of the repository",
+      "It also swallowed every diagram the pitch document and the HTML deck reference by relative path, so both committed clean and rendered with broken images for anyone who cloned",
+      "Nothing errors. The build passes, the markdown is valid, and the failure is only visible to a reader who is not the author",
+      "Fixed with negation rules per content directory rather than by narrowing the debris rule, because the debris rule is right and the content is the exception",
+      "The .pptx was immune because it EMBEDS its images. A format that copies its assets cannot have this bug -- a format that links them always can")
+
+    E("Merging Excalidraw files means rewriting references, not prefixing ids", "Learning",
+      "PROVENANCE: agent default, from building one canvas that holds every pitch diagram",
+      "Naive concatenation collides ids across files. Prefixing every element id fixes the collision and silently breaks the drawing",
+      "Excalidraw points at ids from five other places -- containerId, frameId, groupIds, boundElements and startBinding/endBinding -- and every one must be rewritten with the same prefix or arrows detach from shapes and labels float free of their containers",
+      "Verified structurally instead of visually: 321 elements, zero duplicate ids, zero dangling references",
+      "Chromium cannot screenshot the result -- a 16,224-unit canvas exceeds the renderer. Loading was proved instead by exporting SVG through Excalidraw's own engine, 458 shapes and 389 texts with no page errors",
+      "Hand-laying out Excalidraw text needs a per-case width factor: about 0.55 of the font size per character for mixed case, but nearer 0.685 for UPPERCASE and underscore-heavy strings. Using the low figure on an uppercase label collided two columns")
+
+    E("The pitch artefacts are a build, with the document frozen", "Decision",
+      "PROVENANCE: user decisions throughout -- language, page budget, slide ceiling, file format and the freeze were all stated explicitly",
+      "Audience is solution engineers and investors, and the document is RECITED aloud, which is what sets the language bar: plain enough to read off, no vocabulary chosen to sound impressive",
+      "Stated budgets were hard, not aspirational: under 10 pages for the document, under 15 slides for the deck",
+      "Diagrams were constrained the same way -- no dense arrows, no subtitles, no detail added because it was available",
+      "The deck had to become a real .pptx with embedded images rather than markdown or a hosted page, so it can be edited locally without the author in the loop",
+      "Once the document was accepted it was FROZEN: later requests for a rebate walkthrough and for an episode-assembly view were both answered by adding a slide, never by reopening the document",
+      "PowerPoint holds an exclusive lock on an open deck, so the builder takes an output path as argv[1]. Build to a temp path and copy in later -- killing the process risks the user's unsaved edits and is never the right move")
+
+    # --- corrections to earlier waves -----------------------------------------
+    # Neither entity below is named in grounding.py's ROUTES tables, so extending
+    # them moves no proposer prompt and invalidates no recorded eval trace.
+
+    UNOBS("The walkthrough narrates an episode that does not exist",
+          "The closest true episode is E-000007")
+    OBS("The walkthrough narrates an episode that does not exist",
+        "The fix is not better numbers and not a real-looking id a reader will click -- it is a pointer that carries the query which re-derives it, because the id itself rots on the next reseed",
+        "The E-000007 replacement this entity used to name has itself gone stale, which is recorded separately as the trap that a correction banner is perishable in both directions")
+
+    OBS("Craneware lands a whole report at one instant",
+        "The committed demo database is the Craneware build -- 43 TPA_CRANEWARE raw records and zero TPA_PORTAL -- so this clustering is what every walkthrough and every screenshot is actually showing",
+        "Measured on that build: 43 rows across 6 distinct arrival moments, 38 of them sharing the final cursor 2026-07-01T23:59:59Z",
+        "The consequence a reader notices first is ORDER. Qualification is supposed to precede the Beacon submission it gates, and on this spine it arrives last, after Beacon, because the delivery stamp is the only time the vendor publishes",
+        "So the walkthrough is describing a real inversion rather than a defect: the logical order holds, the observed arrival order does not, and only the arrival order is visible in the data")
+
+    R("A correction banner is perishable in both directions", "supersedes", "The walkthrough narrates an episode that does not exist")
+    R("A correction banner is perishable in both directions", "realises", "Deleting a document orphans every pointer into it")
+    R("A correction banner is perishable in both directions", "realises", "A citation by line number rots on the next edit")
+    R("Proving the engine is not serving mock verdicts", "supports", "Deterministic boundary")
+    R("Proving the engine is not serving mock verdicts", "depends on", "Cursor replay")
+    R("Proving the engine is not serving mock verdicts", "constrains", "Recompute never mutate")
+    R("A broad ignore rule can commit a document with broken images", "threatens", "The pitch artefacts are a build, with the document frozen")
+    R("Merging Excalidraw files means rewriting references, not prefixing ids", "supports", "The pitch artefacts are a build, with the document frozen")
+    R("The pitch artefacts are a build, with the document frozen", "depends on", "Craneware lands a whole report at one instant")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
          wave_11_agent_layer_built, wave_12_explaining_the_build,
          wave_13_trimmed_for_submission, wave_14_connectivity,
          wave_15_building_and_reviewing_the_connector,
-         wave_16_vendor_sourced_ingest]
+         wave_16_vendor_sourced_ingest,
+         wave_17_pitching_the_system]
 
 
 def main():
