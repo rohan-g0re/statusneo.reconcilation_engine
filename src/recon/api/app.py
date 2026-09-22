@@ -610,7 +610,30 @@ def create_app(settings: Settings | None = None):
                 settings=app.state.settings,
                 adapters=adapters,
             )
-        return readiness.as_dict(report)
+        payload = readiness.as_dict(report)
+        # **Which TPA source this build actually read, stated separately from readiness.**
+        #
+        # The gate columns describe whether a source could reach a *vendor system* — credential
+        # resolved, transport configured, access gate cleared — and for every vendor row the
+        # honest answer is still no. But the build now reads one of those datasets on every
+        # run, out of a local mock directory, and a page that showed only "not configured,
+        # switched off" against the source supplying the qualifications would be telling a
+        # reviewer this build ignores a file it is in fact reconciling from.
+        #
+        # Two facts, kept apart, because collapsing them is the failure this whole report is
+        # shaped to avoid: `active` is what was read, `live_vendor_connections` is what was
+        # reached, and the second is still empty.
+        payload["active_tpa_source"] = {
+            "source": DEFAULT_TPA_SOURCE,
+            "datasets": list(_VENDOR_TPA_DATASETS.get(DEFAULT_TPA_SOURCE, ())),
+            "statement": (
+                f"The TPA's own rows are read from {DEFAULT_TPA_SOURCE}'s export on every "
+                "build, out of a local mock directory. That is a file this build reconciles "
+                "from -- it is not a connection to a vendor system, and the gate columns "
+                "below still read 'not configured' for exactly that reason."
+            ),
+        }
+        return payload
 
     @app.post("/api/regenerate")
     def regenerate(
