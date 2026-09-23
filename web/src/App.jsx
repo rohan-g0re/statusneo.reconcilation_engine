@@ -9,6 +9,7 @@ import FeedExceptions from './components/FeedExceptions.jsx'
 import Cited from './components/Cited.jsx'
 import TodoListPanel from './components/TodoListPanel.jsx'
 import Connectivity from './components/Connectivity.jsx'
+import VerdictLibrary from './components/VerdictLibrary.jsx'
 
 // ═══ the Portfolio Analyst panel ═════════════════════════════════════════════════════════════
 // docs/agent_layer_design.md S:opening line: "the Exception Investigator explains, the Portfolio
@@ -377,6 +378,15 @@ export default function App() {
             </button>
             <button
               type="button"
+              data-testid="screen-verdicts"
+              aria-pressed={view === 'verdicts'}
+              onClick={() => setView('verdicts')}
+              title="What kinds of problem the book contains, grouped by what an operator does about them — and what every code on the other screens means."
+            >
+              Problem types
+            </button>
+            <button
+              type="button"
               data-testid="screen-connectivity"
               aria-pressed={view === 'connectivity'}
               onClick={() => setView('connectivity')}
@@ -447,11 +457,17 @@ export default function App() {
         and the first dollar figure. Here it reads as a control on the whole page, which is what
         it is, and the money starts at the top of the scroll.
       */}
-      {view === 'operations' ? (
+      {/*
+        Shown on both screens that answer a question about the book, because both are answers
+        "as at" a moment. Connectivity is not one of them: connector readiness is a property of
+        the build rather than of the instant being replayed, so a cursor above it would imply a
+        control it does not have.
+      */}
+      {view === 'connectivity' ? null : (
         <div className="cursor-band">
           <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
         </div>
-      ) : null}
+      )}
 
       {error ? (
         <div className="error" data-testid="error">
@@ -460,15 +476,16 @@ export default function App() {
       ) : null}
 
       {/*
-        Two screens, one page. The connectivity view answers a different question from every
-        panel below it — "what is actually built, per source" rather than "what did we conclude
-        about this book of claims" — and it takes no cursor, because connector readiness is a
-        property of the build rather than of the moment being replayed. Swapping the body rather
-        than navigating keeps the cursor, the selected queue and the open episode intact
-        underneath it, so coming back lands exactly where you left.
+        Three screens, one page, still not a router. Each answers a different question —
+        "what do I work", "what kinds of problem are in the book", "what is actually built per
+        source" — and swapping the body rather than navigating keeps the cursor, the selected
+        queue and the open episode intact underneath, so coming back lands exactly where you
+        left. A router would have had to reconstruct all three.
       */}
       {view === 'connectivity' ? (
         <Connectivity />
+      ) : view === 'verdicts' ? (
+        <VerdictLibrary overview={overview} />
       ) : (
       <div className="layout-grid">
         <div className="layout-left">
@@ -530,44 +547,12 @@ export default function App() {
           */}
           <TodoListPanel cursor={cursor} />
 
-          {overview ? (
-            <section className="panel">
-              <h2>Verdict distribution</h2>
-              <p className="hint">
-                Every combination of insurance outcome and rebate outcome in the book, most
-                frequent first. Top 25 — the counts do not sum to the total.
-              </p>
-              {/*
-                Capped like every other long table on this screen. It was the one without a
-                height, so a profile with more distinct pairs pushed the page to several
-                thousand pixels -- the exact failure `.queue-scroll` exists to prevent.
-              */}
-              <div className="table-wrap queue-scroll">
-                <table data-testid="verdict-distribution">
-                  <thead>
-                    <tr>
-                      <th>Reimbursement</th>
-                      <th>Rebate</th>
-                      <th className="num">Episodes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.verdict_pairs.map((pair) => (
-                      <tr key={`${pair.reimbursement}|${pair.rebate}`}>
-                        <td>
-                          <span className="verdict-code">{pair.reimbursement}</span>
-                        </td>
-                        <td>
-                          <span className="verdict-code">{pair.rebate}</span>
-                        </td>
-                        <td className="num">{pair.episodes}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
+          {/*
+            The verdict distribution used to sit here. It is reference material, not operations:
+            it carries no money, only episode counts, and on the demo profile twenty-three of its
+            twenty-five rows read "1". It is now the Problem types screen, where it has room to
+            be grouped into families and to carry the code legend beside it.
+          */}
         </div>
 
         <div className="layout-right">
