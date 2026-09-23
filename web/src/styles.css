@@ -80,6 +80,10 @@
   --text-lg: 16px; /* the dossier's identity line, an outcome icon */
   --text-xl: 19px; /* the masthead title */
   --text-display: 28px; /* the one display number: a tile's count */
+  /* The page title, and the only thing at this step. It sat on --text-display, which ties it with
+   * the tile figures -- so the name of the product and the amount of money in one bucket carried
+   * the same weight, and the masthead read as a fourth statistic. A title has to win outright. */
+  --text-title: 42px;
 
   /* Linear's headings run tight; its body runs comfortable. */
   /* Tracking is a CURVE, not one value, and the curve below was measured off linear.app
@@ -174,14 +178,17 @@ header.masthead {
   padding: var(--space-3) var(--space-5);
 }
 .back-link:hover { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+/* The product's name, at the size a product's name is set. It ran at --text-xl (19px), an in-page
+ * heading step, so the thing the whole screen is called was no louder than a section label. */
 .masthead h1 {
-  font-size: var(--text-xl);
+  font-size: var(--text-title);
   margin: 0;
-  font-weight: 640;
-  /* --tracking-tight, not --tracking-tighter: at 19px this is UI text, not display type, and
-   * linear.app's measured curve puts -0.022em only at >=32px. See the token block. */
-  letter-spacing: var(--tracking-tight);
-  line-height: var(--leading-tight);
+  font-weight: 680;
+  /* --tracking-tighter now that this IS display type. The earlier note was right to refuse it at
+   * 19px -- linear.app's measured curve puts -0.022em at display sizes only -- and 42px is well
+   * inside where that curve says it applies. */
+  letter-spacing: var(--tracking-tighter);
+  line-height: 1.15;
 }
 .masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
 .masthead .sub code { font-family: var(--mono); font-size: var(--text-sm); }

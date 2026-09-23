@@ -343,7 +343,7 @@ export default function App() {
     <div className="app">
       <header className="masthead">
         <div>
-          <h1>Post-Claim Pharmacy Financial Reconciliation</h1>
+          <h1>Pharmacy Reconciliation Cockpit</h1>
           {/*
             The claim worth making, and nothing else. This line used to open with "Deterministic
             layer" and end with the profile, the seed and the engine version -- three build
