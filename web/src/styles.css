@@ -624,12 +624,11 @@ details.evidence pre {
 /* The narrative view. Deliberately the most prominent thing on the page once an
  * episode is selected, because the episode object is what the whole design is about. */
 
-.dossier-head {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  gap: var(--space-7); flex-wrap: wrap;
-  padding-bottom: var(--space-5); margin-bottom: var(--space-5);
-  border-bottom: 1px solid var(--border);
-}
+/* Identity only. This was a two-column flex row with the verdict block as its right-hand column;
+ * the verdict has moved out to pin on its own (see `.dossier-sticky`), and at the widths this
+ * panel actually gets the row was wrapping to two stacked blocks anyway. No bottom border either
+ * -- the pinned strip below now provides the seam. */
+.dossier-head { padding-bottom: var(--space-4); }
 .dossier-id {
   font-family: var(--mono); font-size: var(--text-lg); font-weight: 650;
   letter-spacing: var(--tracking-tight); line-height: var(--leading-tight);
@@ -1018,14 +1017,24 @@ details.evidence pre {
 
 /* ═══ dossier: sticky header, view toggle, source panel ══════════════════ */
 
-/* The episode id, identity line, verdict block and the view toggle are the operator's anchor —
- * the thing that must never scroll out of view while they read down a long timeline. `.layout-right`
- * is the scrolling ancestor (see above), so `position: sticky; top: 0` here pins this block to its
- * top edge. A solid background is required or timeline content would show through underneath it as
- * it scrolls past; the bottom border is what makes the pin visually legible as a seam rather than an
- * accident. Content is kept to what the brief calls the verdict block plus identity, which is why it
- * stays well under a third of the panel's height without any max-height/overflow trick that would
- * risk clipping the verdict codes themselves. */
+/* The verdict block, and nothing else, stays on screen while the timeline scrolls under it.
+ *
+ * This used to pin the whole header — identity, verdict, reason chips, every cross-track flag and
+ * the view toggle — on the reasoning that the operator's anchor must never leave the screen, with
+ * a note claiming the band stayed "well under a third of the panel's height". It did on the
+ * episode it was written against. An episode carrying two cross-track flags is not that episode:
+ * each flag is a bordered card with a two-line sentence in it, and the band grew to roughly half
+ * the viewport, so a tall timeline event was permanently half-hidden behind its own header. That
+ * is the whole cost of pinning, paid for content nobody re-reads on the way down.
+ *
+ * What is left is four short lines and it is the part worth keeping in view: the bucket, the code
+ * on each track, and whether this claim came back from somewhere. Everything else scrolls.
+ *
+ * A solid background is required or timeline content shows through as it passes underneath, and
+ * the bottom border is what makes the pin read as a seam rather than as an accident. `.layout-right`
+ * is the scrolling ancestor on the dashboard; on the analysis page there is none and this pins
+ * against the viewport instead — both are correct, and neither needs a max-height now that the
+ * strip cannot grow with the episode. */
 .dossier-sticky {
   position: sticky;
   top: 0;
@@ -1033,10 +1042,8 @@ details.evidence pre {
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
   margin: 0 0 var(--space-5);
-  padding-bottom: var(--space-5);
+  padding: var(--space-3) 0 var(--space-4);
 }
-.dossier-sticky .dossier-head { border-bottom: none; margin-bottom: 0; padding-bottom: var(--space-4); }
-.dossier-sticky .dossier-reasons { margin: 0 0 var(--space-1); }
 
 .view-toggle {
   display: inline-flex;
