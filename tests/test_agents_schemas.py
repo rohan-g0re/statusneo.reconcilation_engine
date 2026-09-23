@@ -277,6 +277,35 @@ def test_parse_requires_blocked_reason_present_only_when_blocked_is_true():
         schemas.ProposedAction.parse(payload)
 
 
+def test_parse_reads_the_string_null_as_null_in_a_nullable_string_field():
+    """A live Decide run (2026-09-22, run 0dd212af) died here.
+
+    `deepseek-v4-pro` returned a complete, correct proposal whose `blocked_reason`
+    was the four-character string `"null"` next to `blocked: false`. The cross-field
+    rule above rejected it, the SchemaError escaped `_ProposerSession.__call__`, and
+    the whole run ended with no outcome -- five minutes of thinking lost to a quoted
+    keyword. None of these spellings is ever a legal value for either nullable string
+    field, so all of them mean absence.
+    """
+    for spelling in ("null", "NULL", " null ", "none", "N/A", ""):
+        payload = _valid_proposed_action_payload()
+        payload["blocked_reason"] = spelling
+        parsed = schemas.ProposedAction.parse(payload)
+        assert parsed.blocked_reason is None, f"{spelling!r} should read as absence"
+
+        payload = _valid_proposed_action_payload()
+        payload["grounding_clause_id"] = spelling
+        assert schemas.ProposedAction.parse(payload).grounding_clause_id is None
+
+    # And the coercion does not swallow a real reason: `blocked` true with a genuine
+    # sentence still parses, and true with a spelled-out null still fails closed.
+    payload = _valid_proposed_action_payload()
+    payload["blocked"] = True
+    payload["blocked_reason"] = "null"
+    with pytest.raises(schemas.SchemaError, match="blocked_reason"):
+        schemas.ProposedAction.parse(payload)
+
+
 def test_criterion_finding_requires_null_span_iff_not_addressed():
     supported_with_no_span = {
         "criterion_id": "grounding_present",
