@@ -652,14 +652,40 @@ export default function Analyse({ episodeId }) {
 
   return (
     <div className="app">
+      {/*
+        Titled after the claim, not after the technology that is about to look at it. "Agent
+        analysis — E-000013" names the machinery; a reader opening this page wants to know which
+        claim they are looking at and what it is worth. The dossier supplies the drug and the
+        payer once it lands, so the id carries the header until then rather than the page
+        re-titling itself halfway through a read.
+      */}
       <header className="masthead">
         <div>
-          <h1>Agent analysis — {episodeId}</h1>
+          <h1>
+            {dossier ? (
+              <>
+                {dossier.identity.drug}
+                <span className="masthead-sub-id">{episodeId}</span>
+              </>
+            ) : (
+              episodeId
+            )}
+          </h1>
           <div className="sub">
-            The agent layer never computes a number: every figure below was already decided by
-            the deterministic engine. The agent only explains it and recommends what a human
-            should do next. <a href="/">← Back to the dashboard</a>
+            {dossier ? (
+              <>
+                {dossier.identity.payer} · dispensed {dossier.identity.date_of_service}
+                {' · '}
+              </>
+            ) : null}
+            Every figure here was decided by the engine. The agent explains it and recommends what
+            a human should do next; it never computes a number.
           </div>
+        </div>
+        <div className="masthead-tools">
+          <a className="back-link" href="/">
+            ← Back to the dashboard
+          </a>
         </div>
       </header>
 

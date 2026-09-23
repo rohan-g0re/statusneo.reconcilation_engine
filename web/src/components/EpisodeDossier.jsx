@@ -67,12 +67,51 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
               {identity.track === 'PHARMACY' ? 'pharmacy benefit' : 'medical benefit'} ·{' '}
               {identity.payer}
             </div>
+            {/*
+              The date and the 340B flag stay on the face; the raw identifiers fold away. `Rx
+              7845102/00` and `CLM01 ENC-519314-00015` are exactly what an operator quotes down
+              a phone and exactly what nobody else in the room can read — CLM01 in particular is
+              an EDI segment name rendered as though it were a field label. One click, not gone.
+            */}
             <div className="dossier-keys">
               dispensed {identity.date_of_service}
-              {identity.rx_number ? ` · Rx ${identity.rx_number}/${identity.fill_number}` : null}
-              {identity.clm01 ? ` · CLM01 ${identity.clm01}` : null}
               {identity.is_340b_flagged ? ' · flagged 340B at the point of sale' : null}
             </div>
+            {identity.rx_number || identity.clm01 ? (
+              <details className="dossier-ids">
+                <summary>Claim identifiers</summary>
+                <dl>
+                  {identity.rx_number ? (
+                    <>
+                      <dt>Prescription</dt>
+                      <dd>
+                        {identity.rx_number} · fill {identity.fill_number}
+                      </dd>
+                    </>
+                  ) : null}
+                  {identity.clm01 ? (
+                    <>
+                      <dt>Provider claim number</dt>
+                      <dd>{identity.clm01}</dd>
+                    </>
+                  ) : null}
+                  {identity.pharmacy_npi ? (
+                    <>
+                      <dt>Pharmacy NPI</dt>
+                      <dd>{identity.pharmacy_npi}</dd>
+                    </>
+                  ) : null}
+                  {identity.billing_provider_npi ? (
+                    <>
+                      <dt>Billing provider NPI</dt>
+                      <dd>{identity.billing_provider_npi}</dd>
+                    </>
+                  ) : null}
+                  <dt>Drug code</dt>
+                  <dd>{identity.ndc11}</dd>
+                </dl>
+              </details>
+            ) : null}
           </div>
           {current ? (
             <div className="dossier-verdict" style={{ '--d': DISPOSITION_COLOR[current.episode_disposition] }}>

@@ -24,15 +24,32 @@ function formatDate(iso) {
   return name ? `${Number(day)} ${name} ${year}` : iso
 }
 
-/** One track's verdict: what it means, with the code kept as a quotable suffix. */
-function Verdict({ kind, code }) {
-  const { label, detail } = labels.verdict(code)
+/** What is wrong with a claim, as a sentence.
+ *
+ * No codes here. A-17 and C-01 mean nothing to someone scanning a list, and putting them in
+ * their own pills forced a grid inside the cell that aligned with nothing around it. The codes
+ * are on the episode panel and on the claim's own page, where there is room to label which
+ * track each belongs to and where somebody has stopped to read one claim rather than forty.
+ *
+ * The rebate line only appears when the rebate track has something to say, and it says so in
+ * words rather than leaning on a column header to disambiguate it.
+ */
+function WhatsWrong({ row }) {
+  const insurance = labels.verdict(row.reimbursement_verdict)
+  const rebate = labels.isAbsentRebate(row.rebate_verdict)
+    ? null
+    : labels.verdict(row.rebate_verdict)
   return (
-    <span className="queue-verdict" title={detail || code}>
-      <span className="queue-verdict-kind">{kind}</span>
-      <span className="queue-verdict-label">{label}</span>
-      <span className="verdict-code">{code}</span>
-    </span>
+    <>
+      <div className="queue-verdict-line" title={insurance.detail}>
+        {insurance.label}
+      </div>
+      {rebate ? (
+        <div className="queue-verdict-line queue-verdict-rebate" title={rebate.detail}>
+          Rebate: {rebate.label}
+        </div>
+      ) : null}
+    </>
   )
 }
 
@@ -149,15 +166,7 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
                   <td className="mono">{formatDate(row.date_of_service)}</td>
                   <td className="num">{row.age_days} days</td>
                   <td className="queue-verdicts">
-                    <Verdict kind="Insurance" code={row.reimbursement_verdict} />
-                    {/*
-                      C-00 is "this claim has no 340B rebate". Rendering it as a line of its own
-                      puts an absence next to a problem and makes two thirds of the column read as
-                      though something were wrong with it.
-                    */}
-                    {labels.isAbsentRebate(row.rebate_verdict) ? null : (
-                      <Verdict kind="340B rebate" code={row.rebate_verdict} />
-                    )}
+                    <WhatsWrong row={row} />
                   </td>
                   <td className="num" title="Negative means an overpayment — a refund liability">
                     {formatMoney(row.total_variance_cents)}

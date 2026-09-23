@@ -154,6 +154,26 @@ header.masthead {
 /* The control cluster. `center`, not the header's own `baseline`: these are boxes of
  * differing heights and aligning their text baselines staggers the boxes themselves. */
 .masthead-tools { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
+/* The claim id, demoted beside the drug name it belongs to. */
+.masthead-sub-id {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: var(--space-4);
+}
+/* A real control rather than an anchor buried at the end of a paragraph. */
+.back-link {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  text-decoration: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-5);
+}
+.back-link:hover { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
 .masthead h1 {
   font-size: var(--text-xl);
   margin: 0;
@@ -622,6 +642,30 @@ details.evidence pre {
   color: var(--d, var(--text-primary)); letter-spacing: 0.02em;
 }
 
+/* The raw identifiers, folded. */
+.dossier-ids { margin-top: var(--space-3); }
+.dossier-ids > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  width: fit-content;
+}
+.dossier-ids > summary::-webkit-details-marker { display: none; }
+.dossier-ids > summary:hover { color: var(--accent); }
+.dossier-ids dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+}
+.dossier-ids dt { color: var(--text-muted); }
+.dossier-ids dd { margin: 0; font-family: var(--mono); color: var(--text-secondary); }
+
 /* The engine's enum, kept beside the word it means. */
 .dossier-enum {
   font-family: var(--mono);
@@ -704,16 +748,38 @@ details.evidence pre {
   display: grid; grid-template-columns: 130px 1fr; gap: var(--space-5);
   padding: 0 0 var(--space-6) 0; position: relative;
 }
+/* The rail runs through the middle of the dots, in the 12px gap between the 130px date gutter
+ * and the body column. It used to sit at 122px, inside the gutter, while the dot centred at
+ * 136px -- so even unclipped the two never met and the dot read as floating loose. It starts at
+ * the first dot's centre (4px top + 7px half-height) rather than below it. */
 .dossier-timeline li::before {
-  content: ''; position: absolute; left: 122px; top: var(--space-6); bottom: 0;
+  content: ''; position: absolute; left: 135px; top: var(--space-5); bottom: 0;
   width: 2px; background: var(--border);
 }
 .dossier-timeline li:last-child::before { display: none; }
 /* The gutter holds a date and nothing else, and must never push into the facts column —
  * belt and braces after a long tag overflowed it in the narrower right-hand panel. */
-.dossier-when { text-align: right; padding-right: var(--space-2); position: relative; overflow: hidden; }
-.dossier-when::after {
-  content: ''; position: absolute; right: -13px; top: var(--space-2);
+/* `min-width: 0` rather than `overflow: hidden`.
+ *
+ * The hidden was belt-and-braces against a long tag overflowing this gutter in the narrow
+ * right-hand panel, and it worked -- but this element is also the containing block for the
+ * status dot below, which sits deliberately outside its right edge. The guard clipped the dot
+ * to a one-pixel crescent. `min-width: 0` lets the grid track actually shrink (the real fix for
+ * the overflow it was added for) and the <time> inside already carries overflow-wrap. */
+.dossier-when { text-align: right; padding-right: var(--space-2); position: relative; min-width: 0; }
+/* The dot hangs off the row, not off the date gutter.
+ *
+ * It used to be `.dossier-when::after` at `right: -13px`, which made its position depend on the
+ * gutter's rendered width -- and the gutter can shrink, so the dot drifted away from the rail it
+ * is supposed to sit on. Anchoring both to the same element at the same offset makes them
+ * aligned by construction rather than by two numbers that have to be kept in agreement.
+ *
+ * 129px = the rail's centre (136) less half the dot's rendered width. `box-sizing` is set
+ * explicitly because the `*` reset does not match pseudo-elements, so this box would otherwise
+ * be content-box at 14px wide while reading as 10px in the source. */
+.dossier-timeline li::after {
+  content: ''; position: absolute; left: 129px; top: var(--space-2);
+  box-sizing: content-box;
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
 }
@@ -803,38 +869,23 @@ details.evidence pre {
  * "<track> — <what happened> <code>". Replaces two columns of bare four-character tokens. */
 /* Fixed layout so the colgroup's percentages are honoured rather than treated as hints. */
 .queue-table { table-layout: fixed; width: 100%; }
+/* Top, not middle. A row whose verdict cell runs to two lines is taller than its neighbours,
+ * and centring every other cell in that extra height is what makes a table of mixed-height rows
+ * read as misaligned. */
+.queue-table td { vertical-align: top; }
 /* These three carry text that is allowed to wrap; everything else in the table stays on one
  * line under the global `th, td { white-space: nowrap }`. */
 .queue-table td.queue-verdicts,
 .queue-table td.mono,
 .queue-table th { white-space: normal; }
 
-.queue-verdicts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-/* The track name is a fixed-width gutter so the sentences line up down the column, and the code
- * is pinned to the end rather than wrapping to a line of its own. */
-.queue-verdict {
-  display: grid;
-  grid-template-columns: 8ch 1fr auto;
-  align-items: baseline;
-  gap: var(--space-3);
-}
-.queue-verdict-kind {
-  font-size: var(--text-xxs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-label);
-  color: var(--text-muted);
-  line-height: var(--leading-tight);
-}
-.queue-verdict-label {
-  font-size: var(--text-sm);
-  color: var(--text-primary);
-  line-height: var(--leading-tight);
-}
-.queue-verdict .verdict-code { white-space: nowrap; }
+/* Plain text, left-aligned, on the same baseline grid as every other cell in the row. This was
+ * a three-column grid — track gutter, sentence, code pill — nested inside a table cell, so it
+ * set up its own alignment that agreed with nothing around it and made rows carrying one track
+ * look broken beside rows carrying two. */
+.queue-verdicts { line-height: var(--leading-tight); }
+.queue-verdict-line { font-size: var(--text-sm); color: var(--text-primary); }
+.queue-verdict-rebate { color: var(--text-secondary); margin-top: var(--space-2); }
 
 /* A row state, set against the claim id rather than listed among the things that are wrong. */
 .queue-reopened {

@@ -100,7 +100,9 @@ const VERDICTS = {
   'C-09': ['Says paid, bank shows nothing', 'Approved and paid per the TPA, no cash in the bank'],
   'C-10': ['Paid less rebate than expected', 'Approved, partial rebate paid'],
   'C-11': ['Approved, awaiting payment', 'Approved, awaiting payment; no defect'],
-  'C-13': ['Rebate clawed back', 'Rebate clawed back; net rebate zero'],
+  // Not "Rebate clawed back": the queue prefixes this line with "Rebate:", and the episode
+  // panel labels the row "340B rebate". Both would read "Rebate: Rebate clawed back".
+  'C-13': ['Clawed back', 'Rebate clawed back; net rebate zero'],
   'C-14': ['Two rebates for one dispense', 'Duplicate rebate payment'],
 }
 
