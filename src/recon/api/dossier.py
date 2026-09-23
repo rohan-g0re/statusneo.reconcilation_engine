@@ -64,8 +64,40 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from recon.db import repository
-from recon.domain.enums import RecordKind
+from recon.domain.enums import KeyType, RecordKind
 from recon.reference import drugs, entities
+
+#: Key types held back from the **dossier**, which is the agent's view.  They stay in the
+#: database and stay on the operator's ``/trace``, which is the honest place for them.
+#:
+#: Both are *restatements of an identity already in this list*, not additional matches:
+#:
+#: * ``COVERED_ENTITY_340B`` is the covered entity joined to a natural key that is already
+#:   here (E1), and the covered entity itself is already in the identity block.
+#: * ``HCPCS`` is the same provider, drug and date as the episode's ``NATURAL_340B_MEDICAL``
+#:   key, with the drug named by J-code instead of NDC (E2).  It exists so a record that
+#:   carries only a J-code can resolve, which is a real capability — but on an episode that
+#:   already publishes the NDC form, it is the same claim spelled twice.
+#:
+#: What this prevents is specific.  A medical episode publishes both forms, so an unfiltered
+#: list shows eight rows for four claims — and "more keys than claims" is exactly how a
+#: duplicate looks to anything reading this structure, including a careful human.
+#:
+#: **This is a display rule and nothing else.**  It narrows no resolution: both key types are
+#: written to ``crosswalk_key`` on every run, and hiding a row here cannot stop a lookup.
+#:
+#: Corrected after review: an earlier version of this comment said these keys "resolve records
+#: normally".  ``HCPCS`` does — ``_tpa_lookup_keys`` looks it up for a medical record carrying
+#: a J-code and no NDC.  ``COVERED_ENTITY_340B`` does **not**: nothing looks it up at all, so
+#: it is published identity rather than a working key, and E1's acceptance is enforced instead
+#: by ``pipeline._contradicts_covered_entity``.  The filter is right either way — a restatement
+#: is a restatement whether or not anything resolves by it — but the reason given was wrong for
+#: one of the two, and a false reason is worse than none.
+#:
+#: Scoped to *published* keys: if one of these is ever the **basis** on which something
+#: resolved, that is a fact about the match rather than a restatement of one, and it belongs
+#: in the dossier.
+_DERIVED_KEY_TYPES = frozenset({KeyType.COVERED_ENTITY_340B, KeyType.HCPCS})
 
 __all__ = ["build_dossier", "TimelineEvent", "RECORD_PROJECTIONS"]
 
@@ -152,7 +184,7 @@ def build_dossier(conn: sqlite3.Connection, episode_id: str, cursor: str) -> dic
                 "first_seen_at": row.first_seen_at,
             }
             for row in repository.crosswalk_for_episode(conn, episode_id)
-            if row.first_seen_at <= cursor
+            if row.first_seen_at <= cursor and row.key_type not in _DERIVED_KEY_TYPES
         ],
         "unresolved": _unresolved(conn, episode, cursor),
     }
@@ -236,6 +268,11 @@ def _records(conn: sqlite3.Connection, episode_id: str, cursor: str) -> list[sql
         "SELECT DISTINCT n.norm_id, n.raw_id, n.record_kind, n.source_system, n.received_at,"
         "       n.amount_cents, n.status_code, n.canonical, n.date_of_service, n.clp07,"
         "       n.rx_number, n.authorization_number, n.allocation_code, n.trn02,"
+        # Beacon's two identity columns. A projection naming a column this SELECT does not
+        # fetch does not read as null -- sqlite3.Row raises IndexError, and it raises inside
+        # the dossier, which is the one call the whole UI and the whole agent layer go
+        # through. That is how three new record kinds took out 39 tests at once.
+        "       n.beacon_id, n.payment_reference,"
         "       r.source_record_id, r.source_line_no, b.source_file"
         "  FROM crosswalk_key k"
         "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
@@ -461,6 +498,59 @@ RECORD_PROJECTIONS: dict[RecordKind, Projection] = {
         ),
         row=("trn02", "amount_cents"),
         simple=("direction", "amount_cents", "posting_date"),
+    ),
+    # Beacon's three inbound shapes.  Each one's ``simple`` view answers the question that
+    # kind exists to answer and nothing else -- the Beacon ID is identity and appears in
+    # ``row`` for anyone chasing a record down, not in the story.
+    RecordKind.BEACON_ACKNOWLEDGMENT: Projection(
+        body=("payload_kind", "direction", "template", "status", "covered_entity_id"),
+        row=("beacon_id",),
+        # A receipt says one thing: Beacon has it, and here is what it is called now.
+        simple=("status", "template"),
+    ),
+    RecordKind.BEACON_VALIDATION_OUTCOME: Projection(
+        body=(
+            "payload_kind", "direction", "template", "validation_outcome",
+            "validation_reason_code", "outcome_source",
+        ),
+        row=("beacon_id",),
+        # The reason code is in the story rather than filed under identity, because a
+        # rejection whose reason is one click away is a rejection nobody reads the reason
+        # for -- and requirement C3 exists to carry that reason verbatim.
+        simple=("validation_outcome", "validation_reason_code"),
+    ),
+    RecordKind.BEACON_PAYMENT_REFERENCE: Projection(
+        body=(
+            "payload_kind", "direction", "manufacturer", "rebate_amount",
+            "batch_total_amount", "payment_effective_date",
+        ),
+        row=("beacon_id", "payment_reference"),
+        # ``rebate_amount`` is text carried from the payload and is NOT ``amount_cents``:
+        # this record deliberately sets no money column, because the same payment is already
+        # counted once through the 340B feed's rebate line. Showing it and summing it are
+        # different things, and only the first is safe here.
+        simple=("rebate_amount", "payment_effective_date"),
+    ),
+    # A TPA's own rebate invoice line, and the projection is most of the point of landing it.
+    # This record moves no verdict by construction, so the only thing it can ever be is
+    # *shown* -- what Verity says it billed, beside what the manufacturer actually paid. A
+    # kind that contributes to no dimension and appears on no timeline would have been worth
+    # nothing at all.
+    RecordKind.TPA_INVOICE_LINE: Projection(
+        body=(
+            "invoice_number", "manufacturer", "rebate_allocation_code",
+            "relayed_manufacturer_status", "relayed_invoice_line_amount",
+            "relayed_batch_total_amount", "payment_effective_date", "covered_entity_id",
+            "reversal_status", "reversal_reason",
+        ),
+        # Identity and the handles that tie this line to the rest of the story: the
+        # accumulation it pays, and the Beacon submission it was billed under.
+        row=("accumulation_id", "relayed_beacon_id"),
+        # The line amount, never the batch total. The batch total is repeated on every row of
+        # a batch, so a story that led with it would read as though each line were paid the
+        # whole payment -- which is exactly the fragmentation this kind exists to avoid, and
+        # it would be avoided in the data and reintroduced in the UI.
+        simple=("relayed_invoice_line_amount", "relayed_manufacturer_status"),
     ),
 }
 

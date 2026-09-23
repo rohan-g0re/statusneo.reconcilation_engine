@@ -143,6 +143,18 @@ class EpisodePlan:
     # --- defect directives ------------------------------------------------
     rx_rendering_pharmacy_835: RxRendering = "CANONICAL"
     rx_rendering_tpa: RxRendering = "CANONICAL"
+    #: How **Craneware** spells the Rx where Verity spells it canonically.
+    #:
+    #: The vendor-layer twin of ``rx_rendering_tpa``, and the reason it has to exist here
+    #: rather than in a mock: both vendor exports are formatted from one shared source
+    #: object, so on their own they can never disagree — and two sources telling different
+    #: stories about one dispense is the single failure a reconciliation engine exists to
+    #: catch.  Until this field existed, the vendor layer could not produce one.
+    #:
+    #: Decided here for the same reason D-6's drift is decided here: a formatter that drifted
+    #: on its own would make the defect unreproducible, and ``recon.mocks`` is forbidden from
+    #: importing ``recon.generators`` at all.
+    rx_rendering_craneware: RxRendering = "CANONICAL"
     late_arrival_days: int = 0
     duplicate_delivery: bool = False
 
@@ -274,6 +286,16 @@ class EpisodePlan:
             negative_rebate_cents=negative_rebate,
             rx_rendering_pharmacy_835=bindings.get("rx_rendering_pharmacy_835", "CANONICAL"),
             rx_rendering_tpa=bindings.get("rx_rendering_tpa", "CANONICAL"),
+            # **Defaults to the TPA feed's rendering, not to CANONICAL.** Craneware reports
+            # what it was sent, so where the feed's Rx drifted Craneware's must drift with it.
+            # Defaulting to CANONICAL made Craneware silently *repair* a D-6 truncation —
+            # ``22105567`` in the feed and Verity, ``221055677`` in Craneware — which would
+            # hand the connector a working join the real feed does not have and quietly
+            # delete the defect through one vendor's door. Caught by measuring the diverged
+            # pairs rather than by a test, because at that point no test looked.
+            rx_rendering_craneware=bindings.get(
+                "rx_rendering_craneware", bindings.get("rx_rendering_tpa", "CANONICAL")
+            ),
             late_arrival_days=bindings.get("late_arrival_days", 0),
             duplicate_delivery=bindings.get("duplicate_delivery", False),
         )

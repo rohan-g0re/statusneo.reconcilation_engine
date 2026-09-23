@@ -58,7 +58,7 @@ A bank line carries no claim identifier at all, so it resolves in two hops: trac
 
 ![System architecture](docs/images/arch-system.png)
 
-**Four boundaries, each held by a test rather than by a convention.**
+**Five boundaries, each held by a test rather than by a convention.**
 
 **Ingest never interprets.** Every source line is stored verbatim with its SHA-256 before a parser sees it. `raw_record` carries `RAISE(ABORT)` triggers on UPDATE and DELETE. Re-loading the same file is a no-op via a UNIQUE index on the file hash.
 
@@ -68,7 +68,34 @@ A bank line carries no claim identifier at all, so it resolves in two hops: trac
 
 **The agent never computes a number.** `calculate_reconciliation()` is a tool call into Python, not reasoning in a prompt. An AST-walking test fails the build if any function other than the single write tool so much as names a transaction or an SQL mutating verb.
 
+**Connectors fetch; they never interpret.** `connectors/` answers "how do I get this and am I allowed to." `ingest/` answers "what does it mean." A test scans the whole connector package and fails on any mutating SQL verb, and a second one asserts no transport implementation — local, SFTP or HTTP — can resolve a path under `truth/`. The withheld answer key stays withheld no matter how the bytes arrive.
+
 **Scale comes from the shape, not from tuning.** A new TPA or payer is an adapter plus config rows — the crosswalk key types, the reason codes and the disposition rollup don't change. Ingest is event-driven: an inbound document carries its own lookup keys and pulls only the episodes it touches, so resolving a 200-day-old claim costs the same as this morning's. There is no time window to widen because there is no sweep.
+
+### The connector layer, and the 340B TPA vendor leg
+
+A second assignment (`docs/Assignment_Doc_2.pdf`) asks for the layer *in front of* this one: go and get the data from six 340B platforms, authenticate to each, land it, map it, and prove a claim traces end to end. It lives on the `connectivity_layer` branch. `docs/connectivity_layer_requirements.md` is the requirements of record; `docs/connectivity_layer_build_plan.md` carries per-requirement status, including the requirements an adversarial review downgraded.
+
+Scope is Doc 2's own steps 1–5. Step 6 — retry, alerting, backfill, runbooks, cutover — is named and not built.
+
+**The vendor leg was blocked, and the reason was written down wrong for a long time.** The record said the blocker was the Week 1–3 credential gate. It was not. The delimited reader read a `received_at` off every row, and a vendor export carries no such column: Verity's timestamps are `qualification_received_at` and `batch_received_at`, and there is a `reversal_received_at` beside them. Choosing among those is a statement about what the dataset *means* — a mapping decision, not a parsing one — and nobody had made it. So the rows could not be turned on, and the credential gate got the blame for a seam that did not exist.
+
+It is now one declaration per dataset, `SecureFileMapping.received_at_column`, with `PayloadFormat.VENDOR_CSV` routing a vendor file through its mapping instead of through the bank reader. The only reason the registry rows are still `enabled=False` is the credential gate — which is now the true reason rather than the stated one.
+
+**Measured on the demo profile**, replaying the six feeds and then both vendor exports in one pass:
+
+| Source | Detail rows | Landed |
+| ------ | ----------- | ------ |
+| `verity_accumulations` | 34 | 34 `TPA_QUALIFICATION` + 4 `TPA_REVERSAL` |
+| `craneware_claims_report` | 39 | 39 `TPA_QUALIFICATION` + 4 `TPA_REVERSAL` |
+
+Nothing quarantined. Both files reconcile their trailers — declared 34 against observed 34, declared 39 against observed 39 — and they are the **first sources in the build that carry a declared count at all**, so the control-total check stops being vacuous and starts comparing two numbers.
+
+**Craneware's arrival time is honestly weaker than Verity's, and is recorded as weaker.** The Claims Report publishes no timestamp column of any kind — only dates: `fill_date`, `reversal_date`, `rebate_submitted_date`, `rebate_payment_date`. So its rows inherit the delivery's fetch stamp. Promoting `fill_date` was the tempting fix and would have been the wrong one: it dates a row to the day the drug left the shelf and hides every day of TPA lag behind it, which is exactly the lag a 340B reconciliation exists to measure. We know when the file landed and we do not know when the row did, so that is what the data says.
+
+`verity_invoices` is the rebate-money leg, and it refused by name for two waves on the grounds that `REBATE_BATCH` / `REBATE_DISPENSE_LINE` semantics were unsettled. They were not unsettled — they were **unavailable**. `connectors/authority.py` lists both kinds with `authoritative = {BEACON, MANUFACTURER_REBATE}`, so asking it what a TPA may emit answers plainly: *"a TPA_VERITY source may not assert rebate status."* DOC2-004 gives rebate status to Beacon and the manufacturer, and a TPA's invoice is a fact Verity owns — this is what we billed — about a decision Verity did not make. So it lands as its own kind, `TPA_INVOICE_LINE`: both money figures carried verbatim as text, `amount_cents` left null, outside `dimensions._KIND_BUCKETS`, emitting no reversal child. Gathered, cited, on the timeline, moving no verdict — measured by building the dataset with and without it and comparing a digest over dispositions, both verdict codes and the rebate money across all 60 episodes.
+
+**One rule caught a real bug.** The first adapter wrote the manufacturer's answer into the canonical `manufacturer_status` and `rejection_reason` keys, and `connectors/authority.py` quarantined nine Craneware rows as `SOURCE_AUTHORITY_BREACH` — a TPA asserting a decision Doc 2 gives to Beacon. Nine is every rejected claim in the profile, and each took a perfectly valid qualification down with it. The fix is to relay rather than assert: `relayed_manufacturer_status` and `relayed_rejection_reason`. The row keeps both the qualification it owns and a record of what the TPA says it heard, which a dossier can show and no verdict can rest on.
 
 ---
 
@@ -79,8 +106,8 @@ The Claim Financial Episode is the semantic anchor. **Records live outside it**,
 | Layer      | Tables                                                                                      | Append-only                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ----------------------------------------- |
 | Raw        | `raw_record`, `ingest_batch`, `quarantined_record`                                    | `raw_record` ✔                         |
-| Canonical  | `normalized_record` (14 record kinds)                                                     | ✔                                        |
-| Semantic   | `episode`, `crosswalk_key` (8 key types)                                                | `episode` ✔                            |
+| Canonical  | `normalized_record` (18 record kinds)                                                     | ✔                                        |
+| Semantic   | `episode`, `crosswalk_key` (12 key types)                                               | `episode` ✔                            |
 | Verdict    | `verdict`, `verdict_reason`, `verdict_cross_track_flag`, `verdict_evidence`         | all ✔                                    |
 | Unresolved | `parked_record`, `parked_record_key`, `parked_record_resolution`, `cash_allocation` | resolutions appended, parks never deleted |
 | Agent      | `work_item`                                                                               | ✔ plus an idempotent unique index        |
@@ -91,7 +118,7 @@ Three rules carry most of the weight.
 
 **The cursor lives at read time**, not in the data: `process(records where received_at <= cursor)`. "What did we believe on 31 March?" is a parameter, not a feature, and forward and backward use the same code path.
 
-**Failed joins are parked, not dropped** — `NO_KEY_MATCH`, `AMBIGUOUS_KEY_MATCH`, `NO_KEYS_PRESENT`. Every later arrival re-checks the parked pool backward, so an out-of-order deposit can clear a park from three weeks earlier. Two candidates park rather than guess, because picking one attributes real money to the wrong claim and then looks identical to a correct match in every report afterwards. There is deliberately **no identifier normalisation** on the match path — a test asserts no `lstrip("0")` exists, because silently absorbing drift would delete the crosswalk-miss exception the system exists to surface.
+**Failed joins are parked, not dropped** — `NO_KEY_MATCH`, `AMBIGUOUS_KEY_MATCH`, `NO_KEYS_PRESENT`, `COVERED_ENTITY_MISMATCH`. Every later arrival re-checks the parked pool backward, so an out-of-order deposit can clear a park from three weeks earlier. Two candidates park rather than guess, because picking one attributes real money to the wrong claim and then looks identical to a correct match in every report afterwards. The fourth is deliberately not folded into the first: the mapping worked and the two records disagree about whose 340B claim it is, which is a different problem with a different owner. There is deliberately **no identifier normalisation** on the match path — a test asserts that `7845102` and `07845102` build *different* keys, because silently absorbing drift would delete the crosswalk-miss exception the system exists to surface.
 
 Money is integer cents, never float; the conversion function refuses a Python float outright rather than rounding it. Variance is `expected − received`, signed, compared exactly. All three tolerance constants are literally zero.
 
@@ -160,19 +187,19 @@ Anything finer than three dispositions belongs in reason codes, which are a *lis
 
 **`INSUFFICIENT_DATA` is a first-class outcome, not an error path.** The engine emits it in exactly three places where it deterministically knows it cannot decide: a clawback that cannot be tied to any bank movement (A-13), no cash on both tracks at once (X-5), and an expected amount it could not price. The alternative is reporting variance against an expectation of zero — a false zero, which renders an unpriceable claim as perfectly clean. It also matters downstream, because it hands the agent a *deterministic* "I don't know" instead of one it has to invent.
 
-**Measured, not asserted:** the engine reproduces the oracle on **4,224 / 4,224** configurations with no threshold — one divergence means the port is no longer the thing that was proved. Against withheld ground truth the crosswalk reassembles **1,349 / 1,354** resolvable episodes (99.6%) on the full profile. **585 tests pass, 2 skip**, with no API key and no network. Full breakdown in `README.md`.
+**Measured, not asserted:** the engine reproduces the oracle on **4,224 / 4,224** configurations with no threshold — one divergence means the port is no longer the thing that was proved. Against withheld ground truth the crosswalk reassembles **1,349 / 1,354** resolvable episodes (99.6%) on the full profile. On `main` that is **585 tests passing, 2 skipped**; on the `connectivity_layer` branch the connector and vendor-sourcing work takes it to **988 passing, 2 skipped, 1 failing**, and the failure is pre-existing rather than new — see §9. Either way, no API key and no network. Full breakdown in `README.md`.
 
 ---
 
 ## 7. Agent and tool design
 
-Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatible client.
+Three roles, nine tools, and a single-file custom harness — hand-rolled `httpx` against an OpenAI-compatible endpoint, no SDK and no framework.
 
 | Role                   | Question                      | Shape                                            |
 | ---------------------- | ----------------------------- | ------------------------------------------------ |
 | Exception Investigator | Why is this claim open?       | Single pass, 8 read tools, ≤5 rounds / 12 calls |
 | Workflow Coordinator   | What should a person do?      | Propose ⇄ Evaluate loop                         |
-| Portfolio Analyst      | What's the state of the book? | Single pass, aggregate tools                     |
+| Portfolio Analyst      | What's the state of the book? | Single pass, same 8 read tools, 4 rounds / 10 calls |
 
 ![Agent loop](docs/images/agent-loop.png)
 
@@ -180,7 +207,7 @@ Three roles, nine tools, and a ~150-line custom harness over an OpenAI-compatibl
 
 **Two agents, and the evaluator never sees the proposer's reasoning.** Self-critique is measured to *degrade* results; external verification improves them. The evaluator gets the proposed action, the evidence and the rubric on a fresh trace — the `reasoning` field does not exist on the object it receives, so it is unrepresentable rather than filtered. The critique fed back between rounds is built from findings only, and its function signature cannot accept a proposal at all.
 
-**The evaluator never emits a score.** It returns per-criterion findings — `SUPPORTED`, `CONTRADICTED`, `NOT_ADDRESSED` — and Python computes `score = 100 × gate × (earned/possible)`. A model asked for a number produces a plausible-looking one; a model asked "is this claim supported, and quote the bit that shows it" is doing something checkable. Sixteen criteria: 6 checked by Python, 8 by the judge, 2 recorded at zero weight. Four **vetoes**, all Python, any one of which zeroes the gate — action valid for the disposition (G1), every figure sourced (G3), every quoted span verbatim in its named source (G5), and no claim that money already moved (G8).
+**The evaluator never emits a score.** It returns per-criterion findings — `SUPPORTED`, `CONTRADICTED`, `NOT_ADDRESSED` — and Python computes `score = 100 × gate × (earned/possible)`. A model asked for a number produces a plausible-looking one; a model asked "is this claim supported, and quote the bit that shows it" is doing something checkable. Sixteen criteria: 6 checked by Python, 8 by the judge, 2 recorded at zero weight — though the default `core` profile grades four of those eight, and `RECON_AGENT_RUBRIC=full` grades all of them. Four **vetoes**, all Python, any one of which zeroes the gate — action valid for the disposition (G1), every figure sourced (G3), every quoted span verbatim in its named source (G5), and no claim that money already moved (G8).
 
 **Four outcomes, never collapsed to a boolean:** `complete` (≥80), `insufficient_data` (rendered as a *success* — more iterations cannot manufacture missing evidence), `stalled` (no improvement across three scored rounds), and `capped` (the hard ceiling, which is the loop bound itself rather than a check inside the body, so it wins ties by construction).
 
@@ -200,11 +227,11 @@ The write tool is never given to any model — role tool lists are built by *rem
 
 Scoped to the brief: no production deployment, no IAM buildout. `README.md` carries the full control table; these four shape the architecture.
 
-**The untrusted-text fence.** Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟧` with a per-run nonce before it reaches a prompt. You cannot sanitise a rejection reason — it *is* the data — so you mark its boundary and refuse instructions from inside it. The fenced-field list is derived from the projection table, so a newly projected field is fenced automatically rather than remembered.
+**The untrusted-text fence.** Payer free text is wrapped in `⟦UNTRUSTED:field#nonce⟧…⟦/UNTRUSTED:#nonce⟧` with a per-run nonce before it reaches a prompt — the nonce repeats in the closer because that is what the fence regex back-references to prove the pair belongs to this run. You cannot sanitise a rejection reason — it *is* the data — so you mark its boundary and refuse instructions from inside it. The fenced-field list is derived from the projection table, so a newly projected field is fenced automatically rather than remembered.
 
 **A structural provenance check.** A tool argument appearing only inside previously-returned untrusted text is refused and journalled as `injection_attempt_recorded`. That holds whether or not the model obeys the prompt, which is the only kind of guarantee worth having here.
 
-**Least privilege as a shape.** One write tool of nine, `INSERT`-only, never in any model's tool list, enforced by an AST test. Eight tables carry `RAISE(ABORT)` immutability triggers. PHI redaction is fail-closed — unparseable means refused, not answered.
+**Least privilege as a shape.** One write tool of nine, `INSERT`-only, never in any model's tool list, enforced by an AST test. Nine tables carry `RAISE(ABORT)` immutability triggers. PHI redaction is fail-closed — text that is unparseable *and* recognisably carries a known PHI key is refused, not answered.
 
 **Audit is the run journal.** Append-only JSONL per run, flushed per line and secret-redacted before write, replayable through `GET /api/agent/runs/{run_id}`. Human-gate decisions are journalled separately with the proposed-versus-accepted diff, which makes override rate measurable.
 
@@ -221,14 +248,29 @@ Ordered by what a reviewer would miss most.
 1. **Close the three named security gaps** — redact at the API edge, gate regenerate behind a flag, require the write token instead of minting it. All three are local and none touches architecture.
 2. **Derivation lineage.** `verdict_evidence` currently records every record *visible* at that cursor, not the ones that *drove* the verdict. The engine already knows which record fired the rule and throws it away — it's one flag at an existing branch. Only about 30% of verdict changes have a single new record behind them, so this is a real gap and a narrow one.
 3. **Tenant isolation**, as a predicate in the repository layer rather than a filter in handlers.
-4. **Connector onboarding as config** — an adapter registry so a new TPA is rows, not a module.
+4. ~~**Carry a vendor record all the way to an episode, and test it there.**~~ **Done.** `build_dataset(..., tpa_source="verity" | "craneware")` runs the whole engine on a vendor export, with the generic feed's `TPA_PORTAL` rows excluded so one dispense never resolves through two doors. Vendor rows reach 25 episodes through Verity and 28 through Craneware, and three test files assert it at verdict level rather than at `normalized_record`. **And it is now the default** — `tpa_source` defaults to Craneware's export rather than the generic feed, and `/api/regenerate?tpa_source=` switches it per rebuild, so the vendor door is reachable from somewhere a reviewer clicks. Craneware rather than Verity because `verity_accumulations` is a population selected on `qualification_status` and cannot express a disqualification at all: four episodes lose their 340B track and read as "never 340B" instead of "refused", against Craneware's one.
 5. **Calibrate the score threshold.** 80 is legible but uncalibrated; real calibration needs 100–200 labelled examples per failure mode, reporting true-positive and true-negative rates separately.
 6. **Model diversity in the evaluator.** Proposer and evaluator currently default to the same model because a thinking-model evaluator averaged 466s per call against the proposer's 4.1s. The self-preference mitigation is therefore off by default, and I'd rather say that than claim independence I don't have.
 
 **Known limitations, plainly:** 5 of 1,354 full-profile episodes don't reproduce their intended verdict; the demo profile scores 54/54 on its frozen spine but 53/54 on a freshly seeded rebuild; three timeline projections are defensive and unexercised; the SQLite file is not byte-reproducible because it carries load wall-clocks, though the feed files are, verified by SHA-256 in the manifest; and there is no front-end test suite.
 
+**On the connector layer specifically**, four more, all found by running it rather than by reading it:
+
+- **The vendor exports are written on every build, and the build now reads some of them back.** `build_dataset` calls `coverage.write_all`, so 18 files land under `data/generated/<profile>/vendor/` on every seed and every regenerate — before this they existed only inside a pytest temp directory, which is a connector nobody can be shown. Beacon's three inbound payloads are ingested from there on **every** build. One 340B TPA export is too, because `tpa_source` now defaults to a vendor. The gate is a function argument rather than the registry's `enabled=False` — `build_dataset` passes `enabled=True` and bypasses that, which is why `/api/connectivity` reports `active_tpa_source` (what was *read*) separately from `live_vendor_connections` (what was *reached*, still empty).
+- **Craneware's correctness depends on a fetch stamp the default gets wrong.** Because the Claims Report publishes no timestamp, every row falls back to the delivery stamp — and `load_from_sources` defaults that to `1970-01-01T00:00:00Z` to keep test databases reproducible. Measured against the demo profile: under the default, 35 of 43 Craneware records sort to the front of the timeline, land before any episode exists and park as `NO_KEY_MATCH`. Pass a real delivery stamp and that drops to 3, which is the identifier-drift defect the generator injects on purpose. Verity is unaffected — it carries its own per-row timestamp, and its 7 parks are that same designed drift. The fix is a decision about where the delivery stamp comes from, not a bug in the reader.
+- ~~**No test would have caught the previous point.**~~ **Closed.** The hazard is now guarded twice: `build_dataset` passes a real delivery stamp for vendor loads, and a `MissingDeliveryStampError` refuses the epoch outright on the vendor branch. The suite no longer only proves records land — `test_vendor_epoch_guard.py` builds a dataset first and asserts episodes exist before loading, and the parity and chain files build real databases and compare verdicts.
+- **Craneware still lands a whole report at one instant, and that is the vendor's own shape.** Its rows have no per-row timestamp, so they inherit the delivery stamp: 4 distinct arrival moments across 39 records against Verity's 41 across 61. The engine evaluates at a cursor, so this changes what a verdict could have known — Craneware reopens 64 previously-closed verdicts against the generic feed's 34, on a different set of episodes. Not a defect in the connector; a true fact about what they ship, invisible in every other measure because the rows parse, the contract passes and the final exception count is the same either way.
+- **The suite is not fully green.** `tests/test_query_plans.py::test_latest_verdict_walks_the_index_not_the_table` fails: SQLite's planner picks `sqlite_autoindex_verdict_1` over `ix_verdict_latest`. Both are index seeks, so nothing scans, but the assertion names a specific index. This was verified as pre-existing by stashing the connector work and re-running — it is not a regression, and it is reported as a failure rather than rounded to green, because rounding it is how a real failure later gets mistaken for this one.
+
+Two more the vendor-sourcing work turned up, both found by measuring rather than reading:
+
+- **The Verity writer was leaving behind runs that never happened.** Its export names are derived from the data so that identical data lands an identical filename — which is right, and whose corollary nobody wrote down: *different* data lands a different name and the old one is never overwritten. Three generations were sitting side by side, and of the 37 rebate allocation codes in the two older invoice exports, **zero** appeared in any feed. A reader matches by filename prefix, so all three matched. It manufactured a finding: the batch-vs-line disagreement that sent this work looking for invoice semantics was read out of a superseded file, and in the live one every batch's lines sum to its declared total exactly.
+- **`tpa_340b_events.jsonl` is not one feed, so it cannot simply be demoted.** Every row declares its own author: 78 are the TPA's (qualification, request, reversal) and 35 are the *manufacturer's* (payment batches, decisions), which DOC2-004 puts outside a TPA's authority and no vendor export could legally carry. Switching source swaps 78 rows, not a file.
+- **Our Beacon mock can only restate the 340B feed, so enabling its last payload would add nothing.** `beacon_rebate_status` was held out on the grounds that landing it would turn C-05 into C-07 "wherever the feed was silent and Beacon says rejected". Measured: Beacon's `manufacturer_decision` is read off the very `MANUFACTURER_DECISION` event the engine already ingests and agrees with the feed on **30 of 30** dispenses; where the feed is silent Beacon is silent too, so that population does not exist. Likewise **zero** `REJECTED` validation outcomes the feed cannot already explain. This is a limit of the mock, not the architecture — DOC2-004 genuinely makes Beacon authoritative here, and making that demonstrable needs Beacon able to *disagree* with the feed, the same deliberate divergence the two TPAs now carry.
+- **One refused submission is stranded, and switching the default is what exposed it.** Nothing in the engine reads a Beacon validation refusal. Under the generic feed every refused submission was covered by something else — a manufacturer decision, a reversal, or never having qualified. Under a vendor default, one episode loses that cover and sits in `PENDING`: an operator waiting on a decision that cannot arrive. Pinned as an exact count in `tests/test_repository_beacon.py` so it cannot grow quietly. Fixing it properly moves the verdict-pair count off the 372 the oracle is built on, so it is its own measured piece of work.
+
 ---
 
 ## Appendix — where to look
 
-`README.md` runs it and answers the six architecture areas in full. `DEMO.md` is the click-by-click script with screenshots. For a single path traced all the way through, `docs/claim_walkthrough.md` follows one claim through the deterministic layer and `docs/agent_walkthrough.md` follows one request through the agent layer. The state space and its derivation are in `docs/reconciliation_state_space.md` and `decision_tree/REPORT.md`; every decision with provenance is in `docs/decision_ledger.md` and `docs/architecture_decisions.md`; the deliberate failure case is `docs/eval_g3_veto_failure_case.md`; and the editable diagram sources sit beside their PNGs in `docs/images/`.
+`README.md` runs it and answers the six architecture areas in full. `DEMO.md` is the click-by-click script with screenshots. For a single path traced all the way through, `docs/claim_walkthrough.md` follows one claim through the deterministic layer and `docs/agent_walkthrough.md` follows one request through the agent layer. The state space and its derivation are in `docs/reconciliation_state_space.md` and `decision_tree/REPORT.md`; every decision with provenance is in `docs/decision_ledger.md` and `docs/architecture_decisions.md`; the deliberate failure case is `docs/eval_g3_veto_failure_case.md`; and the editable diagram sources sit beside their PNGs in `docs/images/`. For the second assignment, `docs/connectivity_layer_requirements.md` is the requirements of record and `docs/connectivity_layer_build_plan.md` is the status of record.

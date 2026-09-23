@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, formatMoney } from './api.js'
+import * as labels from './labels.js'
 import CursorScrubber from './components/CursorScrubber.jsx'
 import QueueTiles from './components/QueueTiles.jsx'
 import QueueTable from './components/QueueTable.jsx'
@@ -7,6 +8,8 @@ import EpisodeDossier from './components/EpisodeDossier.jsx'
 import FeedExceptions from './components/FeedExceptions.jsx'
 import Cited from './components/Cited.jsx'
 import TodoListPanel from './components/TodoListPanel.jsx'
+import Connectivity from './components/Connectivity.jsx'
+import VerdictLibrary from './components/VerdictLibrary.jsx'
 
 // ═══ the Portfolio Analyst panel ═════════════════════════════════════════════════════════════
 // docs/agent_layer_design.md S:opening line: "the Exception Investigator explains, the Portfolio
@@ -97,17 +100,15 @@ function PortfolioAnalystPanel({ cursor }) {
   return (
     <section className="panel">
       <div className="panel-head-row">
-        <h2>Portfolio Analyst</h2>
+        {/* Named for what it does, not for the agent role that does it. */}
+        <h2>Ask about the book</h2>
         <button type="button" data-testid="portfolio-run" onClick={run} disabled={busy}>
           {busy ? 'Analysing…' : result ? 'Run again' : 'Analyse the book'}
         </button>
       </div>
       <p className="hint">
-        Aggregates the same counts and money the tiles below show, plus the exception queue's own
-        deterministic ranking, into a narrative answer to "what is the state of the book right
-        now, and what carries the most money" — every figure is quoted from a tool result and
-        every ordering is a SQL sort the agent only explains; it never re-ranks a queue itself.
-        Ask a specific question below, or leave it blank for a general summary.
+        Every figure it quotes was computed by the engine and cited. It explains the numbers; it
+        never produces one.
       </p>
       <label className="wi-field">
         <span>Question (optional)</span>
@@ -187,6 +188,13 @@ function PortfolioAnalystPanel({ cursor }) {
 // surfacing all the way up to the UI: the front end has no concept of "now" either.
 export default function App() {
   const [meta, setMeta] = useState(null)
+  // Which screen is showing. A piece of state and a pair of buttons, the same `.view-toggle`
+  // pattern the dossier's simple/detailed switch already uses — not a route. The two screens
+  // share the masthead and nothing else, there is no deep link to either, and the queue state
+  // has to survive a look at the connector report and still be there on the way back, which a
+  // router would have had to reconstruct. `/analyse/:episodeId` stays a real navigation because
+  // it genuinely is one: a new tab, opened with `window.open`.
+  const [view, setView] = useState('operations')
   const [cursor, setCursor] = useState(null)
   const [disposition, setDisposition] = useState('EXCEPTION')
   const [orderBy, setOrderBy] = useState('reopened_first')
@@ -335,60 +343,131 @@ export default function App() {
     <div className="app">
       <header className="masthead">
         <div>
-          <h1>Post-Claim Pharmacy Financial Reconciliation</h1>
+          <h1>Pharmacy Reconciliation Cockpit</h1>
+          {/*
+            The claim worth making, and nothing else. This line used to open with "Deterministic
+            layer" and end with the profile, the seed and the engine version -- three build
+            parameters that tell a reader the thing they are looking at is a test harness. They
+            have not gone anywhere: they are the `title` on the build marker below, which is
+            where someone checking reproducibility will think to look and nobody else has to.
+          */}
           <div className="sub">
-            Deterministic layer. Every figure below was computed in Python and is shown verbatim —
-            nothing on this screen calculates.
+            Every figure was computed in Python and is shown verbatim. Nothing on this screen
+            calculates.
             {meta ? (
-              <>
-                {' '}
-                Profile <code>{meta.profile}</code>, seed{' '}
-                <code data-testid="seed">{meta.stored?.master_seed ?? '—'}</code>, engine{' '}
-                <code>{meta.engine_version}</code>.
-              </>
+              <span
+                className="build-stamp"
+                data-testid="seed"
+                title={`profile ${meta.profile} · seed ${meta.stored?.master_seed ?? '—'} · engine ${meta.engine_version}`}
+              >
+                {meta.profile}
+              </span>
             ) : null}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="sub" data-testid="totals">
-            {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
-          </span>
+        <div className="masthead-tools">
+          <div className="view-toggle" role="group" aria-label="Screen">
+            <button
+              type="button"
+              data-testid="screen-operations"
+              aria-pressed={view === 'operations'}
+              onClick={() => setView('operations')}
+              title="The queues, the replay cursor and the episode dossier — what the deterministic engine concluded."
+            >
+              Operations
+            </button>
+            <button
+              type="button"
+              data-testid="screen-verdicts"
+              aria-pressed={view === 'verdicts'}
+              onClick={() => setView('verdicts')}
+              title="What kinds of problem the book contains, grouped by what an operator does about them — and what every code on the other screens means."
+            >
+              Problem types
+            </button>
+            <button
+              type="button"
+              data-testid="screen-connectivity"
+              aria-pressed={view === 'connectivity'}
+              onClick={() => setView('connectivity')}
+              title="Connector readiness per source: transport, auth, schema contract, mock provenance, golden-claim traces, control totals, and what is still vendor-blocked."
+            >
+              Connectivity
+            </button>
+          </div>
+          {view === 'operations' ? (
+            <span className="sub" data-testid="totals">
+              {totals.episodes} episodes · {formatMoney(totals.variance)} total variance
+            </span>
+          ) : null}
           {/*
-            Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
-            the identical file again" surprised everyone who pressed it. A new seed means
-            new claims, new amounts, and defects landing on different episodes, and on the
-            demo profile a different mix of exceptions — while every named edge case is
-            still guaranteed to appear. Reproducibility did not go anywhere: the seed that
-            produced whatever you are looking at is in the masthead and in manifest.json,
-            and `Repeat seed` below replays it byte for byte.
+            The three rebuild controls now sit behind a disclosure rather than in the header
+            row itself. They are how you reseed or replay a dataset — build tooling, not
+            product — and one of them drops and rebuilds the database. Three buttons of equal
+            weight to the screen switcher read as the primary actions on the page, which put
+            the most destructive control in the most reachable spot. Folded, not removed:
+            every one is still one click away and the demo still opens with them.
           */}
-          <button
-            data-testid="regen-demo"
-            onClick={() => regenerate('demo', api.freshSeed())}
-            disabled={busy}
-            title="Rebuild the 60-episode walkthrough on a new seed: different claims, amounts and queue mix, with every named edge case still present."
-          >
-            Rebuild demo
-          </button>
-          <button
-            data-testid="regen-full"
-            onClick={() => regenerate('full', api.freshSeed())}
-            disabled={busy}
-            title="Rebuild the 1,500-episode profile on a new seed. All 372 verdict pairs are still covered — that is arithmetic, not luck."
-          >
-            Rebuild full
-          </button>
-          <button
-            data-testid="regen-same-seed"
-            className="primary"
-            onClick={() => regenerate(meta?.profile ?? 'demo', meta?.stored?.master_seed)}
-            disabled={busy || !meta?.stored?.master_seed}
-            title="Rebuild on the seed shown in the masthead. Byte-for-byte identical, which is how you check reproducibility rather than take it on trust — compare the feed hashes in manifest.json."
-          >
-            Repeat seed
-          </button>
+          <details className="tools-menu">
+            <summary title="Rebuild or replay the dataset">Data</summary>
+            <div className="tools-menu-body">
+              {/*
+                Both rebuild buttons mint a fresh seed, because "rebuild" reading as "produce
+                the identical file again" surprised everyone who pressed it. A new seed means
+                new claims, new amounts, and defects landing on different episodes, and on the
+                demo profile a different mix of exceptions — while every named edge case is
+                still guaranteed to appear. Reproducibility did not go anywhere: the seed that
+                produced whatever you are looking at is in the masthead and in manifest.json,
+                and `Repeat seed` replays it byte for byte.
+              */}
+              <button
+                data-testid="regen-demo"
+                onClick={() => regenerate('demo', api.freshSeed())}
+                disabled={busy}
+                title="Rebuild the 60-episode walkthrough on a new seed: different claims, amounts and queue mix, with every named edge case still present."
+              >
+                Rebuild demo
+              </button>
+              <button
+                data-testid="regen-full"
+                onClick={() => regenerate('full', api.freshSeed())}
+                disabled={busy}
+                title="Rebuild the 1,500-episode profile on a new seed. All 372 verdict pairs are still covered — that is arithmetic, not luck."
+              >
+                Rebuild full
+              </button>
+              <button
+                data-testid="regen-same-seed"
+                className="primary"
+                onClick={() => regenerate(meta?.profile ?? 'demo', meta?.stored?.master_seed)}
+                disabled={busy || !meta?.stored?.master_seed}
+                title="Rebuild on the seed shown in the masthead. Byte-for-byte identical, which is how you check reproducibility rather than take it on trust — compare the feed hashes in manifest.json."
+              >
+                Repeat seed
+              </button>
+            </div>
+          </details>
         </div>
       </header>
+
+      {/*
+        The cursor sits in the header band rather than in a panel of its own. It governs every
+        figure on the screen below it, so a panel in the left column made it look like one more
+        thing to read on the way down — and put two paragraphs of explanation between the title
+        and the first dollar figure. Here it reads as a control on the whole page, which is what
+        it is, and the money starts at the top of the scroll.
+      */}
+      {/*
+        Shown on both screens that answer a question about the book, because both are answers
+        "as at" a moment. Connectivity is not one of them: connector readiness is a property of
+        the build rather than of the instant being replayed, so a cursor above it would imply a
+        control it does not have.
+      */}
+      {view === 'connectivity' ? null : (
+        <div className="cursor-band">
+          <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
+        </div>
+      )}
 
       {error ? (
         <div className="error" data-testid="error">
@@ -396,32 +475,42 @@ export default function App() {
         </div>
       ) : null}
 
+      {/*
+        Three screens, one page, still not a router. Each answers a different question —
+        "what do I work", "what kinds of problem are in the book", "what is actually built per
+        source" — and swapping the body rather than navigating keeps the cursor, the selected
+        queue and the open episode intact underneath, so coming back lands exactly where you
+        left. A router would have had to reconstruct all three.
+      */}
+      {view === 'connectivity' ? (
+        <Connectivity />
+      ) : view === 'verdicts' ? (
+        <VerdictLibrary overview={overview} />
+      ) : (
       <div className="layout-grid">
         <div className="layout-left">
+          {/*
+            Order on this column is deliberate and it is the money first. What an operator — or
+            anyone being shown the book — wants from this screen is "how much is outstanding and
+            what do I work", in that order. Everything below the queue answers a question you only
+            ask once you have seen those two: what could not be matched at all, what the agent
+            layer makes of it, what the team has already committed to.
+          */}
+          {/*
+            Every panel's hint is now one line that states the question the panel answers. They
+            were three to five lines each, explaining how the system was built -- good writing
+            aimed at a reviewer grading the architecture, and the first thing a reader has to get
+            past to reach a number. The reasoning did not go anywhere; it is in DESIGN_NOTE.md,
+            where someone looking for it will find it.
+          */}
           <section className="panel">
-            <h2>Replay cursor</h2>
-            <p className="hint">
-              The engine processes records whose arrival time is at or before this cursor. Moving it
-              backwards reproduces the answer as it stood then — the same code path in both directions,
-              which is why the audit question needs no separate feature.
-            </p>
-            <CursorScrubber bounds={meta?.cursor} cursor={cursor} onChange={setCursor} busy={busy} />
-          </section>
-
-          <PortfolioAnalystPanel cursor={cursor} />
-
-          <section className="panel">
-            <h2>Queues at this cursor</h2>
-            <p className="hint">
-              Three dispositions, because “what do I do with this?” has three answers. A queue is a
-              query over the verdict log, not a table things are moved into — which is why it can be
-              asked at any cursor and why deleting the log loses nothing.
-            </p>
+            <h2>Where the money is</h2>
+            <p className="hint">What do I do with this? There are three answers.</p>
             <QueueTiles overview={overview} selected={disposition} onSelect={selectDisposition} />
           </section>
 
           <section className="panel">
-            <h2>{disposition} queue</h2>
+            <h2>{labels.disposition(disposition).label}</h2>
             <QueueTable
               rows={rows}
               orderBy={orderBy}
@@ -433,13 +522,21 @@ export default function App() {
           </section>
 
           <section className="panel">
-            <h2>Feed-level exceptions</h2>
+            <h2>Money and documents we could not match</h2>
             <p className="hint">
-              Properties of ingestion rather than of any claim, which is why they are not multiplied into
-              the episode state space. Each one is a query, not a stored flag.
+              Faults in what arrived, not facts about any claim.
             </p>
             <FeedExceptions data={feeds} />
           </section>
+
+          {/*
+            The analyst panel reads the same counts and money the tiles above already show. It
+            belongs after them: it answers "what do you make of this", which is a question you ask
+            once you have the numbers, not before. Above the queue it read as the primary feature
+            of the screen, which inverted the one rule the whole system is built on — the engine
+            decides, the agent explains.
+          */}
+          <PortfolioAnalystPanel cursor={cursor} />
 
           {/*
             The cross-episode to-do list answers "what am I doing about it", distinct from the
@@ -450,40 +547,12 @@ export default function App() {
           */}
           <TodoListPanel cursor={cursor} />
 
-          {overview ? (
-            <section className="panel">
-              <h2>Verdict distribution</h2>
-              <p className="hint">
-                Fifty deterministic rules generate 372 reachable verdict pairs compositionally — the
-                engine resolves each track independently and then annotates, rather than enumerating
-                combinations.
-              </p>
-              <div className="table-wrap">
-                <table data-testid="verdict-distribution">
-                  <thead>
-                    <tr>
-                      <th>Reimbursement</th>
-                      <th>Rebate</th>
-                      <th className="num">Episodes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.verdict_pairs.map((pair) => (
-                      <tr key={`${pair.reimbursement}|${pair.rebate}`}>
-                        <td>
-                          <span className="verdict-code">{pair.reimbursement}</span>
-                        </td>
-                        <td>
-                          <span className="verdict-code">{pair.rebate}</span>
-                        </td>
-                        <td className="num">{pair.episodes}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
+          {/*
+            The verdict distribution used to sit here. It is reference material, not operations:
+            it carries no money, only episode counts, and on the demo profile twenty-three of its
+            twenty-five rows read "1". It is now the Problem types screen, where it has room to
+            be grouped into families and to carry the code legend beside it.
+          */}
         </div>
 
         <div className="layout-right">
@@ -502,15 +571,14 @@ export default function App() {
               ) : null}
             </div>
             <p className="hint">
-              One claim, everything that happened to it, in the order we learned it — the claim filed,
-              what the payer said, when the money moved, how the 340B rebate went, and every point at
-              which the verdict changed. This is the same object the agent layer receives in a single
-              call, and nothing in it was written by a model: every line is composed from the records.
+              One claim, everything that happened to it, in the order we learned it. Nothing here
+              was written by a model.
             </p>
             <EpisodeDossier dossier={dossier} busy={dossierBusy} />
           </section>
         </div>
       </div>
+      )}
     </div>
   )
 }

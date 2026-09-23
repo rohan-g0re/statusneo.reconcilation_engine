@@ -1,5 +1,10 @@
 /* Tokens first, components second.
  *
+ * Everything below is driven by the token block on :root — a spacing scale, a type scale, a radius
+ * scale, one accent and a fixed status palette. No rule invents its own pixel value; if a number
+ * looks off, it is off in the scale, not in one place. That is the whole reason the scale exists:
+ * spacing that reads as deliberate rather than accumulated.
+ *
  * The three disposition colours are **status** colours, not series colours: they encode a state
  * (nothing to do / waiting / work it), and status colours are reserved — they never double as
  * "series 4". Two of them sit below 3:1 on the light surface by design, so every one of them ships
@@ -10,32 +15,107 @@
  * app. That adaptive behaviour is gone: there is exactly one palette, applied on :root regardless of
  * what the OS prefers, and `color-scheme: light` (here and in index.html's meta tag) tells the
  * browser to render its own chrome — form controls, the range input thumb, scrollbars — light too.
+ * There is deliberately no `@media (prefers-color-scheme: dark)` block anywhere in this file.
+ *
+ * Inter is loaded from the `@fontsource-variable/inter` npm package, imported once in main.jsx.
+ * It is a local dependency and Vite emits the .woff2 files as build assets — nothing here reaches
+ * a CDN or any other host, and the app renders identically with the network switched off.
  */
 
 :root {
   color-scheme: light;
 
-  --surface-0: #f4f4f2;
-  --surface-1: #fcfcfb;
-  --surface-2: #ececea;
-  --border: #d9d9d4;
-  --border-strong: #b9b9b2;
+  /* ═══ surfaces & borders ═══ cool, flat, and separated by borders rather than shadows. */
+  --surface-0: #f7f8fa; /* the page */
+  --surface-1: #ffffff; /* a panel, a tile, a card */
+  --surface-2: #f0f1f4; /* nested content: table heads, chips, logs, code blocks */
+  --border: #e4e5ea;
+  --border-strong: #c6c8d2;
 
-  --text-primary: #0b0b0b;
-  --text-secondary: #52514e;
-  --text-muted: #74736d;
+  /* ═══ ink ═══ */
+  --text-primary: #16161c;
+  --text-secondary: #4c4d5a;
+  /* The muted step has to clear 4.5:1 on --surface-2, not merely on the page background: chips,
+   * table headers, provenance lines and small labels sit on surface-2 constantly. #66677a measures
+   * 4.86:1 there. */
+  --text-muted: #66677a;
 
-  /* Status palette — fixed, never themed. */
+  /* ═══ status palette ═══ fixed, never themed, never reused as a chart series. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
 
-  --accent: #2a78d6;
+  /* A rebate is not a status, so it gets its own token rather than a hardcoded hex in the JSX. */
+  --track-rebate: #4a3aa7;
 
-  --radius: 8px;
+  /* ═══ accent ═══ one accent, indigo. #5e6ad2 carries white at 4.70:1 (primary buttons, the
+   * selected segment of the view toggle) and sits at 4.70:1 as ink on a white panel (links, the
+   * citation marker), so it is legible in both directions. --accent-soft is the selected-row wash
+   * and is deliberately near-white: the inset bar is what marks the row, the wash only supports it. */
+  --accent: #5e6ad2;
+  --accent-hover: #4f5ac0;
+  --accent-soft: #eceefb;
+
+  /* ═══ spacing scale ═══ 2/4/6/8/12/16/24/32/48. Dense at the bottom because this is a dashboard
+   * — table cells and chips live in the 2-8px range — and coarse at the top for panel rhythm. */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 48px;
+
+  /* ═══ type scale ═══ eight steps with real gaps between them. The file used to carry 10.5, 11,
+   * 11.5, 12, 12.5, 13, 13.5, 14, 14.5, 15, 16, 18 and 30 — thirteen sizes, most of them
+   * indistinguishable from a neighbour, which reads as drift rather than hierarchy. */
+  --text-xxs: 10px; /* micro uppercase labels inside a timeline event */
+  --text-xs: 11px; /* chips, table headers, provenance */
+  --text-sm: 12px; /* secondary meta, hints, logs */
+  --text-base: 13px; /* tables, controls, dense body */
+  --text-md: 14px; /* body, headlines */
+  --text-lg: 16px; /* the dossier's identity line, an outcome icon */
+  --text-xl: 19px; /* the masthead title */
+  --text-display: 28px; /* the one display number: a tile's count */
+  /* The page title, and the only thing at this step. It sat on --text-display, which ties it with
+   * the tile figures -- so the name of the product and the amount of money in one bucket carried
+   * the same weight, and the masthead read as a fourth statistic. A title has to win outright. */
+  --text-title: 42px;
+
+  /* Linear's headings run tight; its body runs comfortable. */
+  /* Tracking is a CURVE, not one value, and the curve below was measured off linear.app
+   * rather than guessed. Their h1 at 64px computes -1.408px and their 72/48/32px headings
+   * compute -1.584/-1.056/-0.704px — every one of them exactly -0.022em, so that is a single
+   * deliberate token they apply to display type only. Their 13-15px UI text computes
+   * -0.13px and -0.15px, exactly -0.01em. Two tokens, a clear threshold near 32px.
+   *
+   * We had -0.022em on a 19px masthead, which is display tracking applied at UI size — the
+   * one place our type visibly diverged from the thing it was imitating. -0.022em is now
+   * reserved for --text-display (28px), the only genuinely display-sized text here. */
+  --tracking-tight: -0.014em; /* 16-19px: between their two tokens, for our in-between sizes */
+  --tracking-tighter: -0.022em; /* display only, >=28px, matching their measured token */
+  --tracking-body: -0.01em; /* was -0.006em; theirs measures -0.01em at 13-15px */
+  --tracking-label: 0.045em; /* small uppercase section labels open up instead */
+  --leading-tight: 1.25;
+  --leading-body: 1.55;
+
+  /* ═══ radii ═══ */
+  --radius-xs: 4px; /* an inline code chip, a focus ring */
+  --radius-sm: 6px; /* buttons, inputs, small cards */
+  --radius-md: 8px; /* nested blocks inside a panel */
+  --radius-lg: 12px; /* panels, tiles, banners — 12px is the card radius measured on
+                      * linear.app's own dashboard mockup, where it is the dominant value in
+                      * the dense section. We were at 10px, which is a hair tighter than the
+                      * thing we are imitating. */
+  --radius-pill: 999px;
+  --radius: var(--radius-lg); /* kept as the historical alias */
+
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --sans: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -43,50 +123,167 @@
 body {
   margin: 0;
   font-family: var(--sans);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--surface-0);
   color: var(--text-primary);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
 }
+
+/* The app renders real links (the masthead's way back to the dashboard, an episode id in the to-do
+ * table). Left unstyled they came out in the browser's default #0000EE, which fights the accent
+ * everywhere else on the page. */
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* ═══ layout ═══════════════════════════════════════════════════════════ */
 
-.app { max-width: 1400px; margin: 0 auto; padding: 20px 24px 64px; }
+.app { max-width: 1400px; margin: 0 auto; padding: var(--space-7) var(--space-7) var(--space-9); }
 
 header.masthead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-6);
   flex-wrap: wrap;
-  padding-bottom: 14px;
+  padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--border);
-  margin-bottom: 20px;
+  /* The cursor band sits directly under this and carries its own bottom border, so the
+   * masthead stops short rather than opening a second gap between two rules. */
+  margin-bottom: 0;
 }
-.masthead h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-.masthead .sub { color: var(--text-muted); font-size: 12.5px; }
-.masthead .sub code { font-family: var(--mono); font-size: 12px; }
+/* The control cluster. `center`, not the header's own `baseline`: these are boxes of
+ * differing heights and aligning their text baselines staggers the boxes themselves. */
+.masthead-tools { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
+/* The claim id, demoted beside the drug name it belongs to. */
+.masthead-sub-id {
+  font-family: var(--mono);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: var(--space-4);
+}
+/* A real control rather than an anchor buried at the end of a paragraph. */
+.back-link {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  text-decoration: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-5);
+}
+.back-link:hover { background: var(--surface-2); border-color: var(--accent); color: var(--accent); }
+/* The product's name, at the size a product's name is set. It ran at --text-xl (19px), an in-page
+ * heading step, so the thing the whole screen is called was no louder than a section label. */
+.masthead h1 {
+  font-size: var(--text-title);
+  margin: 0;
+  font-weight: 680;
+  /* --tracking-tighter now that this IS display type. The earlier note was right to refuse it at
+   * 19px -- linear.app's measured curve puts -0.022em at display sizes only -- and 42px is well
+   * inside where that curve says it applies. */
+  letter-spacing: var(--tracking-tighter);
+  line-height: 1.15;
+}
+.masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
+.masthead .sub code { font-family: var(--mono); font-size: var(--text-sm); }
+/* Which dataset is on screen, in one word. Profile, seed and engine version are on its title:
+ * reproducibility is checked by one person occasionally, not read by everyone constantly. */
+.build-stamp {
+  font-family: var(--mono);
+  font-size: var(--text-xxs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-2);
+  margin-left: var(--space-4);
+  cursor: help;
+}
+
+/* The rebuild controls, folded. A native <details> rather than a popover: no library, no
+ * focus trap to get wrong, and it closes on Escape for free. */
+.tools-menu { position: relative; }
+.tools-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-5);
+}
+.tools-menu > summary::-webkit-details-marker { display: none; }
+.tools-menu > summary:hover { background: var(--surface-2); border-color: var(--accent); }
+.tools-menu[open] > summary { background: var(--surface-2); border-color: var(--accent); }
+.tools-menu-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  min-width: 160px;
+}
+/* The one place the no-shadow rule bends, and only because this floats above content: with
+ * nothing but a border it reads as a box that has been pasted onto the page rather than
+ * lifted off it. Kept faint enough to stay a hairline's worth of separation. */
+.tools-menu-body { box-shadow: 0 4px 16px rgb(22 22 28 / 8%); }
+.tools-menu-body button { width: 100%; }
+
+/* The replay cursor's band. Full width under the masthead, because it governs every figure
+ * on the page rather than any one panel. */
+.cursor-band {
+  padding: var(--space-4) 0 var(--space-5);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-7);
+}
 
 .panel {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 18px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  margin-bottom: var(--space-6);
 }
 .panel > h2, .panel-head-row > h2 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 650;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 640;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
-.panel > .hint { margin: 0 0 14px; color: var(--text-muted); font-size: 12.5px; max-width: 78ch; }
+.panel > .hint {
+  margin: 0 0 var(--space-5);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  max-width: 78ch;
+}
 
 /* A panel's <h2> plus a header-level action (e.g. "Inspect using AI") on the same line,
  * without disturbing `.panel > h2`'s own rule for every panel that has no such action. */
-.panel-head-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.panel-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
 .panel-head-row > h2 { margin: 0; }
 
 /* ═══ two-column layout ════════════════════════════════════════════════ */
@@ -99,14 +296,15 @@ header.masthead {
   display: grid;
   grid-template-columns: 3fr 2fr;
   align-items: start;
-  gap: 18px;
+  gap: var(--space-6);
 }
 .layout-left { min-width: 0; }
 .layout-right {
   position: sticky;
-  top: 20px;
+  /* Matches `.app`'s own top padding, so the pinned column sits level with the page edge. */
+  top: var(--space-7);
   min-width: 0;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - var(--space-9));
   overflow-y: auto;
 }
 .layout-right .panel { margin-bottom: 0; }
@@ -119,215 +317,501 @@ header.masthead {
     max-height: none;
     overflow-y: visible;
   }
-  .layout-right .panel { margin-bottom: 18px; }
+  .layout-right .panel { margin-bottom: var(--space-6); }
 }
 
 /* ═══ cursor scrubber ══════════════════════════════════════════════════ */
 
-.scrubber { display: flex; flex-direction: column; gap: 10px; }
-.scrubber .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.scrubber { display: flex; flex-direction: column; gap: var(--space-4); }
+.scrubber .row { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
 .scrubber input[type='range'] { flex: 1 1 320px; min-width: 220px; accent-color: var(--accent); }
 .scrubber .readout {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   min-width: 11ch;
 }
-.scrubber .ends { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11.5px; color: var(--text-muted); }
+.scrubber .ends {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
 .scrubber .step-btn {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1;
-  padding: 6px 10px;
+  padding: var(--space-3) var(--space-4);
   min-width: 34px;
 }
 
+/* Buttons sit on a white panel, so they are white with a real border rather than a grey fill —
+ * the border is the affordance, the fill is the hover. */
 button {
   font: inherit;
-  font-size: 13px;
-  padding: 6px 12px;
-  border-radius: 6px;
+  font-size: var(--text-base);
+  font-weight: 500;
+  letter-spacing: var(--tracking-body);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
-  background: var(--surface-2);
+  background: var(--surface-1);
   color: var(--text-primary);
   cursor: pointer;
 }
-button:hover:not(:disabled) { border-color: var(--accent); }
+button:hover:not(:disabled) { background: var(--surface-2); border-color: var(--accent); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 550; }
+button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 
 select {
-  font: inherit; font-size: 13px; padding: 5px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
-  background: var(--surface-2); color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-base);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-1);
+  color: var(--text-primary);
 }
 
 /* ═══ stat tiles ═══════════════════════════════════════════════════════ */
 /* A stat tile, not a chart: three numbers whose job is to be read, not compared
  * across a continuum. A bar chart of three counts would add ink and no meaning. */
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-5); }
 
 .tile {
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-left: 3px solid var(--tile-color, var(--border-strong));
-  border-radius: var(--radius);
-  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-5) var(--space-6);
   cursor: pointer;
   text-align: left;
   display: block;
   width: 100%;
 }
-.tile:hover { border-color: var(--border-strong); border-left-color: var(--tile-color); }
+/* `:not(:disabled)` is here for specificity, not for state: a tile is a <button>, so the generic
+ * `button:hover:not(:disabled)` rule above would otherwise outrank a bare `.tile:hover` and repaint
+ * the status-coloured left border in the accent. */
+.tile:hover:not(:disabled) { background: var(--surface-1); border-color: var(--border-strong); border-left-color: var(--tile-color); }
 .tile[aria-pressed='true'] { background: var(--surface-2); border-color: var(--tile-color); }
 
 .tile .label {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 12px; font-weight: 650; letter-spacing: 0.04em;
+  display: flex; align-items: center; gap: var(--space-3);
+  font-size: var(--text-sm); font-weight: 640; letter-spacing: var(--tracking-label);
   text-transform: uppercase; color: var(--text-secondary);
 }
 /* The icon is the non-colour channel. Removing it would make the tile colour-only. */
-.tile .icon { color: var(--tile-color); font-size: 13px; line-height: 1; }
-.tile .count { font-size: 30px; font-weight: 640; letter-spacing: -0.02em; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
-.tile .money { font-family: var(--mono); font-size: 12.5px; color: var(--text-secondary); }
-.tile .money .reopened { color: var(--status-critical); font-weight: 600; }
+.tile .icon { color: var(--tile-color); font-size: var(--text-base); line-height: 1; }
+.tile-money {
+  font-size: var(--text-display);
+  font-weight: 620;
+  /* Money read at display size wants the display tracking; a count did not, which is why this
+   * was not needed until the two swapped places. */
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  margin: var(--space-3) 0 var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+/* The count is the tile's second figure, and it now looks like one.
+ *
+ * It was 12px muted mono on the same line-weight as the blurb below it, which is footnote
+ * styling for the answer to "how big is this pile?". The number takes the same weight and the
+ * same tabular figures as the money at two thirds the size -- clearly subordinate, clearly not
+ * a caption -- and the unit stays small and muted so the eye lands on the digits. */
+.tile-claims { display: flex; align-items: baseline; gap: var(--space-2); }
+.tile-claims .n {
+  font-size: var(--text-xl);
+  font-weight: 620;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.tile-claims .unit {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+/* Was a `title` attribute, which meant the clearest sentence on the screen only existed for
+ * someone hovering a mouse.
+ *
+ * No `max-width` any more. It was 32ch, a sane measure for a sentence long enough to need one,
+ * and every note is a single short sentence now -- so all the cap could still do was wrap one at
+ * a narrower width than the tile it sits in. The tile is the measure. */
+.tile-blurb {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-tight);
+  margin-top: var(--space-3);
+}
 
 /* ═══ tables ═══════════════════════════════════════════════════════════ */
 
-.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
-th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+table { border-collapse: collapse; width: 100%; font-size: var(--text-base); }
+th, td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
 th {
   position: sticky; top: 0;
   background: var(--surface-2);
-  font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: var(--text-xs); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
-tbody tr[aria-selected='true'] { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+tbody tr[aria-selected='true'] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 td.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 td.mono, th.num { font-family: var(--mono); }
 th.num { text-align: right; }
 
 .verdict-code {
-  font-family: var(--mono); font-size: 12px; font-weight: 600;
-  padding: 1px 5px; border-radius: 4px;
+  font-family: var(--mono); font-size: var(--text-sm); font-weight: 600;
+  padding: 1px var(--space-2); border-radius: var(--radius-xs);
   background: var(--surface-2); border: 1px solid var(--border);
 }
 
+/* A chip carries a phrase, so it sets in the UI face. It used to be monospace, which was right
+ * when every chip held a raw enum — REBATE_NO_CASH reads as an identifier and should look like
+ * one. Now they hold sentences, and monospace on a sentence is just harder to read. The raw code
+ * has not gone anywhere: it is the chip's `title`, and `.verdict-code` still renders codes shown
+ * as codes in the face they deserve. */
 .chip {
   display: inline-block;
-  font-size: 11px; font-family: var(--mono);
-  padding: 1px 6px; margin: 1px 3px 1px 0;
-  border-radius: 10px;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-3); margin: 1px var(--space-1) 1px 0;
+  border-radius: var(--radius-pill);
   background: var(--surface-2); border: 1px solid var(--border);
   color: var(--text-secondary);
 }
+/* The exception to the exception: a chip whose content genuinely is a code. */
+.chip.chip-code { font-family: var(--mono); }
 .chip.flag { border-color: var(--status-serious); color: var(--text-primary); }
 .chip.reopened { border-color: var(--status-critical); color: var(--text-primary); font-weight: 600; }
+/* An action a person chose, which is not a verdict the engine computed. Both used to render in
+ * the same `.verdict-code` pill, so a decision and a diagnosis were indistinguishable. */
+.chip.chip-action { border-color: var(--accent); color: var(--accent); font-weight: 550; }
+
+/* ═══ problem types ════════════════════════════════════════════════════ */
+
+.family-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--space-5);
+}
+.family {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  background: var(--surface-1);
+}
+.family-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); }
+.family-head h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 640;
+  color: var(--text-primary);
+  letter-spacing: var(--tracking-body);
+}
+.family-count {
+  font-size: var(--text-lg);
+  font-weight: 640;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.family-blurb {
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: var(--leading-tight);
+}
+.family-empty { margin: 0; font-size: var(--text-xs); color: var(--text-muted); }
+.family-reasons { list-style: none; margin: 0; padding: 0; }
+.family-reasons li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.family-reason-label { color: var(--text-secondary); }
+.family-reason-count { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+.namespace-list { margin: 0; }
+.namespace { padding: var(--space-4) 0; border-top: 1px solid var(--border); }
+.namespace:first-child { border-top: 0; padding-top: 0; }
+.namespace dt {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 640;
+  color: var(--text-primary);
+}
+.namespace dd {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: var(--leading-body);
+}
 
 /* ═══ episode detail ═══════════════════════════════════════════════════ */
 
-.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px 20px; margin-bottom: 16px; }
-.field .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.field .v { font-family: var(--mono); font-size: 13px; }
+.detail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--space-4) var(--space-7); margin-bottom: var(--space-6);
+}
+.field .k { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--text-muted); }
+.field .v { font-family: var(--mono); font-size: var(--text-base); font-variant-numeric: tabular-nums; }
 
 .money-table td.num { font-variant-numeric: tabular-nums; }
 .money-table .variance-bad { color: var(--status-critical); font-weight: 600; }
 .money-table .variance-ok { color: var(--text-muted); }
 
-details.evidence { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 6px; background: var(--surface-1); }
-details.evidence > summary { cursor: pointer; padding: 7px 10px; font-size: 12.5px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+details.evidence {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-3);
+  background: var(--surface-1);
+}
+details.evidence > summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  display: flex; gap: var(--space-4); flex-wrap: wrap; align-items: center;
+}
 details.evidence pre {
-  margin: 0; padding: 10px; overflow-x: auto;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.45;
+  margin: 0; padding: var(--space-4); overflow-x: auto;
+  font-family: var(--mono); font-size: var(--text-xs); line-height: 1.45;
   background: var(--surface-2); border-top: 1px solid var(--border);
   white-space: pre-wrap; word-break: break-all;
 }
 
 .timeline { list-style: none; margin: 0; padding: 0; }
-.timeline li { border-left: 2px solid var(--border-strong); padding: 0 0 12px 14px; margin-left: 5px; position: relative; }
+.timeline li {
+  border-left: 2px solid var(--border-strong);
+  padding: 0 0 var(--space-5) var(--space-5);
+  margin-left: var(--space-2);
+  position: relative;
+}
 .timeline li::before {
-  content: ''; position: absolute; left: -6px; top: 4px;
+  content: ''; position: absolute; left: -6px; top: var(--space-2);
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
 }
-.timeline .when { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.timeline .when { font-family: var(--mono); font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
-.empty { color: var(--text-muted); font-size: 13px; padding: 14px 2px; }
+.empty { color: var(--text-muted); font-size: var(--text-base); padding: var(--space-5) var(--space-1); }
 .error {
   border: 1px solid var(--status-critical);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 10px 14px; margin-bottom: 16px;
-  font-size: 13px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5); margin-bottom: var(--space-6);
+  font-size: var(--text-base);
 }
 .banner {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: var(--space-4);
+  font-size: var(--text-sm); color: var(--text-secondary);
 }
-.spinner { color: var(--text-muted); font-size: 12.5px; }
+.spinner { color: var(--text-muted); font-size: var(--text-sm); }
 
 /* ═══ episode dossier ══════════════════════════════════════════════════ */
 /* The narrative view. Deliberately the most prominent thing on the page once an
  * episode is selected, because the episode object is what the whole design is about. */
 
-.dossier-head {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 20px; flex-wrap: wrap;
-  padding-bottom: 14px; margin-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+/* Identity only. This was a two-column flex row with the verdict block as its right-hand column;
+ * the verdict has moved out to pin on its own (see `.dossier-sticky`), and at the widths this
+ * panel actually gets the row was wrapping to two stacked blocks anyway. No bottom border either
+ * -- the pinned strip below now provides the seam. */
+.dossier-head { padding-bottom: var(--space-4); }
+.dossier-id {
+  font-family: var(--mono); font-size: var(--text-lg); font-weight: 650;
+  letter-spacing: var(--tracking-tight); line-height: var(--leading-tight);
 }
-.dossier-id { font-family: var(--mono); font-size: 18px; font-weight: 650; letter-spacing: -0.01em; }
-.dossier-drug { font-size: 14px; color: var(--text-primary); margin-top: 2px; }
-.dossier-keys { font-family: var(--mono); font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.dossier-drug { font-size: var(--text-md); color: var(--text-primary); margin-top: var(--space-1); }
+.dossier-keys { font-family: var(--mono); font-size: var(--text-sm); color: var(--text-muted); margin-top: var(--space-2); }
 
-.dossier-verdict { text-align: right; border-right: 3px solid var(--d, var(--border-strong)); padding-right: 12px; }
-.dossier-disposition { font-size: 15px; font-weight: 650; color: var(--d, var(--text-primary)); letter-spacing: 0.02em; }
+.dossier-verdict {
+  text-align: right;
+  border-right: 3px solid var(--d, var(--border-strong));
+  padding-right: var(--space-5);
+}
+.dossier-disposition {
+  font-size: var(--text-md); font-weight: 650;
+  color: var(--d, var(--text-primary)); letter-spacing: 0.02em;
+}
 
-.dossier-reasons { margin: 0 0 14px; }
-.dossier-note { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 8px; }
+/* The raw identifiers, folded. */
+.dossier-ids { margin-top: var(--space-3); }
+.dossier-ids > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 2px;
+  width: fit-content;
+}
+.dossier-ids > summary::-webkit-details-marker { display: none; }
+.dossier-ids > summary:hover { color: var(--accent); }
+.dossier-ids dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+}
+.dossier-ids dt { color: var(--text-muted); }
+.dossier-ids dd { margin: 0; font-family: var(--mono); color: var(--text-secondary); }
+
+/* The engine's enum, kept beside the word it means. */
+.dossier-enum {
+  font-family: var(--mono);
+  font-size: var(--text-xxs);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  margin-left: var(--space-3);
+}
+/* One row per track: which track, what happened, and the code. */
+.dossier-track {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+.dossier-track-kind {
+  font-size: var(--text-xxs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+}
+.dossier-track-label { font-size: var(--text-sm); color: var(--text-primary); }
+
+/* A compliance finding, which is not the same kind of thing as a reason code and must not look
+ * like one. X-1 is the strongest single finding this system produces and it used to render as a
+ * third grey chip in a row of grey chips. */
+.dossier-flag {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface-2);
+  border: 1px solid var(--status-serious);
+  border-left: 3px solid var(--status-serious);
+  border-radius: var(--radius-sm);
+}
+.dossier-flag-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  font-size: var(--text-base);
+  font-weight: 640;
+  color: var(--text-primary);
+}
+.dossier-flag-detail {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: var(--leading-body);
+  max-width: 78ch;
+}
+
+.dossier-reasons { margin: 0 0 var(--space-5); }
+.dossier-note { color: var(--text-muted); font-size: var(--text-sm); font-weight: 400; margin-left: var(--space-4); }
 
 .dossier-money {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 8px 24px; padding: 12px 14px; margin-bottom: 18px;
-  background: var(--surface-2); border-radius: var(--radius);
+  display: grid;
+  /* 280px of minimum column does not fit a 360px phone once the app and panel padding are out. */
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4) var(--space-7); padding: var(--space-5) var(--space-5); margin-bottom: var(--space-6);
+  background: var(--surface-2); border-radius: var(--radius-md);
 }
-.dossier-money .k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.dossier-money .v { font-size: 13.5px; }
+.dossier-money .k {
+  display: block; font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
+}
+.dossier-money .v { font-size: var(--text-base); }
 .dossier-amount { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 
 .dossier-section {
-  font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.05em;
-  color: var(--text-secondary); margin: 20px 0 12px;
+  font-size: var(--text-sm); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-secondary); margin: var(--space-7) 0 var(--space-5);
 }
 
 .dossier-timeline { list-style: none; margin: 0; padding: 0; }
 .dossier-timeline li {
-  display: grid; grid-template-columns: 130px 1fr; gap: 14px;
-  padding: 0 0 18px 0; position: relative;
+  display: grid; grid-template-columns: 130px 1fr; gap: var(--space-5);
+  padding: 0 0 var(--space-6) 0; position: relative;
 }
+/* The rail runs through the middle of the dots, in the 12px gap between the 130px date gutter
+ * and the body column. It used to sit at 122px, inside the gutter, while the dot centred at
+ * 136px -- so even unclipped the two never met and the dot read as floating loose. It starts at
+ * the first dot's centre (4px top + 7px half-height) rather than below it. */
 .dossier-timeline li::before {
-  content: ''; position: absolute; left: 122px; top: 16px; bottom: 0;
+  content: ''; position: absolute; left: 135px; top: var(--space-5); bottom: 0;
   width: 2px; background: var(--border);
 }
 .dossier-timeline li:last-child::before { display: none; }
-.dossier-when { text-align: right; padding-right: 4px; position: relative; }
-.dossier-when::after {
-  content: ''; position: absolute; right: -13px; top: 5px;
+/* The gutter holds a date and nothing else, and must never push into the facts column —
+ * belt and braces after a long tag overflowed it in the narrower right-hand panel. */
+/* `min-width: 0` rather than `overflow: hidden`.
+ *
+ * The hidden was belt-and-braces against a long tag overflowing this gutter in the narrow
+ * right-hand panel, and it worked -- but this element is also the containing block for the
+ * status dot below, which sits deliberately outside its right edge. The guard clipped the dot
+ * to a one-pixel crescent. `min-width: 0` lets the grid track actually shrink (the real fix for
+ * the overflow it was added for) and the <time> inside already carries overflow-wrap. */
+.dossier-when { text-align: right; padding-right: var(--space-2); position: relative; min-width: 0; }
+/* The dot hangs off the row, not off the date gutter.
+ *
+ * It used to be `.dossier-when::after` at `right: -13px`, which made its position depend on the
+ * gutter's rendered width -- and the gutter can shrink, so the dot drifted away from the rail it
+ * is supposed to sit on. Anchoring both to the same element at the same offset makes them
+ * aligned by construction rather than by two numbers that have to be kept in agreement.
+ *
+ * 129px = the rail's centre (136) less half the dot's rendered width. `box-sizing` is set
+ * explicitly because the `*` reset does not match pseudo-elements, so this box would otherwise
+ * be content-box at 14px wide while reading as 10px in the source. */
+.dossier-timeline li::after {
+  content: ''; position: absolute; left: 129px; top: var(--space-2);
+  box-sizing: content-box;
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--surface-1); border: 2px solid var(--dot, var(--border-strong));
 }
-.dossier-when time { display: block; font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
-.dossier-kind { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 650; margin-top: 1px; }
-.dossier-body { padding-left: 6px; min-width: 0; }
-.dossier-headline { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
-.dossier-detail { font-size: 13px; color: var(--text-secondary); max-width: 82ch; }
+.dossier-when time {
+  display: block; font-family: var(--mono); font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums; font-weight: 600; overflow-wrap: anywhere;
+}
+/* The kind label used to be painted in the same status colour as its dot — and two of those sit at
+ * 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the meaning,
+ * so the label stays a legible ink. */
+.dossier-kind {
+  display: block; font-size: var(--text-xxs); text-transform: uppercase;
+  letter-spacing: 0.06em; font-weight: 640; margin-top: 1px;
+  color: var(--text-secondary) !important;
+}
+.dossier-body { padding-left: var(--space-3); min-width: 0; }
+.dossier-headline { font-size: var(--text-md); font-weight: 600; letter-spacing: var(--tracking-tight); margin-bottom: var(--space-1); }
+.dossier-detail { font-size: var(--text-base); color: var(--text-secondary); max-width: 82ch; }
 .dossier-provenance {
-  display: flex; gap: 14px; flex-wrap: wrap;
-  font-size: 11.5px; color: var(--text-muted); margin-top: 4px;
+  display: flex; gap: var(--space-5); flex-wrap: wrap;
+  font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-2);
 }
 .dossier-provenance .mono { font-family: var(--mono); }
 
@@ -336,31 +820,32 @@ details.evidence pre {
  * list (an array of objects) spans the full width instead of being squeezed into one column. */
 .dossier-facts {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 6px 18px; margin: 2px 0 6px; max-width: 82ch;
+  gap: var(--space-3) var(--space-6); margin: var(--space-1) 0 var(--space-3); max-width: 82ch;
 }
 .dossier-fact { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .dossier-fact.wide { grid-column: 1 / -1; max-width: none; }
 .dossier-fact dt {
-  margin: 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+  margin: 0; font-size: var(--text-xxs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
   color: var(--text-muted);
 }
-.dossier-fact dd { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.dossier-fact dd { margin: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
 
-.fact-nested { margin: 2px 0 0; max-width: 82ch; }
-.fact-nested table th, .fact-nested table td { padding: 4px 8px; font-size: 11.5px; white-space: normal; }
+.fact-nested { margin: var(--space-1) 0 0; max-width: 82ch; }
+.fact-nested table th, .fact-nested table td { padding: var(--space-2) var(--space-4); font-size: var(--text-xs); white-space: normal; }
 
 .fact-object {
-  display: flex; flex-direction: column; gap: 2px;
-  border: 1px dashed var(--border-strong); border-radius: 6px;
-  padding: 5px 8px; margin-top: 1px; max-width: 82ch;
+  display: flex; flex-direction: column; gap: var(--space-1);
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4); margin-top: 1px; max-width: 82ch;
 }
-.fact-object-row { display: flex; gap: 8px; font-size: 12px; }
+.fact-object-row { display: flex; gap: var(--space-4); font-size: var(--text-sm); }
 .fact-object-key { color: var(--text-muted); min-width: 14ch; flex: 0 0 auto; }
 
 @media (max-width: 640px) {
-  .dossier-timeline li { grid-template-columns: 1fr; gap: 2px; }
+  .dossier-timeline li { grid-template-columns: 1fr; gap: var(--space-1); }
   .dossier-timeline li::before { display: none; }
-  .dossier-when { text-align: left; display: flex; gap: 10px; align-items: baseline; }
+  .dossier-when { text-align: left; display: flex; gap: var(--space-4); align-items: baseline; }
   .dossier-when::after { display: none; }
   .dossier-body { padding-left: 0; }
   .dossier-facts { grid-template-columns: 1fr; }
@@ -375,35 +860,63 @@ details.evidence pre {
  * section reachable and makes the selected row and its dossier visible at the same time. */
 .queue-scroll { max-height: 46vh; overflow-y: auto; }
 
+/* The queue's sort control. Was three inline pixel values in QueueTable.jsx — 10 / 10 / 12.5 —
+ * and the 12.5 was the single off-scale text size a browser measurement found on the whole
+ * screen. Moved here so the scale is the only place sizes are decided. */
+.queue-controls {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  margin-bottom: var(--space-5);
+}
+.queue-controls-label { color: var(--text-secondary); font-size: var(--text-sm); }
+
+/* The "Why" column stacks reason-code chips, and at a narrow width they were being clipped
+ * mid-word at the row's right edge rather than wrapping — a truncated reason code reads as a
+ * different code, which is worse than one that wraps. Chips are inline-block, so the cell has
+ * to be told that wrapping is allowed and given a floor to wrap within. */
+
+/* The merged verdict cell. One row per track that has something to say, each reading
+ * "<track> — <what happened> <code>". Replaces two columns of bare four-character tokens. */
+/* Fixed layout so the colgroup's percentages are honoured rather than treated as hints. */
+.queue-table { table-layout: fixed; width: 100%; }
+/* Top, not middle. A row whose verdict cell runs to two lines is taller than its neighbours,
+ * and centring every other cell in that extra height is what makes a table of mixed-height rows
+ * read as misaligned. */
+.queue-table td { vertical-align: top; }
+/* These three carry text that is allowed to wrap; everything else in the table stays on one
+ * line under the global `th, td { white-space: nowrap }`. */
+.queue-table td.queue-verdicts,
+.queue-table td.mono,
+.queue-table th { white-space: normal; }
+
+/* Plain text, left-aligned, on the same baseline grid as every other cell in the row. This was
+ * a three-column grid — track gutter, sentence, code pill — nested inside a table cell, so it
+ * set up its own alignment that agreed with nothing around it and made rows carrying one track
+ * look broken beside rows carrying two. */
+.queue-verdicts { line-height: var(--leading-tight); }
+.queue-verdict-line { font-size: var(--text-sm); color: var(--text-primary); }
+.queue-verdict-rebate { color: var(--text-secondary); margin-top: var(--space-2); }
+
+/* A row state, set against the claim id rather than listed among the things that are wrong. */
+.queue-reopened {
+  display: inline-block;
+  margin-left: var(--space-3);
+  font-family: var(--sans);
+  font-size: var(--text-xxs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--status-critical);
+}
+
 /* Focus has to be visible. Nothing here removed the default outline, but nothing reinforced it
  * against the custom tile and row backgrounds either. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
 }
-
-/* The timeline's kind label was painted in the same status colour as its dot — and two of those
- * sit at 1.79:1 and 2.57:1 on a light surface. The dot carries the colour; the label carries the
- * meaning, so the label goes back to a legible ink. */
-.dossier-kind { color: var(--text-secondary) !important; }
-
-/* The timeline gutter holds a date and nothing else, and must never push into the facts
- * column. Belt and braces after a long tag overflowed it in the narrower right-hand panel. */
-.dossier-when { overflow: hidden; }
-.dossier-when time { overflow-wrap: anywhere; }
-
-/* #74736d on --surface-2 measures 4.02:1, below the 4.5:1 body-text floor. Chips and small labels
- * sit on surface-2 constantly, so muted ink is darkened for the light theme only; the dark theme's
- * muted step already clears its surface. */
-:root { --text-muted: #6a6964; }
-
-/* A rebate is not a status, so it needs its own token rather than a hardcoded hex in the JSX —
- * the violet that reads well on white is 2.04:1 on the dark surface. */
-:root { --track-rebate: #4a3aa7; }
-
-/* 280px of minimum column does not fit a 360px phone once the app and panel padding are taken out. */
-.dossier-money { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 
 @media print {
   .table-wrap, .queue-scroll { overflow: visible; max-height: none; }
@@ -417,21 +930,21 @@ details.evidence pre {
 .agent-unavailable {
   border: 1px solid var(--border-strong);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--surface-2);
-  padding: 10px 14px;
-  font-size: 13px;
+  padding: var(--space-4) var(--space-5);
+  font-size: var(--text-base);
   color: var(--text-secondary);
-  margin-bottom: 12px;
+  margin-bottom: var(--space-5);
 }
 
 .agent-unsourced {
   border: 1px solid var(--status-critical);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 8px 12px;
-  margin-top: 10px;
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-top: var(--space-4);
+  font-size: var(--text-sm);
 }
 
 /* The streamed decide loop. Deliberately a plain scrolling log, not a spinner — every line is
@@ -441,37 +954,37 @@ details.evidence pre {
   max-height: 42vh;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--surface-2);
-  padding: 8px 10px;
-  margin-bottom: 12px;
-  font-size: 12px;
-  line-height: 1.55;
+  padding: var(--space-4);
+  margin-bottom: var(--space-5);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
 }
 .agent-log-row { overflow-wrap: anywhere; }
 .agent-log-row.muted { color: var(--text-muted); }
 .agent-log-row.bad { color: var(--status-critical); font-weight: 600; }
 .agent-log-row.mono { font-family: var(--mono); }
 .agent-log-divider {
-  margin: 8px 0 4px;
-  font-size: 11.5px;
-  font-weight: 700;
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 680;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-label);
   color: var(--text-secondary);
 }
-.agent-log-rule { border: none; border-top: 1px dashed var(--border); margin: 8px 0; }
+.agent-log-rule { border: none; border-top: 1px dashed var(--border); margin: var(--space-4) 0; }
 .agent-log-card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 4px 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  margin: var(--space-2) 0;
 }
-.agent-log-card-head { font-weight: 650; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.agent-log-card-body { margin-top: 4px; color: var(--text-secondary); overflow-wrap: anywhere; }
-.agent-log-card-foot { margin-top: 4px; font-size: 11px; color: var(--text-muted); }
-.agent-log-criteria { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.agent-log-card-head { font-weight: 640; display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.agent-log-card-body { margin-top: var(--space-2); color: var(--text-secondary); overflow-wrap: anywhere; }
+.agent-log-card-foot { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-muted); }
+.agent-log-criteria { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
 .agent-log-criteria .chip { border-width: 2px; cursor: help; }
 
 /* The terminal outcome. `--oc` carries the per-status colour set inline by OutcomeBanner —
@@ -479,80 +992,91 @@ details.evidence pre {
 .outcome-banner {
   border: 1px solid var(--border);
   border-left: 4px solid var(--oc, var(--border-strong));
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 8px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
 }
-.outcome-banner-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.outcome-banner-icon { color: var(--oc); font-size: 16px; font-weight: 700; }
-.outcome-banner-label { font-size: 14.5px; font-weight: 650; color: var(--oc); }
-.outcome-trajectory { margin-top: 6px; font-size: 12px; color: var(--text-secondary); }
+.outcome-banner-head { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.outcome-banner-icon { color: var(--oc); font-size: var(--text-lg); font-weight: 700; }
+.outcome-banner-label { font-size: var(--text-md); font-weight: 650; letter-spacing: var(--tracking-tight); color: var(--oc); }
+.outcome-trajectory { margin-top: var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); }
 
 /* The editable work-item draft — a safety property, not a convenience: nothing here is
  * pre-committed, and every field the human gate writes is a plain, directly-editable control. */
-.wi-form { margin-top: 4px; }
-.wi-field { display: block; margin-bottom: 12px; }
+.wi-form { margin-top: var(--space-2); }
+.wi-field { display: block; margin-bottom: var(--space-5); }
 .wi-field > span {
-  display: block; margin-bottom: 4px; font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--text-muted);
+  display: block; margin-bottom: var(--space-2); font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
 }
 .wi-field select, .wi-field textarea {
-  width: 100%; font: inherit; font-size: 13px; padding: 6px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
+  width: 100%; font: inherit; font-size: var(--text-base); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--text-primary); resize: vertical;
 }
-.wi-artifact-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.wi-artifact-row { display: flex; gap: var(--space-3); margin-bottom: var(--space-3); }
 .wi-artifact-row input {
-  flex: 1; font: inherit; font-size: 13px; padding: 6px 8px;
-  border-radius: 6px; border: 1px solid var(--border-strong);
+  flex: 1; font: inherit; font-size: var(--text-base); padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--text-primary);
 }
+.wi-field textarea:focus, .wi-artifact-row input:focus, .wi-field select:focus { border-color: var(--accent); }
 
 /* ═══ dossier: sticky header, view toggle, source panel ══════════════════ */
 
-/* The episode id, identity line, verdict block and the view toggle are the operator's anchor —
- * the thing that must never scroll out of view while they read down a long timeline. `.layout-right`
- * is the scrolling ancestor (see above), so `position: sticky; top: 0` here pins this block to its
- * top edge. A solid background is required or timeline content would show through underneath it as
- * it scrolls past; the bottom border is what makes the pin visually legible as a seam rather than an
- * accident. Content is kept to what the brief calls the verdict block plus identity, which is why it
- * stays well under a third of the panel's height without any max-height/overflow trick that would
- * risk clipping the verdict codes themselves. */
+/* The verdict block, and nothing else, stays on screen while the timeline scrolls under it.
+ *
+ * This used to pin the whole header — identity, verdict, reason chips, every cross-track flag and
+ * the view toggle — on the reasoning that the operator's anchor must never leave the screen, with
+ * a note claiming the band stayed "well under a third of the panel's height". It did on the
+ * episode it was written against. An episode carrying two cross-track flags is not that episode:
+ * each flag is a bordered card with a two-line sentence in it, and the band grew to roughly half
+ * the viewport, so a tall timeline event was permanently half-hidden behind its own header. That
+ * is the whole cost of pinning, paid for content nobody re-reads on the way down.
+ *
+ * What is left is four short lines and it is the part worth keeping in view: the bucket, the code
+ * on each track, and whether this claim came back from somewhere. Everything else scrolls.
+ *
+ * A solid background is required or timeline content shows through as it passes underneath, and
+ * the bottom border is what makes the pin read as a seam rather than as an accident. `.layout-right`
+ * is the scrolling ancestor on the dashboard; on the analysis page there is none and this pins
+ * against the viewport instead — both are correct, and neither needs a max-height now that the
+ * strip cannot grow with the episode. */
 .dossier-sticky {
   position: sticky;
   top: 0;
   z-index: 2;
   background: var(--surface-1);
   border-bottom: 1px solid var(--border);
-  margin: 0 0 14px;
-  padding-bottom: 12px;
+  margin: 0 0 var(--space-5);
+  padding: var(--space-3) 0 var(--space-4);
 }
-.dossier-sticky .dossier-head { border-bottom: none; margin-bottom: 0; padding-bottom: 10px; }
-.dossier-sticky .dossier-reasons { margin: 0 0 2px; }
 
 .view-toggle {
   display: inline-flex;
   border: 1px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 .view-toggle button {
   border: none;
   border-radius: 0;
-  background: var(--surface-2);
-  padding: 5px 14px;
-  font-size: 12px;
-  font-weight: 600;
+  background: var(--surface-1);
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+  font-weight: 550;
 }
 .view-toggle button + button { border-left: 1px solid var(--border-strong); }
+.view-toggle button:hover:not(:disabled) { background: var(--surface-2); }
 .view-toggle button[aria-pressed='true'] { background: var(--accent); color: #fff; }
-.view-toggle button:hover:not(:disabled) { border-color: var(--border-strong); }
+.view-toggle button[aria-pressed='true']:hover:not(:disabled) { background: var(--accent-hover); }
 
 /* The detailed view's source line becomes a button once it can be clicked open; it has to keep
  * reading as the same quiet provenance text it always was, not suddenly look like a form control. */
 .source-link {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
+  font-weight: 400;
   color: var(--text-muted);
   background: none;
   border: none;
@@ -564,37 +1088,43 @@ details.evidence pre {
   text-underline-offset: 2px;
   text-decoration-color: var(--border-strong);
 }
-.source-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+/* Same specificity note as `.tile:hover` — this is a <button> that must not pick up the generic
+ * button hover fill. */
+.source-link:hover:not(:disabled) { background: none; color: var(--accent); text-decoration-color: var(--accent); }
 
 .source-panel {
-  margin: 6px 0 0;
-  padding: 8px 10px;
+  margin: var(--space-3) 0 0;
+  padding: var(--space-4);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
-  font-size: 12px;
+  font-size: var(--text-sm);
   max-width: 82ch;
 }
-.source-panel-meta { color: var(--text-secondary); margin-bottom: 6px; }
+.source-panel-meta { color: var(--text-secondary); margin-bottom: var(--space-3); }
 .source-panel pre {
-  margin: 0 0 8px;
-  padding: 8px;
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow-x: auto;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   line-height: 1.45;
   white-space: pre;
 }
-.source-panel-hashes { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-muted); font-size: 11px; font-family: var(--mono); }
+.source-panel-hashes {
+  display: flex; gap: var(--space-5); flex-wrap: wrap;
+  color: var(--text-muted); font-size: var(--text-xs); font-family: var(--mono);
+}
 
 /* A citation marker in agent prose. Deliberately quiet: the evidence must be
-   reachable without the sentence having to carry a parser's worth of syntax. */
+   reachable without the sentence having to carry a parser's worth of syntax.
+   9px is below the type scale on purpose — it is a marker, not text. */
 .agent-cite {
   display: inline-block;
-  margin-left: 2px;
+  margin-left: var(--space-1);
   padding: 0 3px;
   font-size: 9px;
   font-weight: 600;
@@ -613,10 +1143,10 @@ details.evidence pre {
  * new here (a rationale column too long to stay on one line, a disclosure row nested under its
  * parent, and a note that the replay cursor is hiding rows) gets its own rules. */
 
-/* Rationale runs 20-600 characters of free text — `th, td` (line 200) forces `white-space: nowrap`
- * for the dense tabular columns, which would push this one column far off the right edge of the
- * table instead of wrapping it. Bounded so the column can neither collapse to an unreadable sliver
- * on a short rationale nor swallow the rest of the table on a long one. */
+/* Rationale runs 20-600 characters of free text — the `th, td` rule above forces
+ * `white-space: nowrap` for the dense tabular columns, which would push this one column far off the
+ * right edge of the table instead of wrapping it. Bounded so the column can neither collapse to an
+ * unreadable sliver on a short rationale nor swallow the rest of the table on a long one. */
 td.todo-rationale {
   white-space: normal;
   min-width: 26ch;
@@ -635,14 +1165,176 @@ td.todo-artifacts {
 
 /* The replay cursor can hide to-dos that exist outside the current window, and a reader who
  * doesn't notice a muted caption will trust an incomplete list as if it were the whole one. Same
- * shape as `.error` (line 260) so it reads as a real notice rather than helper text, but in
- * `--status-warning` (line 30) rather than `--status-critical` — nothing here is broken, the list
- * is just partial. */
+ * shape as `.error` so it reads as a real notice rather than helper text, but in `--status-warning`
+ * rather than `--status-critical` — nothing here is broken, the list is just partial. */
 .todo-hidden {
   border: 1px solid var(--status-warning);
   border-left-width: 3px;
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  font-size: 12.5px;
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  font-size: var(--text-sm);
 }
+
+/* ═══ connectivity view (requirement F3) ═══════════════════════════════ */
+/* Reuses `.layout-grid`/`.panel`/`.hint`/`.table-wrap`/`table`/`th`/`td`/`td.mono`/`td.num`/
+ * `.chip`/`.detail-grid`/`.field`/`.dossier-head`/`.dossier-id`/`.empty`/`.error`/`.spinner`
+ * wholesale, and every value below comes from the token block at the top of this file — this
+ * screen is an addition to the same design system, not a second one. Only what is genuinely new
+ * (the honesty banner, the four-rung ladder, the provenance-tier bar) gets its own rules. */
+
+/* The banner carries the one sentence the whole report exists to be able to say. Shaped like
+ * `.error` and `.todo-hidden` so it reads as a real notice rather than helper text, but in the
+ * accent rather than a status colour: nothing here is broken. Every connector talking to a local
+ * mock is the expected state of this build, and painting it red would say otherwise. The live
+ * case — a source that genuinely reaches a vendor — is the one that goes critical, because that
+ * is the claim a reader must not skim past. */
+.conn-banner {
+  border: 1px solid var(--border-strong);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  padding: var(--space-5) var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.conn-banner-live { border-left-color: var(--status-critical); }
+.conn-banner-head { display: flex; align-items: baseline; gap: var(--space-4); }
+.conn-banner-icon { color: var(--accent); font-size: var(--text-md); line-height: 1; }
+.conn-banner-live .conn-banner-icon { color: var(--status-critical); }
+.conn-banner-statement {
+  font-size: var(--text-lg);
+  font-weight: 640;
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+.conn-banner-body {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 96ch;
+}
+.conn-note { margin-top: var(--space-3); color: var(--text-muted); }
+
+/* The ladder. Four rungs, one row each, the count in a display number so "14 connector-ready,
+ * 0 with a working connection" is a shape on the page before it is a sentence. An unreached rung
+ * stays legible rather than being greyed out of the way — zero is the finding. */
+.conn-ladder { list-style: none; margin: 0; padding: 0; }
+.conn-rung {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: var(--space-5);
+  align-items: baseline;
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border);
+}
+.conn-rung:first-child { border-top: none; }
+.conn-rung-count {
+  font-size: var(--text-display);
+  font-weight: 620;
+  letter-spacing: var(--tracking-tighter);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--text-muted);
+}
+.conn-rung-reached .conn-rung-count { color: var(--text-primary); }
+.conn-rung-label {
+  font-size: var(--text-md);
+  font-weight: 640;
+  letter-spacing: var(--tracking-tight);
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.conn-rung-none { font-size: var(--text-xs); font-weight: 400; color: var(--text-muted); }
+.conn-rung-meaning {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  max-width: 92ch;
+  margin-top: var(--space-1);
+}
+.chip.conn-ceiling { border-color: var(--accent); color: var(--accent); }
+
+/* A stage in a table cell. `CONNECTOR_READY` gets the accent border because it is what this
+ * build claims; the two rungs above it get no colour at all, because nothing reaches them and a
+ * coloured chip for an unreached rung is exactly the flattery this screen exists to avoid. */
+.chip.conn-stage { font-family: var(--sans); letter-spacing: var(--tracking-body); }
+.chip.conn-stage-CONNECTOR_READY { border-color: var(--accent); color: var(--text-primary); }
+.chip.conn-stage-DECLARED { border-color: var(--status-warning); color: var(--text-primary); }
+.chip.conn-off { border-color: var(--status-warning); margin-left: var(--space-3); }
+
+/* The provenance split. The bar is a shape and the counts beside it are the fact — SPEC,
+ * STANDARD and INVENTED are always spelled out, so the three colours never carry the meaning on
+ * their own. Two of them sit below 3:1 on this surface by design, exactly as the disposition
+ * tiles do. */
+.fidelity { display: flex; flex-direction: column; gap: var(--space-1); min-width: 16ch; }
+.fidelity-bar {
+  display: flex;
+  height: 4px;
+  width: 100%;
+  min-width: 90px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.fidelity-seg { display: block; height: 100%; }
+.fidelity-counts {
+  font-size: var(--text-xs);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* The per-source document in the right-hand column. */
+.conn-section {
+  font-size: var(--text-sm); font-weight: 640; text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-secondary);
+  margin: var(--space-7) 0 var(--space-4);
+}
+.conn-facts { margin: 0; display: flex; flex-direction: column; gap: var(--space-5); }
+.conn-fact dt {
+  margin: 0; font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-label); color: var(--text-muted);
+}
+.conn-fact dd { margin: 0; font-size: var(--text-base); overflow-wrap: anywhere; }
+.conn-sub { font-size: var(--text-xs); color: var(--text-muted); margin-top: var(--space-1); overflow-wrap: anywhere; }
+.conn-muted { font-size: var(--text-xs); color: var(--text-muted); }
+.conn-code {
+  font-family: var(--mono); font-size: var(--text-xs);
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-xs); padding: 0 var(--space-2);
+  margin-right: var(--space-2); overflow-wrap: anywhere;
+}
+.conn-list { margin: 0; padding-left: var(--space-6); font-size: var(--text-base); color: var(--text-secondary); }
+.conn-list li { margin-bottom: var(--space-2); max-width: 82ch; }
+
+/* `th, td` forces `white-space: nowrap` for the dense tabular columns; a blocked item's summary
+ * runs several hundred characters and has to wrap instead of pushing the table off the edge. */
+td.conn-wrap { white-space: normal; min-width: 28ch; max-width: 56ch; }
+
+/* The work-item artifact rows: an ordered list a reviewer can actually reorder, with the write
+ * tool's 120-character ceiling shown per row rather than enforced by a 422 after the fact. */
+.wi-artifact-row { display: flex; align-items: center; gap: var(--space-3); }
+.wi-artifact-row input { flex: 1 1 auto; min-width: 0; }
+.wi-artifact-n {
+  font-family: var(--mono); font-size: var(--text-xs); color: var(--text-muted);
+  min-width: 1.4em; text-align: right;
+}
+.wi-artifact-count {
+  font-family: var(--mono); font-size: var(--text-xxs); color: var(--text-muted);
+  min-width: 5.5ch; text-align: right; font-variant-numeric: tabular-nums;
+}
+.wi-artifact-count.at-limit { color: var(--status-critical); font-weight: 600; }
+.wi-artifact-row button:disabled { opacity: 0.35; cursor: default; }
+
+/* The outcome's one-sentence "why", and the run id that replaces the printed audit trail. */
+.outcome-why {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-body);
+  max-width: 78ch;
+}
+.outcome-runid { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--text-muted); }

@@ -225,7 +225,30 @@ def _require_str(payload: dict[str, Any], field_name: str, *, schema_name: str) 
     return value
 
 
+#: The ways a model writes "no value" into a slot that wanted the JSON literal `null`.
+#: Compared after `strip().casefold()`, so `"Null"` and `" null "` are covered too.
+_NULL_IN_A_STRING: frozenset[str] = frozenset({"", "null", "none", "nil", "n/a", "na"})
+
+
 def _require_nullable_str(payload: dict[str, Any], field_name: str, *, schema_name: str) -> str | None:
+    """A nullable string field, with the four characters `null` read as `null`.
+
+    Measured on a live Decide run (2026-09-22, run 0dd212af): `deepseek-v4-pro`
+    returned a complete, correct `ProposedAction` whose `blocked_reason` was the
+    *string* `"null"` alongside `blocked: false`. The cross-field rule below
+    ("blocked_reason must be null when blocked is false") then rejected the whole
+    proposal, `_ProposerSession.__call__` raised out of the harness, and the run died
+    with no outcome at all -- five minutes of thinking thrown away over a quoted
+    keyword. A thinking model emitting JSON as text inside a tool argument writes the
+    word rather than the literal often enough that this cannot stay a fatal slip.
+
+    Coercing is safe because none of these strings is ever a legal *value* here: the
+    two nullable string fields in this module are `grounding_clause_id` (a
+    `KG:<entity>` clause id) and `blocked_reason` (a sentence naming a missing
+    record). "null", "none", "n/a" and the empty string all mean the absence of one,
+    whichever way the model chose to spell it, so reading them as absence preserves
+    the model's intent rather than overriding it.
+    """
     value = payload[field_name]
     if value is not None and not isinstance(value, str):
         raise SchemaError(
@@ -236,6 +259,8 @@ def _require_nullable_str(payload: dict[str, Any], field_name: str, *, schema_na
                 f"or null if it does not apply."
             ),
         )
+    if isinstance(value, str) and value.strip().casefold() in _NULL_IN_A_STRING:
+        return None
     return value
 
 

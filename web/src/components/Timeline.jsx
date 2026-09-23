@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { api, formatMoney } from '../api.js'
+import * as labels from '../labels.js'
 
 // The episode's event timeline, read as a story.
 //
@@ -32,12 +33,18 @@ const TAG_DOT = {
   VERDICT: 'var(--status-critical)',
 }
 
-// REMITTANCE_CLAIM_LINE -> "Remittance claim line". Prominent and skimmable; the raw tag is still
-// shown verbatim alongside it (see the timeline render below) so nothing is lost for anyone who
-// wants the exact identifier.
+// REMITTANCE_CLAIM_LINE -> "Payer's payment decision". A lookup, not a transformation.
+//
+// This replaces lowercasing the tag and capitalising the first letter, which worked until it met
+// an acronym: TPA_QUALIFICATION rendered as "Tpa qualification" on every episode carrying a
+// rebate, and TPA_MANUFACTURER_DECISION as "Tpa manufacturer decision". Casing rules cannot know
+// that TPA is an initialism and REMITTANCE is a word, so the map states it. It also buys better
+// names than the enum has — an event called MEDICAL_ACKNOWLEDGMENT is, to a reader, "the
+// clearinghouse accepted the claim".
+//
+// The raw tag is still on the element's `title`, so the exact identifier is never lost.
 function humanizeTag(tag) {
-  const lower = String(tag).toLowerCase().replace(/_/g, ' ')
-  return lower.charAt(0).toUpperCase() + lower.slice(1)
+  return labels.recordKind(tag).label
 }
 
 // clp02_claim_status_code -> "CLP02 claim status code". EDI segment identifiers (a short letter

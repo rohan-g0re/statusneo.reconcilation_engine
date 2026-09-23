@@ -104,6 +104,14 @@ LATE_ARRIVAL_DAYS = (7, 45)
 #: Identifier drift, assigned to exactly one feed per episode so the defect is reproducible.
 RX_DRIFT_BPS = 600
 RX_TRUNCATION_BPS = 200
+
+#: How often the two TPAs disagree about how a dispense's Rx is spelled, in basis points.
+#:
+#: Lower than either drift rate on purpose.  A vendor disagreement is the expensive exception
+#: rather than routine noise, and a rate high enough to be convenient would make "the two
+#: vendors agree" the unusual case — which would misrepresent the programme to anyone reading
+#: the queue and would drown the D-6 misses it has to be told apart from.
+VENDOR_DIVERGENCE_BPS = 300
 #: D-7: an unreferenced forward balance on otherwise-clean remittances.
 FB_RESIDUAL_BPS = 500
 #: How many claims a remittance cycle bundles before spilling into a second file.
@@ -154,6 +162,10 @@ class GenerationResult:
     records_by_feed: dict[str, list[Record]]
     ground_truth: dict[str, Any]
     leaf_digest: str
+    #: Cross-system identifiers for the vendor-format layer, with the keys to join them on.
+    #: Empty by default so every existing caller that builds a ``GenerationResult`` keeps
+    #: working unchanged -- the six feeds are the same object they always were.
+    vendor_refs: tuple[dict[str, Any], ...] = ()
 
     @property
     def episode_count(self) -> int:
@@ -346,11 +358,21 @@ def generate(settings: Settings, *, decision_tree_dir: Path | None = None) -> Ge
         leaf_digest=catalogue.digest,
     )
 
+    # --- vendor-layer identifiers (requirement M1) -------------------------
+    #
+    # Minted *last*, and the ordering is load-bearing rather than tidy.  ``SliceRefs`` is a
+    # dense counter, and ``_mint_trace_number`` derives every ``trn02`` from the slice ref it
+    # is given -- so taking refs earlier would renumber every remittance's trace number and
+    # change all six feeds.  Minting here leaves every existing ref exactly where it was.
+    vendor_refs = _vendor_identifier_rows(plans, settings, refs)
+    assert_vendor_rows_are_blind(vendor_refs)
+
     return GenerationResult(
         plans=tuple(plans),
         records_by_feed=dict(records_by_feed),
         ground_truth=ground_truth,
         leaf_digest=catalogue.digest,
+        vendor_refs=tuple(vendor_refs),
     )
 
 
@@ -1306,6 +1328,25 @@ def _defect_directives(
             directives["rx_rendering_tpa"] = "ZERO_PADDED"
         else:
             directives["rx_rendering_pharmacy_835"] = "ZERO_PADDED"
+
+    # ── vendor disagreement ────────────────────────────────────────────────────────
+    #
+    # Verity and Craneware are formatted from one shared source object, so without this
+    # they report the same qualification for the same dispense, always. That makes the
+    # vendor layer incapable of the one failure a reconciliation engine exists to catch,
+    # and "both vendors agree" is then a property of the generator rather than a finding.
+    #
+    # **Only when the TPA rendering is already canonical.** If the feed itself drifted, both
+    # vendors read that drifted value off the sidecar and still agree with each other —
+    # stacking a second divergence on top would make a vendor disagreement indistinguishable
+    # from D-6, which is the one thing this has to be told apart from.
+    #
+    # A separate modulus from the drift above, and a coprime one, so the two defects do not
+    # land on the same episodes by arithmetic coincidence and leave the interaction untested.
+    if not directives.get("rx_rendering_tpa") and has_rebate:
+        diverge = sequence % 13 == 5 if curated else rng.randint(0, 9_999) < VENDOR_DIVERGENCE_BPS
+        if diverge:
+            directives["rx_rendering_craneware"] = "ZERO_PADDED"
     return directives
 
 
@@ -1556,6 +1597,17 @@ def write_outputs(settings: Settings, result: GenerationResult) -> dict[str, str
     truth_text = json.dumps(result.ground_truth, indent=1, sort_keys=False) + "\n"
     truth_path.write_text(truth_text, encoding="utf-8", newline="")
 
+    # The vendor identifier sidecar (requirement M1).  Written beside the feeds, never into
+    # them: ``load_feeds`` iterates ``FEED_FILENAMES`` and never globs, so this file is
+    # invisible to ingestion, to ``raw_record``, and to every agent tool -- which is what
+    # keeps the six feed hashes, and therefore every recorded agent prompt, unchanged.
+    vendor_dir = settings.vendor_dir()
+    vendor_dir.mkdir(parents=True, exist_ok=True)
+    vendor_text = "".join(
+        json.dumps(row, separators=(",", ":"), sort_keys=True) + "\n" for row in result.vendor_refs
+    )
+    settings.vendor_identifiers_path().write_text(vendor_text, encoding="utf-8", newline="")
+
     manifest = {
         "schema": "recon.manifest/1",
         "profile": str(settings.profile),
@@ -1774,3 +1826,136 @@ def _mint_allocation_code(slice_ref: str, effective: date) -> str:
     """
     suffix = derive_seed(_MINT_NAMESPACE, "alloc", slice_ref) % 100_000
     return f"RBT-{effective.strftime('%Y%m%d')}-{suffix:05d}"
+
+
+# ═══ vendor-layer identifiers (requirement M1) ══════════════════════════════
+#
+# Minted here for the same reason ``trn02`` and ``allocation_code`` are: each is a value two
+# independent systems must agree on, so exactly one component may decide it.  A mock that
+# minted its own Beacon ID would be inventing a fact the rest of the system then has to
+# accept on faith -- and the connector that later joins on it would be testing the mock's
+# imagination rather than the crosswalk.
+#
+# All three formats are INVENTED and declared as such.  ``BEACON-013`` establishes that
+# Beacon IDs exist and are persisted against the claim; the pages that would have given
+# their *shape* are ``BEACON-001`` through ``BEACON-007``, every one of them a 403.
+# ``VERITY-006`` establishes that a Split Transaction specification exists without
+# publishing it.  Inventing a format is the honest response to that; inventing one and
+# calling it SPEC would not be.
+
+
+def _mint_beacon_id(slice_ref: str) -> str:
+    """Beacon's own identifier for a submitted claim.
+
+    Opaque on purpose.  Beacon assigns this, so it must carry no structure we could have
+    derived ourselves -- if a Beacon ID encoded the NDC or the fill date, a connector could
+    "resolve" an episode without the crosswalk ever running, and the test that proves the
+    join works would prove nothing.
+    """
+    return f"BCN-{derive_seed(_MINT_NAMESPACE, 'beacon', slice_ref) % 1_000_000_000_000:012d}"
+
+
+def _mint_accumulation_id(slice_ref: str) -> str:
+    """Verity's reference for the accumulation a qualified dispense contributes to."""
+    return f"ACC-{derive_seed(_MINT_NAMESPACE, 'verity-acc', slice_ref) % 100_000_000:08d}"
+
+
+def _mint_invoice_number(slice_ref: str) -> str:
+    """Verity's reference for the replenishment invoice a dispense lands on."""
+    return f"VINV-{derive_seed(_MINT_NAMESPACE, 'verity-inv', slice_ref) % 10_000_000:07d}"
+
+
+#: Fields a vendor identifier row may never carry.  The sidecar is read by the mocks, and a
+#: mock that could see an episode id, a verdict or an expected amount would be able to tell
+#: a consistent story without the generator's blind slice ever being consulted -- which is
+#: the guarantee ``contracts.assert_slice_is_blind`` exists to hold.  Same prohibition, one
+#: layer out, because the sidecar crosses the same boundary by a different road.
+FORBIDDEN_VENDOR_REF_FIELDS: frozenset[str] = frozenset(
+    {
+        "episode_id",
+        "case_id",
+        "verdict",
+        "reimbursement_verdict_code",
+        "rebate_verdict_code",
+        "cross_track_flags",
+        "coherence",
+        "disposition",
+        "expected_reimbursement_cents",
+        "expected_rebate_cents",
+        "rebate_amount",
+        "amount_cents",
+    }
+)
+
+
+def _vendor_identifier_rows(
+    plans: Sequence[EpisodePlan],
+    settings: Settings,
+    refs: SliceRefs,
+) -> list[dict[str, Any]]:
+    """One row per rebate-track dispense: the minted ids, plus the keys to join them on.
+
+    The join keys are rendered **exactly as the TPA feed renders them**, drift included.  An
+    episode carrying the D-6 identifier defect writes a drifted ``rx_number`` to
+    ``tpa_340b_events.jsonl``, and a sidecar that quietly wrote the clean value would hand
+    the vendor layer a working join the real feed does not have -- repairing the defect by
+    accident and deleting the crosswalk-miss exception it exists to produce.
+    """
+    rows: list[dict[str, Any]] = []
+    for plan in plans:
+        if not plan.has_rebate_track:
+            continue
+        is_pharmacy = plan.track.value == "PHARMACY"
+        slice_ref = refs.mint(plan.episode_id, "vendor")
+        rows.append(
+            {
+                "beacon_id": _mint_beacon_id(slice_ref),
+                "accumulation_id": _mint_accumulation_id(slice_ref),
+                "invoice_number": _mint_invoice_number(slice_ref),
+                # -- join keys, spelled as the TPA feed spells them --
+                #
+                # ``ndc_11`` with the underscore, and ``fill_date`` through
+                # ``iso_date_to_wire``, because that is what ``tpa.py`` writes.  A sidecar
+                # spelling these its own way would look correct in review and join to
+                # nothing at runtime.
+                "rx_number": plan.rendered_rx(plan.rx_rendering_tpa) if is_pharmacy else None,
+                # Craneware's spelling of the same Rx, which is usually the same string and
+                # sometimes deliberately is not.
+                #
+                # **A new column rather than a changed one**, and that is load-bearing.
+                # ``mocks.source.load_source`` joins the TPA events onto this row on exactly
+                # five fields, ``rx_number`` among them, so diverting the existing column
+                # would not produce a vendor disagreement — it would silently unjoin the
+                # dispense and hand both vendors a row with no events at all.
+                "rx_number_craneware": (
+                    plan.rendered_rx(plan.rx_rendering_craneware) if is_pharmacy else None
+                ),
+                "pharmacy_npi": plan.pharmacy_npi if is_pharmacy else None,
+                "provider_npi": None if is_pharmacy else plan.billing_provider_npi,
+                "ndc_11": plan.ndc11,
+                "fill_date": keys.iso_date_to_wire(plan.date_of_service.isoformat()),
+                "covered_entity_id": plan.covered_entity_id or "",
+                "manufacturer": entities.manufacturer_by_id(
+                    plan.manufacturer_id or ""
+                ).short_name,
+            }
+        )
+    return rows
+
+
+def assert_vendor_rows_are_blind(rows: Sequence[dict[str, Any]]) -> None:
+    """The sidecar's counterpart to :func:`contracts.assert_slice_is_blind`."""
+    for row in rows:
+        offenders = sorted(set(row) & FORBIDDEN_VENDOR_REF_FIELDS)
+        if offenders:
+            raise AssertionError(
+                f"vendor identifier row declares forbidden field(s) {offenders}. "
+                "The mocks read this file; a mock that can see the answer is not a "
+                "formatter, and the crosswalk it feeds stops being a measurement."
+            )
+        for name, value in row.items():
+            if isinstance(value, str) and value.startswith(("EP-", "EPISODE-", "CASE-")):
+                raise AssertionError(
+                    f"vendor identifier row field {name!r} = {value!r} looks like an "
+                    "episode id; episode identity is the orchestrator's alone."
+                )

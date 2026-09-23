@@ -474,7 +474,41 @@ class _ProposerSession:
             journal=self._journal, agent="proposer", iteration=iteration,
             max_tokens=_emit_ceiling(self._model, _EMIT_MAX_TOKENS),
         )
-        proposal = ProposedAction.parse(call.arguments)
+        try:
+            proposal = ProposedAction.parse(call.arguments)
+        except SchemaError as exc:
+            # One repair turn on a schema violation, aimed at the exact field -- the
+            # same treatment `_make_evaluate` already gives the evaluator, and for the
+            # same reason, which a live run made expensive to keep ignoring.
+            #
+            # Measured (2026-09-22, run 0dd212af): the proposer spent 27,246 reasoning
+            # tokens and five minutes producing a complete, correct ESCALATE proposal
+            # whose `blocked_reason` was the string "null" rather than the literal.
+            # `parse` rejected it, the SchemaError escaped this method, `run_until` has
+            # no handler for a failing `propose` (only for a failing `evaluate`), and
+            # the whole run ended as a bare "error" -- the one outcome design S2 does
+            # not have a name for. The unpaired `try` was the bug, not the model.
+            #
+            # `schemas._require_nullable_str` now reads that particular spelling as
+            # absence, so this path is the backstop rather than the fix: any OTHER slip
+            # -- a missing artifact on a non-ABSTAIN action, an out-of-vocabulary
+            # action -- gets one precisely-worded retry instead of killing the run. A
+            # second failure still raises, and still fails closed.
+            self._journal.event(
+                "proposal", iteration=iteration, model=self._model,
+                schema_repair_attempted=True, error=str(exc),
+            )
+            self._messages.append(_assistant_tool_call_message_from(call))
+            self._messages.append({"role": "tool", "tool_call_id": call.id, "content": "rejected"})
+            self._messages.append({"role": "user", "content": exc.repair_message})
+            call = _emit_structured(
+                client=self._client, model=self._model, messages=self._messages,
+                tool_spec=EMIT_PROPOSED_ACTION_TOOL, forced_name="emit_proposed_action",
+                repair_message=_PROPOSER_REPAIR_MESSAGE, journal=self._journal,
+                agent="proposer", iteration=iteration,
+                max_tokens=_emit_ceiling(self._model, _EMIT_MAX_TOKENS),
+            )
+            proposal = ProposedAction.parse(call.arguments)
         self._messages.append(_withheld_reasoning_tool_call_message(call, proposal))
         self._messages.append({"role": "tool", "tool_call_id": call.id, "content": "recorded"})
         return proposal

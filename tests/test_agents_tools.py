@@ -720,8 +720,18 @@ def test_get_raw_record_distinguishes_a_missing_raw_id_from_a_norm_id_confusion(
 
 def test_get_raw_record_with_a_duplicated_source_record_id_is_ambiguous(demo_conn, tmp_path):
     ctx = make_ctx(demo_conn, tmp_path, cursor=load_settings("demo").max_cursor)
+    # NULL is excluded and the pick is ordered, which this query used to leave to chance.
+    # ``source_record_id`` is nullable by design -- the bank CSV carries no record id and
+    # neither does a Beacon payload -- and SQLite groups every NULL together, so an
+    # unordered LIMIT 1 could return the NULL group and hand the tool an absent id. It then
+    # answers ``invalid_input`` rather than ``ambiguous``, which is correct behaviour and a
+    # different question from the one this test asks. It passed for as long as it did on
+    # luck, and a third source of nulls is what ran the luck out.
     dup = demo_conn.execute(
-        "SELECT source_record_id FROM raw_record GROUP BY source_record_id HAVING COUNT(*) > 1 LIMIT 1"
+        "SELECT source_record_id FROM raw_record"
+        " WHERE source_record_id IS NOT NULL"
+        " GROUP BY source_record_id HAVING COUNT(*) > 1"
+        " ORDER BY source_record_id LIMIT 1"
     ).fetchone()
     assert dup is not None, "the demo dataset must contain a duplicated source_record_id (D-1)"
     result = tools.dispatch(ctx, "get_raw_record", {"source_record_id": dup["source_record_id"]})

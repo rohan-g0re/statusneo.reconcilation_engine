@@ -1,5 +1,45 @@
 # One Request, End to End — The Agent Layer
 
+> **Correction, added by an audit against the running code, and re-audited since.** The worked
+> example below — claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00
+> rebate — **does not match the data this repository generates.** The pair `A-07`/`C-09` lands on
+> no episode at all.
+>
+> **This is not connectivity-layer drift.** It was checked at `dbb129e`, before any of that work:
+> the example was already wrong there. The figures are a hand-composed illustration that was never
+> re-derived from a run.
+>
+> The narrative is still a faithful description of *how the system works* — that is what it is for.
+> But **do not click `E-000042` during a walkthrough.** On the demo spine as it stands it is
+> `A-13`/`C-14`, a different claim than the one described here.
+>
+> **Point at `E-000004` instead.** It is the episode that tells the approved-but-unpaid-rebate
+> story: reimbursement expected and received at $14,540.39 with the bank deposit matched, and a
+> rebate of $4,149.00 approved in September and still unpaid ten cursors later — `A-04`/`C-01`
+> every month until the age threshold trips it to `A-04`/`C-09`, EXCEPTION, at the final cursor.
+> It is the only `C-09` in the database.
+>
+> **An episode id in prose is perishable, and this banner is the proof.** Its first version named
+> `E-000007` as the episode to click, at $6,638.63 reconciled and $1,929.00 outstanding. That was
+> true when it was written and is false now: the generator reassigns ids on every reseed, and
+> `E-000007` is today `A-02`/`C-00`, PENDING, nothing received. Re-derive any id before quoting it:
+>
+> ```sql
+> SELECT episode_id, reimbursement_verdict_code, rebate_verdict_code, expected_rebate_cents
+> FROM verdict v
+> WHERE rebate_verdict_code = 'C-09'
+>   AND cursor_at = (SELECT MAX(cursor_at) FROM verdict v2 WHERE v2.episode_id = v.episode_id);
+> ```
+>
+> **Why the body below was not renumbered, stated so it reads as a decision and not as neglect.**
+> Assignment Doc 2 — the connectivity assessment, the connector fabric, the six-step build method,
+> the vendor-access gate — does not scope the agent layer. Re-deriving every figure in Parts II to
+> IV from a run is a large edit to a document the assignment being demonstrated does not ask about,
+> and each re-derived number is a new chance to be wrong in the same way this banner exists to
+> catch. So the example stays as an illustration of the *shape* of the flow, which is what it was
+> always good at, and the one sentence above tells you what to click instead.
+
+
 *This is the companion to `claim_walkthrough.md`. That one followed a claim through the deterministic side. This one follows a **request** through the agent side — from the moment you click a button to the moment something lands on disk. Same promise: at every stage I say what came in, what happened, what got written, and where it went. Where one program hands off to another, I stop and say so, because that is where the first document lost you. Read it straight through. About 90 minutes.*
 
 ---
@@ -385,7 +425,7 @@ One JSON object per line, flushed after each write. Every line has the same four
 {"seq":6,"at":"...","run_id":"a3f9","kind":"run_finished","outcome":"complete","wall_ms":19204}
 ```
 
-`kind` comes from a closed list of nineteen values. Anything else raises rather than being written — so a new kind of event cannot quietly appear in the log and be missed by everything that reads it.
+`kind` comes from a closed list of eighteen values. Anything else raises rather than being written — so a new kind of event cannot quietly appear in the log and be missed by everything that reads it.
 
 **Why a file and not a table:** because the log is not a byproduct of the run, it *is* the run. Three different things read it, and each one needs a different property:
 
@@ -487,6 +527,8 @@ tools           eight read tools          none at all
 ```
 
 The Evaluator getting a **fresh trace every round** is intentional. It should re-read the proposal cold, not carry forward its own opinion from round one.
+
+**Correction, and the honest version of the first row.** The table above describes a configuration, not the shipped default. `config.py` defaults *both* `proposer_model` and `evaluator_model` to `deepseek-chat` — the same non-thinking model. So out of the box the two rows that matter here are not different at all, and the self-preference-bias mitigation that motivated splitting them is off. Set `RECON_AGENT_EVALUATOR_MODEL` and the row becomes true; leave it and one model is grading its own homework. `agent_layer_design.md` and `DESIGN_NOTE.md` section 9 both already say this; this document was the last one still claiming an independence it does not have by default. The remaining two rows — fresh trace, no tools — hold either way, and they are the ones doing the real work.
 
 **The practitioner's detail:** the two models need completely different handling to produce structured output. The Proposer's model accepts a forced tool choice — you can say "call exactly this function" and it will. The Evaluator's thinking model returns HTTP 400 if you try that, so it has to be asked nicely and then repaired if it answers in the wrong shape. One function knows how to get either model to reliably emit one specific tool call, and that awkwardness is a real fact about the provider rather than a design choice.
 

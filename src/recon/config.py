@@ -55,6 +55,7 @@ __all__ = [
     "BANK_TRANSACTIONS_FILE",
     "GROUND_TRUTH_FILE",
     "MANIFEST_FILE",
+    "VENDOR_IDENTIFIERS_FILE",
 ]
 
 # --- formats ---------------------------------------------------------------
@@ -66,7 +67,7 @@ DATE_FORMAT = "%Y-%m-%d"
 
 #: Bumped whenever ``db/schema.sql`` changes shape.  A database stamped with an older
 #: value is rebuilt, not migrated (the database is a derived artefact).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 8
 ADAPTER_VERSION = "1.0.0"
 ENGINE_VERSION = "1.0.0"
 
@@ -92,8 +93,19 @@ FEED_FILENAMES: tuple[str, ...] = (
 GROUND_TRUTH_FILE = "ground_truth.json"
 MANIFEST_FILE = "manifest.json"
 
+#: Cross-system identifiers the orchestrator mints for the vendor-format layer.
+#:
+#: Deliberately **not** a seventh feed.  ``FEED_FILENAMES`` is what ``load_feeds`` iterates
+#: and what every existing hash, adapter and dossier projection is pinned to, so a vendor
+#: identifier added there would travel into ``raw_record`` and — through
+#: ``get_raw_record``'s ``file_sha256`` — into a recorded agent prompt, where it would
+#: invalidate every replay fixture.  The sidecar sits beside the feeds instead: written by
+#: the orchestrator, read by the vendor mocks, invisible to ingestion.
+VENDOR_IDENTIFIERS_FILE = "identifiers.jsonl"
+
 FEEDS_SUBDIR = "feeds"
 TRUTH_SUBDIR = "truth"
+VENDOR_SUBDIR = "vendor"
 
 
 # --- profiles --------------------------------------------------------------
@@ -228,6 +240,18 @@ class Settings:
     def truth_dir(self, profile: Profile | None = None) -> Path:
         """``data/generated/<profile>/truth/`` — ingestion and the engine never read this."""
         return self.generated_dir(profile) / TRUTH_SUBDIR
+
+    def vendor_dir(self, profile: Profile | None = None) -> Path:
+        """``data/generated/<profile>/vendor/`` — the vendor-format layer's own directory.
+
+        Holds the minted-identifier sidecar and, once the mocks run, the Beacon, Verity and
+        Craneware files.  A sibling of ``feeds/`` rather than a member of it, so the six
+        feeds stay byte-identical and ``load_feeds`` cannot reach any of this.
+        """
+        return self.generated_dir(profile) / VENDOR_SUBDIR
+
+    def vendor_identifiers_path(self, profile: Profile | None = None) -> Path:
+        return self.vendor_dir(profile) / VENDOR_IDENTIFIERS_FILE
 
     def feed_path(self, filename: str, profile: Profile | None = None) -> Path:
         if filename not in FEED_FILENAMES:

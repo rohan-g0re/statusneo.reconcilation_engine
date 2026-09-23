@@ -1,12 +1,57 @@
 import React from 'react'
 import { formatMoney } from '../api.js'
+import * as labels from '../labels.js'
 
+// The four the server's whitelist accepts, worded for a reader rather than named after the
+// column they sort on. The values are the API's and cannot change: anything outside
+// QUEUE_ORDERINGS comes back a 422.
 const ORDERINGS = [
-  ['reopened_first', 'Reopened first, then oldest'],
+  ['reopened_first', 'Reopened first'],
   ['age_desc', 'Oldest first'],
-  ['variance_desc', 'Largest variance first'],
-  ['episode_id', 'Episode id'],
+  ['variance_desc', 'Biggest money first'],
+  ['episode_id', 'Claim number'],
 ]
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** `2025-08-20` reads as `20 Aug 2025`. Parsed by hand rather than through Date, which would
+ *  shift the day backwards for anyone west of UTC — a date-of-service is a calendar fact, not
+ *  a moment, and it has no timezone to be converted from. */
+function formatDate(iso) {
+  if (typeof iso !== 'string' || iso.length < 10) return iso ?? '—'
+  const [year, month, day] = iso.slice(0, 10).split('-')
+  const name = MONTHS[Number(month) - 1]
+  return name ? `${Number(day)} ${name} ${year}` : iso
+}
+
+/** What is wrong with a claim, as a sentence.
+ *
+ * No codes here. A-17 and C-01 mean nothing to someone scanning a list, and putting them in
+ * their own pills forced a grid inside the cell that aligned with nothing around it. The codes
+ * are on the episode panel and on the claim's own page, where there is room to label which
+ * track each belongs to and where somebody has stopped to read one claim rather than forty.
+ *
+ * The rebate line only appears when the rebate track has something to say, and it says so in
+ * words rather than leaning on a column header to disambiguate it.
+ */
+function WhatsWrong({ row }) {
+  const insurance = labels.verdict(row.reimbursement_verdict)
+  const rebate = labels.isAbsentRebate(row.rebate_verdict)
+    ? null
+    : labels.verdict(row.rebate_verdict)
+  return (
+    <>
+      <div className="queue-verdict-line" title={insurance.detail}>
+        {insurance.label}
+      </div>
+      {rebate ? (
+        <div className="queue-verdict-line queue-verdict-rebate" title={rebate.detail}>
+          Rebate: {rebate.label}
+        </div>
+      ) : null}
+    </>
+  )
+}
 
 // Prioritisation is a deterministic sort over verdicts, never a judgement — which is exactly why the
 // orderings are a closed whitelist on the server. A free-form ORDER BY from the client would be an
@@ -14,8 +59,11 @@ const ORDERINGS = [
 export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelect, busy }) {
   return (
     <>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
-        <label htmlFor="order-by" style={{ color: 'var(--text-secondary)', fontSize: 12.5 }}>
+      {/* Class, not inline style. These three values were hardcoded as 10 / 10 / 12.5 px, and a
+          browser measurement caught the 12.5 as the one text size on the screen that sits off
+          the type scale. A scale that anything may opt out of inline is a suggestion. */}
+      <div className="queue-controls">
+        <label htmlFor="order-by" className="queue-controls-label">
           Rank by
         </label>
         <select
@@ -41,17 +89,41 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
         </p>
       ) : (
         <div className="table-wrap queue-scroll">
-          <table data-testid="queue-table">
+          <table data-testid="queue-table" className="queue-table">
+            {/*
+              Explicit widths, because auto layout starves the one column that matters. Every
+              other cell is `nowrap` and so claims its natural width first, leaving the verdict
+              sentences to wrap at four or five characters a line. Fixed layout makes the
+              allocation a decision rather than a side effect of content length.
+            */}
+            <colgroup>
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '9%' }} />
+              <col style={{ width: '36%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th>Episode</th>
-                <th>Track</th>
-                <th>Service date</th>
+                <th>Claim</th>
+                <th>Billed to</th>
+                <th>Dispensed</th>
                 <th className="num">Age</th>
-                <th>Reimb.</th>
-                <th>Rebate</th>
-                <th className="num">Variance</th>
-                <th>Why</th>
+                {/*
+                  One column where there were three. The two it merges were bare codes — two
+                  four-character tokens side by side with nothing saying which was insurance and
+                  which was the rebate, and the only place that mapping appeared was a column
+                  header inside a collapsed accordion on another panel.
+
+                  The third was `Why`, a bag of up to five raw reason chips. Once the verdicts
+                  read as sentences the two columns said the same thing twice: A-17 renders as
+                  "Paid twice" and its reason code DUPLICATE_PAYMENT renders as "Paid twice".
+                  The reason codes are not lost — they are on the episode panel, in full, where
+                  there is room for them.
+                */}
+                <th>What’s wrong</th>
+                <th className="num">Outstanding</th>
               </tr>
             </thead>
             <tbody>
@@ -73,31 +145,31 @@ export default function QueueTable({ rows, orderBy, onOrderBy, selected, onSelec
                     }
                   }}
                 >
-                  <td className="mono">{row.episode_id}</td>
-                  <td>{row.track === 'PHARMACY' ? 'Pharmacy' : 'Medical'}</td>
-                  <td className="mono">{row.date_of_service}</td>
-                  <td className="num">{row.age_days}d</td>
-                  <td>
-                    <span className="verdict-code">{row.reimbursement_verdict}</span>
+                  <td className="mono">
+                    {row.episode_id}
+                    {/*
+                      Reopened is a property of the row, not one more thing that is wrong with
+                      the claim, so it marks the claim rather than joining a list of reasons.
+                      It is also the strongest signal in the default sort — money that was
+                      already recognised and has come undone outranks money never collected.
+                    */}
+                    {row.reopened_from ? (
+                      <span
+                        className="queue-reopened"
+                        title={`Was ${labels.disposition(row.reopened_from).label.toLowerCase()} and came back`}
+                      >
+                        reopened
+                      </span>
+                    ) : null}
                   </td>
-                  <td>
-                    <span className="verdict-code">{row.rebate_verdict}</span>
+                  <td>{row.track === 'PHARMACY' ? 'Pharmacy' : 'Medical'}</td>
+                  <td className="mono">{formatDate(row.date_of_service)}</td>
+                  <td className="num">{row.age_days} days</td>
+                  <td className="queue-verdicts">
+                    <WhatsWrong row={row} />
                   </td>
                   <td className="num" title="Negative means an overpayment — a refund liability">
                     {formatMoney(row.total_variance_cents)}
-                  </td>
-                  <td>
-                    {row.reopened_from ? (
-                      <span className="chip reopened">reopened from {row.reopened_from}</span>
-                    ) : null}
-                    {row.reason_codes.map((code) => (
-                      <span className="chip" key={code}>
-                        {code}
-                      </span>
-                    ))}
-                    {!row.reopened_from && row.reason_codes.length === 0 ? (
-                      <span style={{ color: 'var(--text-muted)' }}>—</span>
-                    ) : null}
                   </td>
                 </tr>
               ))}

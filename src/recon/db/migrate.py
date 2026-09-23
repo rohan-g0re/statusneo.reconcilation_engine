@@ -30,23 +30,44 @@ def _user_version(conn: sqlite3.Connection) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
+class SchemaVersionMismatch(RuntimeError):
+    """The database on disk was stamped by a different build than this one.
+
+    A ``RuntimeError`` subclass rather than a new exception hierarchy, so every existing
+    ``except RuntimeError`` keeps catching it exactly as before — this only makes the case
+    *nameable*, it does not reclassify it.
+
+    Naming it is worth doing because this is the one failure a person meets before they
+    have done anything wrong: the database is a derived artefact and the repository ships
+    with stale ones, so the first run after any schema change lands here.  The message has
+    always said precisely how to fix it; the API had no way to tell this apart from a bug
+    and answered ``500 Internal Server Error``, so the reader saw none of it.
+    """
+
+    def __init__(self, found: int, expected: int) -> None:
+        self.found = found
+        self.expected = expected
+        super().__init__(
+            f"database is at schema version {found}, this build expects {expected}. "
+            "The database is a derived artefact: delete it and re-load the feeds "
+            "(recon.db.migrate.rebuild, or `recon load --rebuild`)."
+        )
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Apply the schema to a fresh database, or verify an existing one.
 
     Raises:
-        RuntimeError: if the database was stamped by an older (or newer) schema
+        SchemaVersionMismatch: if the database was stamped by an older (or newer) schema
             version, naming the rebuild path.  A silent mismatch would show up later
             as a missing column halfway through an ingest.
+        RuntimeError: if ``schema.sql`` and ``config.SCHEMA_VERSION`` disagree.
     """
     version = _user_version(conn)
     if version == config.SCHEMA_VERSION:
         return
     if version != 0:
-        raise RuntimeError(
-            f"database is at schema version {version}, this build expects "
-            f"{config.SCHEMA_VERSION}. The database is a derived artefact: delete it and "
-            "re-load the feeds (recon.db.migrate.rebuild, or `recon load --rebuild`)."
-        )
+        raise SchemaVersionMismatch(version, config.SCHEMA_VERSION)
     conn.executescript(schema_sql())
     applied = _user_version(conn)
     if applied != config.SCHEMA_VERSION:

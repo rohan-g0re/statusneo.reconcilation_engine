@@ -1,5 +1,38 @@
 # One Claim, End to End
 
+> **Correction, added by an audit against the running code, and re-audited since.** The worked
+> example below — claim `E-000042`, verdicts `A-07`/`C-09`, short $1,367.97 with a $6,864.00
+> rebate — **does not match the data this repository generates.** The pair `A-07`/`C-09` lands on
+> no episode at all.
+>
+> **This is not connectivity-layer drift.** It was checked at `dbb129e`, before any of that work:
+> the example was already wrong there. The figures are a hand-composed illustration that was never
+> re-derived from a run.
+>
+> The narrative is still a faithful description of *how the system works* — that is what it is for.
+> But **do not click `E-000042` during a walkthrough.** On the demo spine as it stands it is
+> `A-13`/`C-14`, a different claim than the one described here.
+>
+> **Point at `E-000004` instead.** It is the episode that tells the approved-but-unpaid-rebate
+> story: reimbursement expected and received at $14,540.39 with the bank deposit matched, and a
+> rebate of $4,149.00 approved in September and still unpaid ten cursors later — `A-04`/`C-01`
+> every month until the age threshold trips it to `A-04`/`C-09`, EXCEPTION, at the final cursor.
+> It is the only `C-09` in the database.
+>
+> **An episode id in prose is perishable, and this banner is the proof.** Its first version named
+> `E-000007` as the episode to click, at $6,638.63 reconciled and $1,929.00 outstanding. That was
+> true when it was written and is false now: the generator reassigns ids on every reseed, and
+> `E-000007` is today `A-02`/`C-00`, PENDING, nothing received. Before quoting any id from this
+> document, re-derive it:
+>
+> ```sql
+> SELECT episode_id, reimbursement_verdict_code, rebate_verdict_code, expected_rebate_cents
+> FROM verdict v
+> WHERE rebate_verdict_code = 'C-09'
+>   AND cursor_at = (SELECT MAX(cursor_at) FROM verdict v2 WHERE v2.episode_id = v.episode_id);
+> ```
+
+
 *This is the walkthrough document for the deterministic half of the system — the generators, the connector, the crosswalk, the reconciliation engine and the read layer. The agent layer is deliberately not in here; it gets its own document. Read this straight through: it is about 90 minutes and it is the whole thing. It is written for the interview question you know is coming — "trace one claim end-to-end" — so it follows one real claim from the moment a drug leaves the shelf to the moment a finance analyst sees it in a queue, and stops to explain the domain wherever the machinery depends on it. Where you only need to recognise something, I say so. Where you need to be able to defend it under pushback, I say that too.*
 
 ---
@@ -189,7 +222,7 @@ This is the most important section in Part I, and it is the premise the entire a
 
 **The practitioner's detail that gets remembered:** the bank line carries no claim identifier at all, so it **resolves in two hops** — trace number finds the remittance, and the remittance holds the claim list. One deposit can touch dozens of claims. That is not a modelling choice; it is what a bank export is.
 
-**And the design decision that follows from it, which you should be ready to defend:** the connector does **no identifier normalisation** on the primary match path. No stripping leading zeros, no case folding, no trimming. There is not a single `lstrip("0")` in the package and a test asserts it. If a feed spells the Rx number `07845102` and another spells it `7845102`, that match is *meant* to fail — because the failure is the exception the system exists to surface. Normalising it away would be the engine quietly covering up the thing it was built to find. (Re-rendering a date from `CCYYMMDD` to `YYYY-MM-DD` is allowed, and the line is precise: re-rendering *one* value is parsing; deciding *two* values match is normalisation.)
+**And the design decision that follows from it, which you should be ready to defend:** the connector does **no identifier normalisation** on the primary match path. No stripping leading zeros, no case folding, no trimming. There is not a single `lstrip("0")` in the package, and a test asserts the behaviour it would break — `test_a23_key_builders_do_not_normalise` requires a zero-padded Rx to build a *different* key from a bare one. (No test greps the source for the call. Worth saying, given this document's own advice two sections down: grep for the test before believing the sentence.) If a feed spells the Rx number `07845102` and another spells it `7845102`, that match is *meant* to fail — because the failure is the exception the system exists to surface. Normalising it away would be the engine quietly covering up the thing it was built to find. (Re-rendering a date from `CCYYMMDD` to `YYYY-MM-DD` is allowed, and the line is precise: re-rendering *one* value is parsing; deciding *two* values match is normalisation.)
 
 That is thread #1, and it will keep coming back.
 
@@ -368,9 +401,9 @@ flowchart TD
 
 **Notice that both branches end in the same place.** Whether a record creates an episode or attaches to one, the last thing it does is write rows into `crosswalk_key` — the reverse-lookup table that says *"if a future document quotes this string, it means this episode."* Our B1 writes three of them on day 0, and those three rows are the only reason the remittance can find anything on day 19. A record that created an episode and wrote no crosswalk rows would be permanently unreachable.
 
-**One line does not mean one row.** An 835 batch is a single line of the feed file and becomes 27 rows — one `REMITTANCE` envelope carrying the deposit total and trace number, plus 24 `REMITTANCE_CLAIM_LINE` children, plus two `PROVIDER_LEVEL_ADJUSTMENT` children. The children point back at the envelope through `parent_norm_id`, which is a self-reference inside the same table. That split exists because the money identifier lives on the envelope while the claim identifier lives on the line.
+**One line does not mean one row.** An 835 batch is a single line of the feed file and becomes many rows — one `REMITTANCE` envelope carrying the deposit total and trace number, plus one `REMITTANCE_CLAIM_LINE` child per claim (capped at 24, though the demo profile's batches run far smaller — the largest observed is 15 rows), plus a `PROVIDER_LEVEL_ADJUSTMENT` child per PLB entry. The children point back at the envelope through `parent_norm_id`, which is a self-reference inside the same table. That split exists because the money identifier lives on the envelope while the claim identifier lives on the line.
 
-**And only two of the fourteen record kinds create an episode** — a pharmacy `B1` and an original medical `837`. The other twelve attach to one that already exists, which makes sense said out loud: an 835 does not create a claim, it *answers* one.
+**And only two of the eighteen record kinds create an episode** — a pharmacy `B1` and an original medical `837`. Two more, the `REMITTANCE` and `REBATE_BATCH` envelopes, are resolution roots that neither create nor attach. The remaining fourteen attach to an episode that already exists, which makes sense said out loud: an 835 does not create a claim, it *answers* one.
 
 Three design points here are worth defending.
 
@@ -392,7 +425,7 @@ This is the mechanism the whole architecture is organised around, so it gets the
 
 **What it is:** every record, on arrival, does two things. It **publishes** the keys it makes resolvable, and it **looks up** the keys it needs someone else to have published. Both go through one table, `crosswalk_key`, as a point seek on `(key_type, key_value)`.
 
-There are exactly eight key types, one per bridge:
+There are exactly eight key types under Decision A24, one per bridge. *(The connector layer later added four more — `BEACON_ID`, `COVERED_ENTITY_340B`, `HCPCS`, `PAYMENT_REFERENCE` — additively, leaving all eight below unchanged. All four are published on an ordinary run now that Beacon's three inbound payloads load with every build.)*
 
 ```mermaid
 flowchart LR
@@ -413,14 +446,20 @@ flowchart LR
 
 **Why one file builds all of them:** because building key strings in two places is exactly how you end up with a crosswalk that works perfectly for pharmacy claims and silently misses every medical one. Every key in the system is constructed by one module, and the 835 side of the pharmacy bridge *reconstructs* the `NCPDP_CLAIM` key by splitting `CLP01` back into Rx and fill — the parsing step from §3, now doing real work.
 
-**What happens when a lookup finds nothing — and this is the interesting half.** There are exactly four outcomes and no tie-breaks anywhere:
+**What happens when a lookup finds nothing — and this is the interesting half.** There are five outcomes and no tie-breaks anywhere:
 
-| Outcome                       | What the connector does                    |
-| ----------------------------- | ------------------------------------------ |
-| Exactly one match             | Attach it                                  |
-| Keys present, nothing matches | **Park** it: `NO_KEY_MATCH`        |
-| More than one match           | **Park** it: `AMBIGUOUS_KEY_MATCH` |
-| No usable keys at all         | **Park** it: `NO_KEYS_PRESENT`     |
+| Outcome                                            | What the connector does                    |
+| -------------------------------------------------- | ------------------------------------------ |
+| Exactly one match                                  | Attach it                                  |
+| Keys present, nothing matches                      | **Park** it: `NO_KEY_MATCH`                |
+| More than one match                                | **Park** it: `AMBIGUOUS_KEY_MATCH`         |
+| No usable keys at all                              | **Park** it: `NO_KEYS_PRESENT`             |
+| One match, but it names a different covered entity | **Park** it: `COVERED_ENTITY_MISMATCH`     |
+
+*The fifth was added by the connector layer (requirement E1) and is the only one where the keys
+resolved perfectly. The record and the episode simply disagree about whose 340B claim it is, and
+attaching would credit one covered entity's savings to another. Silence is never a contradiction:
+the check fires only when both sides name an entity and the two differ.*
 
 A parked record is *held*, not discarded — "the claim is not missing, the mapping failed", which is a different problem with a different owner. And every subsequent arrival does a **backward re-check**: it probes the parked pool for anything that now resolves against the keys it just published. That is what lets an out-of-order bank deposit retroactively clear a park from three weeks earlier, with no window to tune and no sweep job to schedule.
 
@@ -486,7 +525,7 @@ flowchart LR
 
 **Why allocation is real work and not a footnote:** one deposit against many claims means "did this episode's money arrive?" is a question about the *allocation*, not about the bank row. The connector splits the deposit back across the remittance's claim lines and writes one `cash_allocation` row per episode, recording the **basis** on which each link was made — `TRN02`, `ACH_TRACE`, `ALLOCATION_CODE`, `AMOUNT_DATE` or `RESIDUAL`. Recording the basis is what lets a reader later distinguish "we know this matched" from "we inferred this matched." The same splitter serves the 340B rebate batches, which have exactly the same one-to-many shape under a different key.
 
-**When hop 1 cannot start at all:** about one deposit in five arrives with the CCD+ addenda stripped, so `TRN02` is simply absent. The fallback is amount-and-date: find a remittance with the exact same amount whose settlement date is within **three banking days**, a window taken from CAQH CORE Rule 370 rather than invented. And it holds the same line as everything else — **two candidates park rather than guess**. A residual false-positive rate on that path is inherent, not a defect, which is precisely why the basis is recorded on every allocation row.
+**When hop 1 cannot start at all:** about one deposit in five arrives with the CCD+ addenda stripped, so `TRN02` is simply absent. The fallback is amount-and-date: find a remittance with the exact same amount whose settlement date is within **three calendar days**. The window is CAQH CORE Rule 370's ±3 *business* days, taken rather than invented. And it holds the same line as everything else — **two candidates park rather than guess**. A residual false-positive rate on that path is inherent, not a defect, which is precisely why the basis is recorded on every allocation row.
 
 ---
 
@@ -667,7 +706,7 @@ flowchart TD
 
 **Why it is the best trap:** the bank is structurally blind to it. The deposit is short and there is no explanation anywhere in the banking data, because the explanation exists only in a segment of a document the bank never sees. So `Σ(claim payments) − PLB = what hits the bank`, and if you reconcile the deposit against the claim list without reading `PLB`, every claim in the batch looks slightly underpaid and the real event — a clawback on a claim from six weeks ago — is invisible.
 
-**Where it shows up:** four `PLB` reason codes matter. `WO` is overpayment recovery. `FB` is a forward balance. `L6` is interest owed *to* you, which is negative and *increases* the payment. `RA` is a retroactive adjustment, which is how a won appeal often arrives. Sign convention bit us once — an early draft of the feed spec had appeal credits positive, which is self-contradictory under `BPR02 = Σ(CLP04) − Σ(PLB, signed)` and was corrected.
+**Where it shows up:** six `PLB` reason codes are modelled and three actually arrive. `WO` is overpayment recovery, and it dominates. `RA` is a retroactive adjustment, which is how a won appeal often arrives. `FB` is a forward balance. `L6` — interest owed *to* you, negative, *increasing* the payment — along with `CS` and `72`, is defined and never emitted by any generator. Sign convention bit us once — an early draft of the feed spec had appeal credits positive, which is self-contradictory under `BPR02 = Σ(CLP04) − Σ(PLB, signed)` and was corrected.
 
 **And the deliberate cruelty:** `FB` entries are generated with **no reference at all**, as D-7. The residual must be tracked as an unallocated forward balance, not absorbed into whatever claim happens to be nearby.
 
@@ -715,7 +754,7 @@ That third case is the one to quote if someone pushes on whether "insufficient d
 
 **Four. Aging is never a verdict.** Covered in §21. It buys provable completeness for incremental processing.
 
-**Five. Store everything, including the things that did not work.** Parked records, quarantined records, orphan deposits, unallocated residuals — all first-class rows, not log lines. The database was designed from the query patterns backward rather than the entities forward, and every hot query is pinned by a test that runs `EXPLAIN QUERY PLAN` and asserts no table scan. That audit found five scans and ten indexes the planner never chose. *The sharpest thing it taught:* a **partial index whose predicate is bound as a query parameter is silently declined by SQLite**, because the planner cannot prove at plan time that the parameter satisfies the `WHERE` clause.
+**Five. Store everything, including the things that did not work.** Parked records, quarantined records, orphan deposits, unallocated residuals — all first-class rows, not log lines. The database was designed from the query patterns backward rather than the entities forward, and the hot queries are pinned by tests that run `EXPLAIN QUERY PLAN` and assert no table scan -- nine of them today, and the queue read itself is not yet one of them. That audit found five scans and ten indexes the planner never chose. *The sharpest thing it taught:* a **partial index whose predicate is bound as a query parameter is silently declined by SQLite**, because the planner cannot prove at plan time that the parameter satisfies the `WHERE` clause.
 
 **Six. State, do not narrate.** The deterministic layer emits a record kind and that record's own fields, verbatim — never a sentence. An earlier version wrote English prose per event, and it failed in a specific way: English existed only for branches somebody had written out, so an unanticipated record produced *nothing at all* while the component looked able to describe anything. One projection per record kind plus a single generic renderer replaced 51 hand-written branches across 13 functions, and an import-time check raises if any record kind lacks one. A silent `continue` on an unknown kind had already made four record kinds invisible in every episode payload, with no error anywhere.
 
@@ -739,7 +778,7 @@ Say these before you are asked. Each one is a scoped decision with a reason, not
 
 **Scale.** SQLite, single file, one process. The query plans are pinned and the access patterns are point seeks, so the shape survives a move to Postgres — but nobody has run it there.
 
-**Test coverage.** 583 tests total; the agent layer accounts for 306 of them, so roughly 277 cover the deterministic side — the engine against all 4,224 oracle configurations, every hot query's plan, the full HTTP surface under concurrency, and end-to-end reproduction of all 372 verdict pairs. There is **no frontend test suite at all.** Say that plainly.
+**Test coverage.** 988 tests collected — 583 when this was written, before the connectivity layer added the rest. Three buckets now rather than two: the deterministic engine, the agent layer (~368 in `test_agents_*`), and the connectivity layer (`test_connectors` 92, `test_readiness` 44, `test_control_totals` 27, `test_authority` 25, `test_sites` 17, `test_mapping` 16, `test_vendor_ingest` 15, `test_file_pattern` 14, `test_vendor_evidence` 14, `test_vendor_connector_leg` 13, `test_api_pattern` 13). One of those 919 fails, and it is not one of these: `test_query_plans.py::test_latest_verdict_walks_the_index_not_the_table`, where SQLite picks a different index than the one the assertion names. Both are index seeks, so nothing scans; the test pins a name rather than the property it cares about. Say that plainly rather than rounding to green. The deterministic side still covers — the engine against all 4,224 oracle configurations, every hot query's plan, the full HTTP surface under concurrency, and end-to-end reproduction of all 372 verdict pairs. There is **no frontend test suite at all.** Say that plainly.
 
 ---
 

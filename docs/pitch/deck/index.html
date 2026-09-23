@@ -1,0 +1,457 @@
+<title>Post-Claim Pharmacy Financial Reconciliation</title>
+<style>
+  :root {
+    --paper: #fbfbf9;
+    --ink: #1e1e1e;
+    --ink-soft: #55534e;
+    --ink-faint: #8a8781;
+    --rule: #d9d7d2;
+    --rule-soft: #ecebe7;
+    --panel: #f3f2ee;
+    --plate: #ffffff;
+    --exception: #d02b2b;
+    --pending: #c97a00;
+    --settled: #2f8a41;
+    --reference: #1a66b0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16171a; --ink: #e9e7e2; --ink-soft: #a9a6a0; --ink-faint: #75726c;
+      --rule: #34363b; --rule-soft: #24262a; --panel: #1d1f23; --plate: #ffffff;
+      --exception: #ff6b6b; --pending: #f0a33c; --settled: #5cc46e; --reference: #62a8f0;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #16171a; --ink: #e9e7e2; --ink-soft: #a9a6a0; --ink-faint: #75726c;
+    --rule: #34363b; --rule-soft: #24262a; --panel: #1d1f23; --plate: #ffffff;
+    --exception: #ff6b6b; --pending: #f0a33c; --settled: #5cc46e; --reference: #62a8f0;
+  }
+  :root[data-theme="light"] {
+    --paper: #fbfbf9; --ink: #1e1e1e; --ink-soft: #55534e; --ink-faint: #8a8781;
+    --rule: #d9d7d2; --rule-soft: #ecebe7; --panel: #f3f2ee; --plate: #ffffff;
+    --exception: #d02b2b; --pending: #c97a00; --settled: #2f8a41; --reference: #1a66b0;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  .stage { height: 100dvh; width: 100vw; display: grid; place-items: center; padding: 2vmin; }
+
+  .slide {
+    width: min(100%, calc((100dvh - 4vmin) * 16 / 9));
+    aspect-ratio: 16 / 9;
+    container-type: size;
+    position: relative;
+    display: none;
+    background: var(--paper);
+  }
+  .slide.is-live { display: block; }
+
+  .sheet { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr auto; padding: 4.2cqw 5cqw 3cqw; }
+  .masthead {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 2cqw;
+    padding-bottom: 1.1cqh; border-bottom: 1px solid var(--rule);
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    font-size: 1.15cqw; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .masthead .part { color: var(--ink-soft); }
+  .colophon {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-top: 1px solid var(--rule-soft); padding-top: 1cqh;
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    font-size: 1.05cqw; letter-spacing: .1em; color: var(--ink-faint); font-variant-numeric: tabular-nums;
+  }
+  .body { min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 2.2cqh; padding: 2.2cqh 0; }
+  .body.fill { justify-content: flex-start; }
+
+  h1, h2, h3, .eyebrow, .stat, .code, table, figcaption, .cue {
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+  h1 { font-size: 5.1cqw; line-height: 1.08; font-weight: 700; letter-spacing: -.015em; margin: 0; text-wrap: balance; }
+  h2 { font-size: 3.1cqw; line-height: 1.14; font-weight: 700; letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+  h3 { font-size: 1.5cqw; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; margin: 0; color: var(--ink-soft); }
+  .eyebrow { font-size: 1.2cqw; letter-spacing: .2em; text-transform: uppercase; color: var(--exception); margin: 0; }
+  p { font-size: 1.95cqw; line-height: 1.5; margin: 0; max-width: 62ch; }
+  p.lead { font-size: 2.35cqw; line-height: 1.42; }
+  p.sub { color: var(--ink-soft); font-size: 1.65cqw; }
+  em { font-style: italic; color: var(--ink-soft); }
+  .code { font-size: .92em; background: var(--panel); padding: .08em .34em; border-radius: 2px; }
+
+  .rows { display: flex; flex-direction: column; gap: 1.4cqh; }
+  .row { display: grid; grid-template-columns: 3.4cqw 1fr; gap: 1.6cqw; align-items: baseline;
+         padding-bottom: 1.3cqh; border-bottom: 1px solid var(--rule-soft); }
+  .row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .row .n { font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+            font-size: 1.3cqw; letter-spacing: .1em; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+  .row p { font-size: 1.8cqw; }
+
+  .cols { display: grid; gap: 2.4cqw; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-4 { grid-template-columns: repeat(4, 1fr); }
+
+  .card { border-top: 2px solid var(--ink); padding-top: 1.2cqh; display: flex; flex-direction: column; gap: .7cqh; }
+  .card.exception { border-top-color: var(--exception); }
+  .card.pending { border-top-color: var(--pending); }
+  .card.settled { border-top-color: var(--settled); }
+  .card.reference { border-top-color: var(--reference); }
+  .card h3 { font-size: 1.28cqw; }
+  .card p { font-size: 1.5cqw; line-height: 1.42; }
+
+  .stat { display: flex; flex-direction: column; gap: .4cqh; }
+  .stat .figure { font-size: 3.5cqw; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .stat .label { font-size: 1.1cqw; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); line-height: 1.35; }
+  .stat.exception .figure { color: var(--exception); }
+  .stat.settled .figure { color: var(--settled); }
+  .stat.reference .figure { color: var(--reference); }
+
+  figure { margin: 0; min-height: 0; display: flex; flex-direction: column; }
+  .plate { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+           border: 1px solid var(--rule); background: var(--plate); padding: 1.2cqh 1.2cqw; }
+  .plate img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
+  figcaption { font-size: 1.02cqw; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); padding-top: .8cqh; }
+
+  .exhibit { flex: 1; min-height: 0; }
+
+  .shots { display: grid; gap: 2cqw; flex: 1; min-height: 0; }
+  .shots.duo-even { grid-template-columns: 1fr 1fr; }
+  .shots.duo { grid-template-columns: .62fr 1fr; }
+
+  .cue { display: flex; flex-direction: column; gap: 1.1cqh; font-size: 1.5cqw; color: var(--ink-soft); }
+  .cue div { display: grid; grid-template-columns: 2.6cqw 1fr; gap: 1.2cqw; align-items: baseline; }
+  .cue b { color: var(--exception); font-weight: 700; }
+
+  .rulemark { width: 12cqw; height: 3px; background: var(--exception); }
+  .title-sheet { justify-content: flex-end; gap: 3cqh; }
+  .divider .body { justify-content: center; gap: 1.6cqh; }
+  .divider h1 { font-size: 6cqw; }
+
+  .progress { position: fixed; left: 0; bottom: 0; height: 2px; background: var(--exception); width: 0; transition: width .28s ease; z-index: 5; }
+  .hud { position: fixed; right: 1.4vmin; bottom: 1.4vmin; display: flex; gap: .5vmin; align-items: center; z-index: 6; opacity: .28; transition: opacity .2s ease; }
+  .hud:hover, .hud:focus-within { opacity: 1; }
+  .hud button {
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    font-size: 12px; line-height: 1; padding: 6px 9px; background: var(--paper);
+    color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 2px; cursor: pointer;
+  }
+  .hud button:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .hud button:focus-visible { outline: 2px solid var(--reference); outline-offset: 2px; }
+  .hint {
+    position: fixed; left: 50%; bottom: 2.2vmin; transform: translateX(-50%);
+    font-family: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+    font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-faint);
+    z-index: 6; transition: opacity .5s ease;
+  }
+  .hint.gone { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { .progress, .hint, .hud { transition: none; } }
+</style>
+
+<div class="stage">
+  <!-- 01 -->
+  <section class="slide is-live">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Solution architecture</span><span>2026</span></div>
+      <div class="body title-sheet">
+        <div class="rulemark"></div>
+        <h1>Post-Claim Pharmacy Financial&nbsp;Reconciliation</h1>
+        <p class="lead">Four independent feeds, no shared claim number, and one question:
+          what were we owed, what arrived, and what needs a human?</p>
+        <p class="sub">Every number is computed in Python. The model only explains numbers it was handed.</p>
+      </div>
+      <div class="colophon"><span>Post-claim reconciliation</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">The problem</span><span>Three roads and a witness</span></div>
+      <div class="body">
+        <h2>A drug goes out the door. Three parties now owe money, and none of them talk.</h2>
+        <div class="cols cols-4">
+          <div class="card reference"><h3>Pharmacy benefit</h3><p>Pills at a counter, billed to a <strong>PBM</strong>. Adjudicated in seconds, paid in weeks.</p></div>
+          <div class="card reference"><h3>Medical benefit</h3><p>Drugs infused in a chair, billed to a <strong>medical payer</strong> via a clearinghouse.</p></div>
+          <div class="card pending"><h3>340B rebate</h3><p>A manufacturer owes cash back — but only once a <strong>TPA</strong> rules the dispense qualifies.</p></div>
+          <div class="card settled"><h3>The bank</h3><p>Owes nothing. It is the only proof the other three actually landed.</p></div>
+        </div>
+        <p>Nobody sends the hospital a statement saying <em>here is what you are owed and here is what you got.</em>
+          <strong>That statement is the product.</strong></p>
+      </div>
+      <div class="colophon"><span>Post-claim reconciliation</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">The argument</span><span>Three threads</span></div>
+      <div class="body">
+        <p class="eyebrow">Every design decision is one of these three wearing a different hat</p>
+        <div class="rows">
+          <div class="row"><span class="n">01</span><p><strong>Nothing carries one claim number end to end.</strong> There is no shared ID. That is the hard part — not the arithmetic.</p></div>
+          <div class="row"><span class="n">02</span><p><strong>The system never guesses.</strong> A wrong match looks identical to a correct one in every report afterwards, so it parks instead.</p></div>
+          <div class="row"><span class="n">03</span><p><strong>Everything is a replay.</strong> Delete every answer it has produced, feed it the same files, get the same answers back.</p></div>
+        </div>
+      </div>
+      <div class="colophon"><span>Post-claim reconciliation</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Architecture</span><span>Five blocks</span></div>
+      <div class="body fill">
+        <figure class="exhibit">
+          <div class="plate"><img src="img/01-system-overview.png" alt="Sources feed connectors, then ingest and crosswalk, then the reconciliation engine, then a read API serving a dashboard and an agent layer."></div>
+        </figure>
+      </div>
+      <div class="colophon"><span>Connectors fetch and never interpret · ingest writes records in · the engine writes verdicts out · both only add rows</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Architecture</span><span>The rule</span></div>
+      <div class="body">
+        <h2>Every number is computed in Python.<br>The model only explains numbers it was handed.</h2>
+        <div class="cols cols-3">
+          <div class="stat"><span class="figure">9</span><span class="label">Tools the agents can call</span></div>
+          <div class="stat"><span class="figure">8</span><span class="label">Of them read-only</span></div>
+          <div class="stat exception"><span class="figure">0</span><span class="label">Write tools in any model's tool list</span></div>
+        </div>
+        <p>The one write creates a <strong>work item</strong> for a human. Role tool lists are built by <em>removing</em> it,
+          so no prompt can reach it — and the record names the person who pressed the button, not the model.</p>
+      </div>
+      <div class="colophon"><span>A number a model produced is a number you cannot defend in an audit</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Making the data</span><span>Built backwards from a proof</span></div>
+      <div class="body fill">
+        <div class="cols cols-4">
+          <div class="stat"><span class="figure">12.09bn</span><span class="label">Raw combinations</span></div>
+          <div class="stat reference"><span class="figure">4,224</span><span class="label">Legally possible</span></div>
+          <div class="stat reference"><span class="figure">372</span><span class="label">Verdict pairs — all reachable</span></div>
+          <div class="stat settled"><span class="figure">4,224</span><span class="label">Reproduced by the engine · no threshold</span></div>
+        </div>
+        <figure class="exhibit">
+          <div class="plate"><img src="img/02-data-generation.png" alt="A decision tree produces 4,224 legal cases; an orchestrator turns one into facts and hands blind slices to four generators producing six feed files, plus vendor exports and a withheld answer key."></div>
+        </figure>
+      </div>
+      <div class="colophon"><span>A generator never sees an episode id, a verdict, or an expected amount — asserted at runtime</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Building an episode</span><span>Six arrivals, one episode</span></div>
+      <div class="body fill">
+        <figure class="exhibit">
+          <div class="plate"><img src="img/03-episode-build.png" alt="Episode E-000012 built arrival by arrival, with the verdict recomputed after each arrival."></div>
+        </figure>
+      </div>
+      <div class="colophon"><span>Episode E-000012 · every code read off the running engine · a record that fits nowhere is parked, never dropped</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">The hard part</span><span>Three bridges, each with a named failure</span></div>
+      <div class="body fill">
+        <figure class="exhibit">
+          <div class="plate"><img src="img/04-crosswalk-keys.png" alt="Three join bridges with their exact key fields and failure modes, plus the bank's two-hop path from bank row to remittance to its claim lines."></div>
+        </figure>
+      </div>
+      <div class="colophon"><span>No identifier normalisation on the match path — 7845102 and 07845102 build different keys, on purpose</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 09 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">The engine</span><span>Evidence → dimensions → verdict → disposition</span></div>
+      <div class="body fill">
+        <figure class="exhibit">
+          <div class="plate"><img src="img/05-verdict-engine.png" alt="The engine pipeline: evidence at a cursor, eighteen dimensions, two verdicts judged separately, seven cross-track rules, then one of three dispositions."></div>
+        </figure>
+      </div>
+      <div class="colophon"><span>A pure function of (episode, cursor) · 43 track verdicts + 7 cross-track rules · aging is never an input</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Evidence</span><span>Measured, not asserted</span></div>
+      <div class="body">
+        <h2>The difference between a claim and a demonstration.</h2>
+        <div class="cols cols-4">
+          <div class="stat settled"><span class="figure">4,224</span><span class="label">of 4,224 oracle configurations · no threshold</span></div>
+          <div class="stat settled"><span class="figure">99.6%</span><span class="label">crosswalk reassembly against a withheld key</span></div>
+          <div class="stat"><span class="figure">978</span><span class="label">tests passing · no API key, no network</span></div>
+          <div class="stat"><span class="figure">0</span><span class="label">table scans · every hot query pins its plan</span></div>
+        </div>
+        <p class="sub"><strong>Stated, not hidden:</strong> no authentication and no tenant isolation yet; five of the 1,354
+          resolvable episodes do not reproduce their intended verdict; one query-plan test fails and is reported as a
+          failure rather than rounded to green.</p>
+      </div>
+      <div class="colophon"><span>Post-claim reconciliation</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide divider">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Demo</span><span>What we built</span></div>
+      <div class="body">
+        <p class="eyebrow">Demo</p>
+        <h1>What we built.</h1>
+        <p class="lead">A React dashboard over the read API, an episode dossier, the connector fabric,
+          and an agent layer that explains but never calculates.</p>
+      </div>
+      <div class="colophon"><span>Post-claim reconciliation</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 12 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Demo</span><span>The book at a glance</span></div>
+      <div class="body fill">
+        <div class="shots duo-even">
+          <figure>
+            <div class="plate"><img src="img/shot-queues.png" alt="Dashboard showing the replay cursor, the portfolio analyst entry point, and three queue tiles: 34 exception, 11 pending, 15 closed."></div>
+            <figcaption>Replay cursor · three dispositions, counted live at that cursor</figcaption>
+          </figure>
+          <figure>
+            <div class="plate"><img src="img/shot-queue.png" alt="Exception queue table listing episodes with verdict codes, variance and reopened chips."></div>
+            <figcaption>The exception queue — a query, not a table</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="colophon"><span>Every figure on screen was written by the engine and is returned verbatim</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 13 -->
+  <section class="slide">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Demo</span><span>One episode, then the agent</span></div>
+      <div class="body fill">
+        <div class="shots duo">
+          <figure>
+            <div class="plate"><img src="img/shot-dossier.png" alt="Episode dossier for E-000006 showing verdict B-10 and C-08, an X-1 cross-track flag, reopened from pending, expected and outstanding money, and a record timeline."></div>
+            <figcaption>E-000006 · B-10 / C-08 · X-1 cross-track</figcaption>
+          </figure>
+          <figure>
+            <div class="plate"><img src="img/shot-agent.png" alt="The agent's explain panel: what happened, why it is open, what it could not determine, and what a human should check first, with 23 numbered citations."></div>
+            <figcaption>What happened · why it is open · what it could <em>not</em> determine · 23 citations</figcaption>
+          </figure>
+        </div>
+      </div>
+      <div class="colophon"><span>The claim was denied and the rebate was paid anyway — a story no single-track view can tell</span><span class="pageno"></span></div>
+    </div>
+  </section>
+
+  <!-- 14 -->
+  <section class="slide divider">
+    <div class="sheet">
+      <div class="masthead"><span class="part">Demo</span><span>Switching to the app</span></div>
+      <div class="body">
+        <p class="eyebrow">Live</p>
+        <h1>Let me show you.</h1>
+        <div class="cue">
+          <div><b>1</b><span>Drag the replay cursor — the answer as it stood in March</span></div>
+          <div><b>2</b><span>Open the exception queue, pick the largest variance</span></div>
+          <div><b>3</b><span>Read the dossier — records, cash movements, verdict changes</span></div>
+          <div><b>4</b><span>Ask the agent to explain it, then to decide next steps</span></div>
+          <div><b>5</b><span>Edit the draft and commit it through the human gate</span></div>
+        </div>
+      </div>
+      <div class="colophon"><span>localhost:5173 · profile demo · seed 20250701</span><span class="pageno"></span></div>
+    </div>
+  </section>
+</div>
+
+<div class="progress" id="progress"></div>
+<nav class="hud" aria-label="Slide navigation">
+  <button id="prev" type="button" aria-label="Previous slide">&larr;</button>
+  <button id="next" type="button" aria-label="Next slide">&rarr;</button>
+  <button id="full" type="button" aria-label="Toggle fullscreen">&#9974;</button>
+</nav>
+<div class="hint" id="hint">&larr; &rarr; to navigate &nbsp;·&nbsp; F for fullscreen</div>
+
+<script>
+  (function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    var progress = document.getElementById("progress");
+    var hint = document.getElementById("hint");
+    var i = 0;
+
+    slides.forEach(function (s, n) {
+      var p = s.querySelector(".pageno");
+      if (p) p.textContent = String(n + 1).padStart(2, "0") + " / " + slides.length;
+    });
+
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach(function (s, k) { s.classList.toggle("is-live", k === i); });
+      progress.style.width = ((i + 1) / slides.length * 100) + "%";
+      if (location.hash !== "#" + (i + 1)) history.replaceState(null, "", "#" + (i + 1));
+    }
+    function step(d) { show(i + d); hint.classList.add("gone"); }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case "ArrowRight": case "ArrowDown": case " ": case "PageDown": e.preventDefault(); step(1); break;
+        case "ArrowLeft": case "ArrowUp": case "PageUp": e.preventDefault(); step(-1); break;
+        case "Home": e.preventDefault(); show(0); break;
+        case "End": e.preventDefault(); show(slides.length - 1); break;
+        case "f": case "F": e.preventDefault(); toggleFull(); break;
+      }
+    });
+
+    document.getElementById("next").addEventListener("click", function () { step(1); });
+    document.getElementById("prev").addEventListener("click", function () { step(-1); });
+    document.getElementById("full").addEventListener("click", toggleFull);
+
+    function toggleFull() {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    }
+
+    var x0 = null;
+    document.addEventListener("touchstart", function (e) { x0 = e.changedTouches[0].clientX; }, { passive: true });
+    document.addEventListener("touchend", function (e) {
+      if (x0 === null) return;
+      var dx = e.changedTouches[0].clientX - x0;
+      if (Math.abs(dx) > 48) step(dx < 0 ? 1 : -1);
+      x0 = null;
+    }, { passive: true });
+
+    window.addEventListener("hashchange", function () {
+      var n = parseInt((location.hash || "#1").slice(1), 10);
+      if (!isNaN(n) && n - 1 !== i) show(n - 1);
+    });
+
+    var start = parseInt((location.hash || "#1").slice(1), 10);
+    show(isNaN(start) ? 0 : start - 1);
+    setTimeout(function () { hint.classList.add("gone"); }, 6000);
+  })();
+</script>

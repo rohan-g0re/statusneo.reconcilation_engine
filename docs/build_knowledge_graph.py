@@ -1072,11 +1072,619 @@ def wave_13_trimmed_for_submission():
     R("Deleting a document orphans every pointer into it", "threatens", "Build state")
 
 
+# ===========================================================================
+# WAVE 14 -- the connectivity assignment
+# ===========================================================================
+
+def wave_14_connectivity():
+
+    E("Connectivity assignment", "Artifact",
+      "docs/Assignment_Doc_2.pdf -- StatusNeo's Connectivity Assessment, dated 11 September 2026, delivered after the reconciliation build was already complete",
+      "Assesses Beacon plus five priority 340B TPAs -- Verity 340B, PharmaForce, Craneware, Macro Helix, Pillr/RxStrategies -- on whether a direct machine-to-machine interface is publicly proven",
+      "Its subject is the layer UPSTREAM of everything already built: how data is obtained, authorised and landed, not what is done with it afterwards",
+      "Introduces the Shields connector fabric, a six-step connector build method, a working-connection versus production-ready split, and a Week 1-3 Go/Amber/Red vendor-access gate inside a 26-week programme",
+      "Of the five TPAs, only Verity and Craneware publish a proven machine-to-machine path, and it is scheduled SFTP rather than an API. Macro Helix, PharmaForce and Pillr have no public specification for transport or payload",
+      "Answered by docs/connectivity_layer_requirements.md on the connectivity_layer branch")
+
+    E("Beacon", "DomainActor",
+      "The 340B rebate-model platform manufacturers use -- it sits IN FRONT OF the manufacturer, not in front of the covered entity",
+      "Receives already-qualified claims and returns an acknowledgement, a validation outcome, a Beacon ID, a rebate status and a payment reference",
+      "A claim a TPA calls qualified can still die at Beacon -- the two decisions are independent, which is exactly why they are separate systems of record",
+      "Authentication is a documented two-token model, an Access Token plus a separate Private Token, with the covered entity granting Read or Read/Write partner permission per 340B ID",
+      "The only source in the whole assessment with published pharmacy and medical claim field templates, which is why it is the only one a faithful adapter can be built for",
+      "Absent from the existing object model entirely: the 340B feed collapses TPA qualification and the manufacturer decision into one track, where Doc 2 splits them across two companies",
+      "CORRECTS the `340B TPA` and `Manufacturer` entities without editing them, because both are grounding material. A TPA works for the COVERED ENTITY -- the hospital hires and pays it, so it argues for the hospital's discount -- while Beacon works for the manufacturer. They sit on opposite sides of the table",
+      "Source-of-truth split: the TPA is authoritative for qualification, Beacon for rebate status, the bank for settled cash, and Shields for nothing except the consolidated financial picture",
+      "Cash flows FROM the manufacturer TO the covered entity's own account. The manufacturer's bank is never a system we connect to, because under the rebate model the hospital already paid full commercial price and is out of pocket until the rebate arrives")
+
+    E("Only Beacon is an outbound connector", "Learning",
+      "Every other source in the connector fabric is a pull -- the Direction row on each TPA page reads inbound to Shields, and only Beacon's reads outbound as well",
+      "Shields is a consumer and reconciler, not a router: the pharmacy system feeds the TPA directly through the vendor's own contracted flow, and Shields ingests a copy in parallel",
+      "Putting Shields in the path before the TPA would make it the operational system of record for qualification, which the source-of-truth table explicitly refuses",
+      "Submission ownership is a per-covered-entity decision -- mode A has Shields submitting directly, mode B has the TPA submitting. If both do it, the same claim is submitted twice")
+
+    E("Shields connector fabric", "Mechanism",
+      "One shared middleware strip every source passes through: API/SDK gateway, secure file and EDI, auth and secrets, schema registry, idempotency, retry/replay, monitoring",
+      "The argument inside that one box is build this once, not seven times -- adding a vendor becomes an adapter on an existing spine",
+      "Four production patterns must be supported: API/SDK, SFTP/structured files, healthcare EDI X12/NCPDP, and banking/ERP -- direct-source does not mean API-only",
+      "Scored against what exists: EDI/X12/NCPDP is finished, SFTP and banking are half-built and need only transport, API/SDK is the one genuinely new build",
+      "The vendors own the interfaces, Shields owns permission and identity, and the delivery team owns the fabric -- Shields itself has none of it today, which is the premise of the engagement")
+
+    E("Connector-ready", "Decision",
+      "A third scope level, named because neither of Doc 2's own two is reachable in a prototype: both working connection and production-ready begin with the word authorized",
+      "Beacon, Verity, Craneware, Macro Helix, PharmaForce and Pillr are contracted enterprise products gated behind a covered entity -- no self-service signup, no token obtainable from outside a customer relationship",
+      "Means: adapter built to the vendor's published contract, exercised against a mock reproducing that contract, wrapped in the real transport and auth machinery, switchable to a live endpoint by configuration alone",
+      "Defensible on the document's own terms -- it says the interface packs must be obtained through vendor support, and that no public specification exists for four of the six platforms",
+      "PROVENANCE: approved by the user")
+
+    E("Production hardening is out of scope", "Decision",
+      "Doc 2's six-step build method supplies the cut line for free: steps 1-5 produce a working connection, step 6 is the entire delta to production-ready",
+      "Dropped accordingly -- retry, backoff, replay orchestration, connector observability, alerting, DQ quarantine surfacing, secrets rotation, backfill, runbooks, lineage tooling, cutover, performance, and exhaustive edge-case reconciliation",
+      "Kept despite sounding like hardening: checkpointing, idempotency and schema validation are named in STEP 3, and control totals in STEP 5. Reading the steps rather than the adjective is what settles it",
+      "The first draft mixed the two levels and had to be cut back, from 30 requirements to 19; the user rejected it in one sentence",
+      "PROVENANCE: approved by the user, explicitly and forcefully")
+
+    E("The data layer is built first", "Decision",
+      "Before any transport, connector or fabric code: produce real Beacon- and Verity-format data on disk, covering every vendor record type and all four golden-claim archetypes",
+      "The reason is testability, not convenience -- a transport with nothing to move, a schema registry with nothing to validate and a mapping with nothing to map can only be checked by reading them",
+      "Must stand alone: the data generates, is inspected and is asserted on with src/recon/connectors/ absent from the repository entirely",
+      "Reordered mid-session. The first plan had the data layer third, behind the framework, and the user moved it to first",
+      "PROVENANCE: approved by the user, stated as a hard requirement")
+
+    E("Vendor claims are cited or tagged INVENTED", "Decision",
+      "Beacon's and Verity's public documentation is indexed into docs/vendor_evidence/ with verbatim excerpts, source URLs and retrieval dates, before any code that names one of their fields",
+      "Every field in every mapping, mock and orchestrator change carries one of three tags: SPEC for a cited vendor source, STANDARD for X12/NCPDP/ISO 20022/FHIR, INVENTED for our own construction with the reasoning recorded",
+      "A source that cannot be fetched is recorded as unavailable with the failure and the date, and the fact it would have established is treated as unknown -- a model's recollection of a vendor's API is not evidence",
+      "Enforced by a test rather than by discipline: it walks the mappings, mocks and minted identifiers against index.jsonl, and deleting one evidence entry turns the suite red",
+      "The failure it prevents: a mock that is wrong is worse than no mock, because it is confidently wrong and looks identical in every demo",
+      "PROVENANCE: approved by the user, stated as a hard requirement")
+
+    E("Mocks are formatters, not generators", "Decision",
+      "Every source is served by a local mock, so the design question is whether those mocks generate data or re-dress data the orchestrator already produced",
+      "They re-dress it. A new Beacon or Verity generator would have to be handed the answer to produce a consistent story, which deletes the runtime blind-slice assertion in contracts.py",
+      "That assertion is the only reason crosswalk accuracy is a measured 1,349/1,354 rather than a claim, so it outranks any convenience a generator would buy",
+      "beacon_id and the Verity accumulation and invoice references are minted by the orchestrator alongside trn02 and allocation_code -- a cross-feed identifier is a value two systems must agree on, so exactly one component may decide it",
+      "If a mock ever needs data the assertion forbids, the mock is wrong, not the assertion",
+      "PROVENANCE: agent default, accepted by the user")
+
+    E("load_feeds transport seam", "Plan",
+      "The single genuine refactor the connectivity layer needs. Everything else in it is additive",
+      "load_feeds currently takes a feeds directory and walks config.FEED_FILENAMES, a fixed six-tuple, against FEED_SOURCE_SYSTEMS, a dict literal keyed by filename -- both assume a local directory of exactly six known files",
+      "The change makes the source the parameter instead of the directory, with LocalDirectoryTransport preserving today's behaviour and the old signature kept as a thin wrapper so no call site moves",
+      "Everything below load_feeds is untouched: ingest, _process_raw_record, _attach, _park, _recheck_parked and the allocator all operate on raw_record rows, and a row is a row regardless of how it arrived",
+      "That is the payoff of the original event-driven decision -- a record arriving over SFTP or HTTP is indistinguishable downstream from one read off disk")
+
+    E("A refactor can quietly delete a guarantee", "Trap",
+      "load_feeds takes a feeds directory and therefore CANNOT reach truth/ even by accident. That structural inability is why crosswalk accuracy is scoreable rather than assumed",
+      "A Transport protocol is a more general thing than a directory path, so the seam that makes the connector layer possible is also the seam that could silently restore reach to the answer key",
+      "The guarantee has to be restated in the new place: no transport implementation may expose arbitrary filesystem access, asserted by a test",
+      "Restating a structural guarantee somewhere else is fine. Losing it during a refactor that nothing fails on is not",
+      "PROVENANCE: agent default, found while planning the seam rather than by a test")
+
+    E("An instruction file goes stale silently", "Trap",
+      "CLAUDE.md carried six dead pointers -- START_HERE.md, docs/solutions/ twice, docs/agent_layer_data_readiness.md and docs/remaining_work.md -- all removed by wave 13's trim",
+      "It is exactly the trap wave 13 recorded, arriving on the one file loaded into every session's context, where a wrong pointer costs a search before any work starts",
+      "It survived because CLAUDE.md is not tracked by git, so the grep-after-deletion check that fixed the source comments never ran over it",
+      "The check that works is the same one, widened: grep every file for a deleted basename, tracked or not",
+      "Discovered by running /complete_compound and finding phase 1 had nothing to refresh -- the command's own scope was the stale pointer",
+      "PROVENANCE: agent default")
+
+    E("An observation on a routed entity rewrites the prompt", "Trap",
+      "Adding three observations to `340B TPA` and two to `Manufacturer` turned the eval suite from 23 passed to 4 failed, with no code change anywhere",
+      "The chain: those two entities sit on eleven ReasonCode and CrossTrackFlag routes in grounding.py, routed entities become Clauses, the clause index is rendered into the proposer prompt as a string, and client.py's ReplayClient keys recorded traces on a digest of the whole request -- so a new observation is a new prompt is a replay miss",
+      "The existing guidance was half right. It says grep src/recon/agents/ before any UNOBS, because removing grounding material breaks resolution. Adding is the mirror hazard and was not covered: it does not break resolution, it silently invalidates every recorded eval trace",
+      "There is a second-order version with no error at all. MAX_CLAUSES caps the index at 72, so observations added to a routed entity can push OTHER entities' clauses out of the window -- changing what the model can cite, quietly, in a passing build",
+      "The fix that keeps both properties: put the correction on a NEW entity and wire a relation to the routed one. Traversal still reaches it, the clause index does not move, and the recorded traces stay valid",
+      "The rule, stated once: treat any entity named in ROUTES as frozen. Correct it from the outside",
+      "PROVENANCE: agent default, found by running the suite after a graph rebuild rather than by reasoning about it")
+
+    E("HRSA rebate model pilot", "DomainConcept",
+      "HRSA issued a notice on 31 July 2026 letting qualifying manufacturers deliver the 340B price as a retrospective REBATE instead of an upfront discount",
+      "Limited to drugs selected under Medicare price negotiation for initial price applicability years 2026 and 2027, to deduplicate the Maximum Fair Price against the 340B discount",
+      "Manufacturer rebate plans were due 24 August 2026, HRSA approvals by 24 September 2026, and approved plans take effect 1 January 2027",
+      "Vindicates the project's single riskiest assumption -- modelling 340B as a rebate rather than replenishment, which the design note flagged as out of scope rather than a variant",
+      "It is also the deadline behind the connectivity urgency: a connector that cannot submit to Beacon and reconcile a rebate by January is late",
+      "hrsa.gov returned 403 to automated retrieval; the dates are cited from Epstein Becker Green, Covington and HLC summaries instead")
+
+    R("Connectivity assignment", "introduces", "Shields connector fabric")
+    R("Connectivity assignment", "introduces", "Beacon")
+    R("Connectivity assignment", "is answered by", "Connector-ready")
+    R("Beacon", "fronts", "Manufacturer")
+    R("Beacon", "decides independently of", "340B TPA")
+    R("Only Beacon is an outbound connector", "constrains", "Shields connector fabric")
+    R("Only Beacon is an outbound connector", "describes", "Beacon")
+    R("Connector-ready", "is bounded by", "Production hardening is out of scope")
+    R("Connector-ready", "requires", "The data layer is built first")
+    R("The data layer is built first", "is gated by", "Vendor claims are cited or tagged INVENTED")
+    R("The data layer is built first", "is realised by", "Mocks are formatters, not generators")
+    R("Mocks are formatters, not generators", "protects", "Generator independence")
+    R("Mocks are formatters, not generators", "extends", "Orchestrator")
+    R("load_feeds transport seam", "realises", "Shields connector fabric")
+    R("load_feeds transport seam", "preserves", "Event-driven ingestion")
+    R("A refactor can quietly delete a guarantee", "threatens", "load_feeds transport seam")
+    R("A refactor can quietly delete a guarantee", "protects", "Measure the claim against the generated data")
+    R("An instruction file goes stale silently", "is the same family as", "Deleting a document orphans every pointer into it")
+    R("An observation on a routed entity rewrites the prompt", "constrains", "Knowledge graph is generated, never written to")
+    R("An observation on a routed entity rewrites the prompt", "threatens", "Test suite")
+    R("An observation on a routed entity rewrites the prompt", "is why", "Beacon")
+    R("Beacon", "corrects from outside", "340B TPA")
+    R("Beacon", "corrects from outside", "Manufacturer")
+    R("HRSA rebate model pilot", "validates", "Rebate model")
+    R("HRSA rebate model pilot", "motivates", "Connectivity assignment")
+
+    # The corrections to `340B TPA` and `Manufacturer` deliberately live on the new
+    # entities above rather than on those two.  Both are grounding material -- they sit
+    # on eleven ReasonCode and CrossTrackFlag routes -- and an observation added to a
+    # routed entity becomes a clause in the index the proposer prompt embeds.  See the
+    # trap entity below; the relations wired above are the traversal path a reader
+    # follows from either entity to the correction.
+
+    OBS("Build state",
+        "Branch connectivity_layer carries the response to the second assignment: docs/connectivity_layer_requirements.md, 24 requirements in seven groups across seven waves. Nothing built yet",
+        "decision_tree/NOTES.md was removed -- REPORT.md supersedes it, and its four findings are named entities in this graph",
+        "The GitHub remote moved to statusneo.reconcilation_engine, one fewer l. Pushes still succeed through a redirect, but the configured origin URL is stale")
+
+
+def wave_15_building_and_reviewing_the_connector():
+    """What building waves 0-7 and then reviewing them adversarially settled.
+
+    Wave 14 recorded the connectivity layer as a PLAN. This wave records what
+    building it, and then attacking it with two independent reviewers, actually
+    produced -- including four things the build believed about itself that turned
+    out to be false.
+
+    None of these entity names appear in `grounding.py`'s routing tables, so none
+    becomes a Clause and the recorded agent-eval prompts are unmoved.
+    """
+
+    # --- what the build actually is, as opposed to what it was planned to be ---
+
+    E("The vendor adapters are written and unwired", "Status",
+      "src/recon/connectors/vendors/ -- verity.py, craneware.py, beacon.py -- is written, documented, schema-checked and unit-tested, and NOTHING IN src/ IMPORTS IT",
+      "Measured, not read: a full build produces 0 BEACON_ID rows and 0 PAYMENT_REFERENCE rows in crosswalk_key, on both the demo and full profiles",
+      "This single fact is the root cause behind four requirement failures at once -- C2 (outbound submission), C5 (Beacon ID as a key), E3 (payment references) and half of F2 (control totals)",
+      "The proximate reason is documented in registry.py rather than accidental: the delimited reader wants a received_at off every row, and a vendor export carries qualification_received_at / batch_received_at / reversal_received_at, so choosing among them is a mapping decision the seam does not yet make",
+      "F2's consequence is the sharpest: the only two sources in the build that declare a trailer are the two that never reach the reconciling path, so every control-total check that executes is vacuous",
+      "Recorded as FAIL in docs/connectivity_layer_build_plan.md rather than as a caveat under a green wave, because 'committed and green' and 'requirement met' are different claims")
+
+    E("The connector layer changed nothing downstream", "Status",
+      "A full build at HEAD against one at dbb129e, the pre-connector baseline, in a git worktree: episode identity -- id, track, ndc11, date_of_service -- is IDENTICAL on both demo and full",
+      "raw_record, normalized_record, episode, verdict, cash_allocation and parked_record counts all identical",
+      "The only downstream change is crosswalk_key, 11947 -> 13613 on full, and that delta of 1666 is exactly COVERED_ENTITY_340B 855 + HCPCS 811",
+      "Zero orphan raw_record rows, zero quarantines of any reason, zero COVERED_ENTITY_MISMATCH parks on generated data",
+      "So the honest split is: nothing was broken, and some things were never finished. Those are different failures with different fixes, and a review that reports only one of them is misleading")
+
+    # --- the traps, each earned by a real defect this session ------------------
+
+    E("A guard copied three times disagrees three ways", "Trap",
+      "PROVENANCE: agent default, found by an independent reviewer that executed the bypass rather than reading the guard",
+      "The ground-truth refusal existed in three transports -- transport.py, sftp.py, http.py -- as three independent copies of the same idea",
+      "They disagreed: http.py casefolded the comparison, the other two did not. SftpTransport refused /exports/truth and ACCEPTED /exports/TRUTH",
+      "A reviewer fetched ground_truth.json over a real paramiko SSH connection through that hole, end to end -- demonstrated, not theorised",
+      "transport.py's copy was correct only by accident: Path.resolve() canonicalizes an EXISTING path to its on-disk casing on Windows, protection that evaporates for a directory not yet created and that never existed on Linux",
+      "SFTP was also missing the second layer -- the local transport re-checks each document after resolving it, so a bad root is still caught per file; SFTP checked only at construction, making that one check the entire guarantee",
+      "Fixed by one _names_truth() helper all three call. The rule to take from it: a security property copied per call site is a property that holds in the average case and fails in some particular one",
+      "Whether TRUTH and truth are one directory is the SERVER's filesystem's opinion, not ours -- one on Windows and macOS, two on a POSIX host. A guard whose correctness depends on which host a vendor runs is not a guarantee")
+
+    E("A test can promise coverage its filter does not deliver", "Trap",
+      "test_no_transport_implementation_can_resolve_a_path_under_truth promised in its docstring to cover 'every implementation, not just this one'",
+      "It filtered on value.__module__ == transport.__name__, which enumerates exactly LocalDirectoryTransport -- both the wave-3 and wave-4 transports escaped it",
+      "`assert implementations` passed happily on a list of one, so the test was green and the guarantee was untested for two waves",
+      "This is why the SFTP bypass survived four waves of self-verification: the test meant to catch it was structurally incapable of seeing it",
+      "The fix pattern: assert on the SIZE of what a discovery test discovered (`>= 3`), because a discovery that finds too little looks identical to a subject that is clean")
+
+    E("An assertion whose subject is absent passes", "Trap",
+      "PROVENANCE: agent default, and the dead assertion was the agent's own, found by a reviewer reading what the fixture actually selects",
+      "A scoped-key assertion added in wave 5 selected the first EXCEPTION-queue episode, which is medical and carries no COVERED_ENTITY_340B key at all",
+      "The loop body therefore never ran, and an entities_seen that stayed empty satisfied `len(...) <= 1` as `0 <= 1`",
+      "Both assertions were dead the day they were written, inside a comment claiming the test checked 'strictly more' than the one it replaced",
+      "The same shape appeared twice more in the same review: a checkpoint-hash assertion guarded by hasattr(server, 'root') on a class with no public root, reducing to x == x",
+      "Fix pattern: a test that searches for its own subject must FAIL when it finds none. A guard that silently does nothing when its subject is absent is worse than no guard, because the green tick is read as evidence")
+
+    E("A docstring can assert a guarantee the code does not provide", "Trap",
+      "crosswalk/keys.py claimed requirement E1 held 'by construction rather than by a comparison someone has to remember to write' and that there was 'no equality check to forget'",
+      "It holds by exactly such a check -- pipeline._contradicts_covered_entity -- and COVERED_ENTITY_340B is published and never looked up by anything",
+      "Worse than being wrong: the sentence described a guarantee, so a reader would stop looking for the check that actually carries it",
+      "Three more in the same family were found and corrected: dossier.py claiming derived keys 'resolve records normally' when one resolves nothing, sites.py naming a vendor site column that does not exist, and two places still saying HCPCS 'is not built' after E2 landed",
+      "In a repository whose credibility rests on its prose being true, a false docstring is worse than a missing one -- it is a claim a reviewer will spend their scepticism elsewhere because of")
+
+    E("Idempotency that rests on statement order", "Trap",
+      "control_total has no unique constraint and no idempotency key. Re-running a load does not duplicate its rows, and the reason is not a constraint",
+      "It is that reconcile_or_fail sits AFTER the batch_for_file_sha256 early-continue in load_from_sources. Swap the two statements and every run appends a duplicate row into a table whose triggers forbid cleaning it up",
+      "No test pins that ordering: the acceptance is exercised through a test-local reimplementation of the loader's two statements, not through the loader",
+      "cash_allocation is protected the same transitive way -- by _insert_tree returning None on a repeat, not by any constraint of its own",
+      "The rule: when idempotency comes from control flow rather than from a constraint, the control flow is the invariant and something has to pin it")
+
+    E("A wire format agreed in two places and matched in neither", "Trap",
+      "PROVENANCE: agent default, found by a reviewer checking whether a cited test existed, then proven by running both sides",
+      "beacon.py says its submission template and the mock's payload builder are 'kept in step by a round-trip test rather than by an import'. That test does not exist",
+      "Proven empirically rather than inferred: the mock indexes on fill_date '20251216' (CCYYMMDD, straight off the generator sidecar) and a connector-built body would send date_of_service '2025-12-16' (ISO, because adapters.py converts it)",
+      "So the first real end-to-end submission would 404 with unknown_claim, and the acknowledgement check would then raise on the same mismatch",
+      "It survived because both sides were only ever tested against themselves -- the tests that 'submit' POST the mock's own payload builder, so the adapter's mapping never touches the wire",
+      "A claimed test is a load-bearing claim. Citing a test that does not exist is how two halves of a seam drift while both look verified")
+
+    # --- decisions, with provenance -------------------------------------------
+
+    E("A weak inference is worse than a null", "Decision",
+      "PROVENANCE: agent default, overturned by its own measured output rather than by review",
+      "Requirement E1 wanted episodes to carry a 340B covered entity",
+      "The first implementation derived it from the rendering prescriber's affiliation. It filled 22 of 23 medical episodes and then CONTRADICTED the TPA on five of them",
+      "DOC2-004 makes the TPA authoritative for 340B qualification and source transaction context, so the inference was overruling the system of record",
+      "It was worse than no value because it landed in a column everything downstream reads as fact, and then drove the contradiction guard -- so the guess parked five records the TPA had labelled correctly",
+      "Now registration-only: an episode's covered entity comes from the reference table's registered_pharmacy_npis or is NULL. Medical episodes carry NULL and get their entity from the record that states it",
+      "The asymmetry that makes NULL safe: the guard treats absence as 'no opinion' and never fires on it, so a null is inert where a wrong value is actively harmful")
+
+    E("Two independent reviewers beat four waves of self-verification", "Learning",
+      "PROVENANCE: the user specified this structure explicitly and insisted on it after it was skipped for four waves",
+      "Two Fable reviewers, each planning before dispatching, each directing its own fan-out of Opus workers, neither permitted to write code",
+      "Waves 3-6 had been built by single Opus builders that verified their own work and reported green. The review found a working ground-truth bypass, three tests that could not fail, and four false docstrings",
+      "The structural reason it worked: a builder verifies against what it intended to build, and a reviewer verifies against what the requirement says. Those diverge precisely where the builder misunderstood",
+      "The reviewers were also told the findings already recorded, so workers were not spent rediscovering them -- and were asked to state failure criteria BEFORE looking, so a comfortable reading could not be rationalised afterwards",
+      "Cost: roughly twenty Opus workers. It found a demonstrated security hole that four waves of green tests had not")
+
+    E("Measure the benchmark, not your own tokens", "Learning",
+      "PROVENANCE: agent default, prompted by the user rejecting a verification that had never looked at the benchmark",
+      "Every check before this one verified the stylesheet against ITS OWN declared tokens, which answers 'did the CSS apply', not 'does this look like Linear'",
+      "Measuring linear.app directly found three real divergences: display tracking of -0.022em was being applied to a 19px masthead when they reserve it for >=32px, our UI text sat at -0.006em against their measured -0.01em, and our card radius was 10px against their 12px",
+      "It also DISPROVED a claim this build had been repeating: 'Linear's look is borders-not-shadows' is false -- they run 42 shadowed elements to 98 bordered page-wide",
+      "We still use zero shadows, but now as a stated divergence with a reason (a shadow reads as depth on their near-black page and as smudge on a light one at this density) rather than as mistaken fidelity",
+      "Recorded in docs/frontend_linear_benchmark.md, including the three divergences kept deliberately -- colour, shadows and the strict spacing scale")
+
+    E("A changelog drawn as boxes is not a system diagram", "Learning",
+      "PROVENANCE: user decision, stated bluntly after ten such bands had already been committed",
+      "Rows of labelled rectangles summarising what each wave did contain no components, no direction and no arrows",
+      "A system diagram answers what talks to what and in which direction. A changelog answers what happened and when. Only one of those is architecture, and the boxes made the wrong one look like the right one",
+      "The canvas already held the correct model -- 'THE WHOLE PROJECT, END TO END', 99 elements of which 26 are arrows -- and the right move was to extend that language rather than invent a worse one beside it",
+      "Replaced with 97 elements, 20 arrows: vendors into mocks into transports into load_from_sources into raw_record, then the unchanged pipeline, then the surface",
+      "The two things drawn because they are true rather than flattering: the vendor leg ends in a DASHED arrow that stops short of the seam, and the truth store sits crossed out")
+
+    # --- what phase 1's refresh turned up, which is itself graph-worthy --------
+
+    E("A citation by line number rots on the next edit", "Trap",
+      "PROVENANCE: agent default, found by auditing docs/agent_layer_design.md against the code rather than by a test",
+      "The fourth member of the pointer-rot family, and the one the existing three do not cover: the file still exists and its name is still right, only the LINE moved",
+      "agent_layer_design.md cited src/recon/db/schema.sql:461-464 for the work_item triggers. The fact was still true; the triggers had moved to 518-521 because the connectivity layer took the schema from user_version 3 to 7 and shifted everything below it",
+      "It runs in both directions. rubric.py cited agent_layer_design.md:55 and :66, and both had moved -- then moved again when this refresh edited the document",
+      "The fix is not a better line number, it is a different kind of reference: rubric.py now cites the document's SECTION. A section survives an edit above it; a line number is invalidated by every insertion, including the one that corrects it",
+      "The suite cannot see any of this. A comment pointing at the wrong line of a real file is not a failure any runner checks")
+
+    E("The walkthrough narrates an episode that does not exist", "Trap",
+      "PROVENANCE: agent default, found by auditing the walkthroughs against a real run rather than against the code that produces them",
+      "Both walkthroughs -- the documents written for a spoken interview -- are built around claim E-000042 with verdicts A-07/C-09, short $1,367.97 with a $6,864.00 rebate",
+      "On the frozen demo spine, E-000042 is A-02/C-00. The pair A-07/C-09 lands on NO episode at all. Anyone clicking E-000042 during the walkthrough sees a different claim than the one being described",
+      "The first reviewer blamed the connectivity layer's reseeding. That was WRONG and worth recording: checked at dbb129e, before any connector work, the example was already wrong there. Episode identity is byte-identical between the two commits",
+      "So the real cause is older and simpler -- the figures were hand-composed to illustrate the narrative and never re-derived from a run, and nothing checks a document's worked example against the data",
+      "The fix is not better numbers, it is not using a real-looking id a reader will click. The closest true episode is E-000007 (A-04/C-09): reimbursement reconciled at $6,638.63, rebate approved and never paid, $1,929.00 outstanding",
+      "A worked example is the most load-bearing prose in any walkthrough and the only kind no test can see")
+
+    E("A design document can specify a mechanism the build never used", "Learning",
+      "PROVENANCE: agent default, found by auditing the design document against the implementation it preceded",
+      "agent_layer_design.md's schema section rested on `pydantic.BaseModel` preserving declaration order into `model_json_schema()`, with illustrative code writing `class ProposedAction(BaseModel)`",
+      "The build uses no pydantic at all. schemas.py is frozen dataclasses plus a hand-written ordered _FIELD_SCHEMAS dict, because pydantic arrives only with the `api` extra and the agent layer must import on a base install that has neither it nor FastAPI",
+      "The PRINCIPLE the section argued for -- reasoning-first field order, worth ~60pp on hard tasks -- is correctly implemented. Only the named mechanism was wrong, which is the more dangerous shape: the claim reads as verified because its conclusion is true",
+      "Same audit found the document's EvidenceSpan illustration claiming model-supplied offsets, where the code deliberately forbids them and locates quotes with str.find() afterwards -- the code is STRICTER than its own design document",
+      "A document written alongside an implementation drifts hardest where it was most confident, because confident prose is what nobody re-checks")
+
+    # --- corrections to wave 14, which planned what this wave built ------------
+    # None of these entities is routed in grounding.py, so extending them moves
+    # no prompt and invalidates no recorded eval trace.
+
+    OBS("Connector-ready",
+        "Measured out as: 14 declared sources, all CONNECTOR_READY, and zero at working-connection or production-ready",
+        "The readiness report states 'No source in this build has ever reached a vendor system' and that sentence is armed -- a test points a row at a real host, resolves a credential, and asserts the report would say otherwise",
+        "But connector-ready turned out to cover two quite different states: the six generated feeds genuinely ingest, and the eight vendor sources map without ever reaching the database. The report does not yet distinguish them")
+
+    OBS("Vendor claims are cited or tagged INVENTED",
+        "Held under audit: zero citation violations across 247 + 69 provenance rows, every cited id present in index.jsonl, no SPEC row citing an UNAVAILABLE source",
+        "Verified non-vacuously -- the parser matched exactly the row counts both files declare for themselves, so nothing was being silently skipped",
+        "One weakness the audit named: SPEC covers both 'the vendor said it' and 'an assessment document about the vendor said it', and no test enforces the distinction. BEACON-013's url is Assignment_Doc_2.pdf page 3, which reads as first-hand at a glance")
+
+    OBS("A refactor can quietly delete a guarantee",
+        "This trap predicted the exact defect that later happened. The transport seam did generalise a directory into a Transport, and the ground-truth guarantee did survive in two of three implementations and silently fail in the third",
+        "What the original framing missed: the danger was not the refactor losing the check, it was the refactor COPYING the check, so three call sites each had one and only two were right")
+
+    # --- relations -------------------------------------------------------------
+
+    R("The vendor adapters are written and unwired", "blocks", "Connector-ready")
+    R("The vendor adapters are written and unwired", "is a limit of", "Shields connector fabric")
+    R("The connector layer changed nothing downstream", "is evidence for", "load_feeds transport seam")
+    R("The connector layer changed nothing downstream", "measured against", "Test suite")
+
+    R("A guard copied three times disagrees three ways", "is an instance of", "A refactor can quietly delete a guarantee")
+    R("A guard copied three times disagrees three ways", "threatens", "Measure the claim against the generated data")
+    R("A test can promise coverage its filter does not deliver", "is why", "A guard copied three times disagrees three ways")
+    R("An assertion whose subject is absent passes", "is the same family as", "A test can promise coverage its filter does not deliver")
+    R("A docstring can assert a guarantee the code does not provide", "is the same family as", "An instruction file goes stale silently")
+    R("Idempotency that rests on statement order", "threatens", "load_feeds transport seam")
+    R("A wire format agreed in two places and matched in neither", "is a limit of", "The vendor adapters are written and unwired")
+    R("A wire format agreed in two places and matched in neither", "is the same family as", "A docstring can assert a guarantee the code does not provide")
+
+    R("Two independent reviewers beat four waves of self-verification", "found", "A guard copied three times disagrees three ways")
+    R("Two independent reviewers beat four waves of self-verification", "found", "An assertion whose subject is absent passes")
+    R("Two independent reviewers beat four waves of self-verification", "found", "The vendor adapters are written and unwired")
+    R("A weak inference is worse than a null", "corrects", "Connector-ready")
+    R("Measure the benchmark, not your own tokens", "is the same family as", "Measure the claim against the generated data")
+    R("A changelog drawn as boxes is not a system diagram", "constrains", "Connectivity assignment")
+
+    R("The walkthrough narrates an episode that does not exist", "is the same family as", "A citation by line number rots on the next edit")
+    R("The walkthrough narrates an episode that does not exist", "threatens", "Build state")
+    R("A citation by line number rots on the next edit", "is the same family as", "Deleting a document orphans every pointer into it")
+    R("A citation by line number rots on the next edit", "threatens", "Agent layer")
+    R("A design document can specify a mechanism the build never used", "is the same family as", "A docstring can assert a guarantee the code does not provide")
+    R("A design document can specify a mechanism the build never used", "describes", "Agent layer")
+
+
+def wave_16_vendor_sourced_ingest():
+    """Inverting the TPA source, and the assumptions that measuring it disproved.
+
+    The session that made the reconciliation engine run on a vendor's export rather
+    than on a generic feed this repository invented for itself.
+    """
+
+    # --- what the authority table decided, rather than us -------------------
+    E("A TPA may not assert rebate status", "Decision",
+      "connectors/authority.py lists REBATE_BATCH and REBATE_DISPENSE_LINE under _REBATE_STATUS with authoritative = {BEACON, MANUFACTURER_REBATE}, so a TPA source emitting either is refused at the kind check before any field is read",
+      "Asking it directly returns: a TPA_VERITY source may not assert rebate status: a REBATE_DISPENSE_LINE record is the claim itself",
+      "The plan framed verity_invoices as blocked on unsettled batch-versus-line semantics; the real blocker was prior, and the system already answered it",
+      "The same boundary that quarantined nine Craneware rows for authoring manufacturer_status, one level up: not a field a TPA may not set, but a kind a TPA may not be",
+      "A TPA invoice is a fact the TPA owns -- this is what we billed -- about a payment decision the TPA did not make",
+      "PROVENANCE: agent default, derived from the authority table rather than chosen")
+
+    E("TPA_INVOICE_LINE", "Mechanism",
+      "The record kind verity_invoices lands as, after refusing to adapt for two waves",
+      "Both money figures are carried verbatim as text under relayed_ names and neither is summed; amount_cents is null",
+      "Outside dimensions._KIND_BUCKETS and inside engine.run._ROLE_BY_KIND: gathered, cited, on the timeline, moving no verdict",
+      "Mapping it in _ROLE_BY_KIND is not housekeeping -- that lookup defaults to ADJUDICATION, so an unmapped kind is filed as the episode pharmacy adjudication evidence rather than refused",
+      "A reversed invoice row emits no TPA_REVERSAL child: TPA_REVERSAL is bucketed and dimensions reads clawed_back = bool(tpa_reversals) and paid > 0, so a second reversal through the invoice door would move episodes to C-13",
+      "beacon_id is relayed rather than set -- the authority domain rationale says a Verity export echoes a beacon_id as a lookup handle and a caller resolving a key should not pass it as a fact",
+      "Proven to move nothing by building the dataset with and without it and comparing a digest over dispositions, both verdict codes and the rebate money across all 60 episodes")
+
+    # --- what measurement disproved -----------------------------------------
+    E("A data-derived filename accumulates runs that never happened", "Trap",
+      "Verity export names are derived from the data so identical data lands an identical filename, which is what makes file-level idempotency testable",
+      "The corollary nobody wrote down: different data lands a different name, and the old one is never overwritten",
+      "Three generations sat side by side in data/generated/demo/vendor/verity/, and of the 37 rebate allocation codes in the two older invoice exports, ZERO appeared in any feed",
+      "A reader cannot know a data-derived name in advance so it matches by filename prefix -- all three matched, and taking the first read the oldest run",
+      "It manufactured a finding rather than merely cluttering: the batch-versus-line disagreement that sent this work looking for invoice semantics was read out of a superseded file, and in the live one every batch lines sum to its declared total exactly",
+      "The writer is at fault, not the reader -- a real vendor SFTP directory legitimately holds successive deliveries that should all be ingested; what must not appear is a delivery that was never sent",
+      "Craneware and Beacon are immune because they write to constant filenames")
+
+    E("The 340B feed carries two authorities", "Learning",
+      "tpa_340b_events.jsonl is not one feed: every row declares its own author",
+      "On the demo profile 78 rows say TPA_PORTAL (qualification decisions, rebate requests, dispense reversals) and 35 say MANUFACTURER_REBATE (payment batches, manufacturer decisions)",
+      "_adapt_tpa has honoured that split since before any connector existed, reading the row own source_system rather than the file",
+      "So inverting the TPA source swaps 78 rows, not a file -- a vendor export replaces what the TPA said and cannot replace what the manufacturer said",
+      "The plan step to demote the feed to generation-only is therefore not available as written: dropping the file takes the rebate money with it",
+      "Filtering rows at load is safe on this file for a checked reason, not a general one -- control_totals.declared_in returns NOTHING_DECLARED for any document with no record-type column, which covers every generated feed; on a vendor export, which declares a trailer count, excluding rows would manufacture a shortfall and fail the load")
+
+    E("No vendor export carries the rebate request", "Learning",
+      "_derive_rebate reads request = SUBMITTED if evidence.tpa_requests else NOT_SUBMITTED and returns immediately on NOT_SUBMITTED, short-circuiting manufacturer status, payment and cash at once",
+      "The generic feed carries 33 REBATE_REQUEST events; neither verity_accumulations nor craneware_claims_report has a column for it, because asking the manufacturer happens after qualification and is reported by whoever asked",
+      "So both vendor modes collapse 30 of 60 episodes to C-03",
+      "The filler exists and is already ingested: every episode holding a rebate request also holds a Beacon acknowledgement, zero orphans, and Beacon reaches 6 more besides",
+      "DOC2-004 makes Beacon authoritative for the rebate submission identifier, so in the inverted world we submitted is Beacon fact rather than the TPA word for it",
+      "Held open deliberately: BEACON_ACKNOWLEDGMENT is outside _KIND_BUCKETS by decision and bucketing it moves verdicts on those 6, which is a separately measurable step",
+      "PROVENANCE: agent default -- the default build stays on the generic feed until this gap closes, because flipping it first would make the demo strictly worse")
+
+    E("Verity cannot express a disqualification", "Learning",
+      "verity_accumulations is the dispenses that accumulated, a population selected on qualification_status, which vendors/verity.py says can only be QUALIFIED there",
+      "So a NOT_QUALIFIED decision has no row to sit on, and Verity lands 34 qualifications where the generic feed and Craneware land 39",
+      "Those 5 episodes reach C-00 track absent -- not this dispense was refused, but this dispense was never 340B",
+      "Craneware Claims Report is a report of claims rather than of accumulations, so a non-qualifying row has a home in it and the disqualifications survive",
+      "The sharpest reason one export is not interchangeable with another, and invisible at the row level: both files parse, contract-check and ingest perfectly")
+
+    E("Craneware lands a whole report at one instant", "Learning",
+      "The Claims Report publishes no per-row arrival time, so every row inherits the delivery stamp: 4 distinct arrival moments across 39 records against Verity 41 across 61",
+      "The engine evaluates at a cursor, so this changes what a verdict could have known -- a dispense qualified in August arrives when the next report was cut",
+      "Measured: Craneware reopens 64 previously-closed verdicts against the generic feed 34, on a DIFFERENT set of episodes, four of which the generic feed never reopens",
+      "Verity reopened episodes are a strict subset of the generic feed, because it carries its own stamps and moves nothing earlier or later than the fact justified",
+      "Not a connector defect -- a true fact about what the vendor ships, and invisible everywhere else because the rows parse, the control total agrees and the final exception count is the same either way")
+
+    E("A mock that repairs a defect is worse than one that adds a wrong value", "Trap",
+      "Landing vendor divergence defaulted rx_rendering_craneware to CANONICAL, which reads as the safe default and is the opposite",
+      "Where D-6 had already drifted the feed Rx, Verity reported the drifted spelling and Craneware reported the CORRECT one -- 22105567 against 221055677",
+      "A wrong value is visible; a repair hands the connector a join the real feed does not have, so the crosswalk miss vanishes through one vendor door and every count downstream agrees with itself",
+      "mocks/source.py had already warned about exactly this: the sidecar stores the key spelled the way the TPA feed spells it, drift included",
+      "Found by printing the diverged pairs, not by a test -- at that point no test looked",
+      "The fix is that Craneware inherits the feed rendering and diverges only when the generator says so")
+
+    E("Vendor divergence", "Mechanism",
+      "Verity and Craneware are formatted from one shared VendorSource, so without this they report the same qualification for the same dispense always, and the two vendors agree is a property of the generator rather than a finding",
+      "Follows the D-6 pattern because it has no choice: recon.mocks may not import recon.generators, so a formatter cannot make this call",
+      "Decide in _defect_directives, freeze onto EpisodePlan as rx_rendering_craneware, render into a NEW sidecar column, and let each formatter read its own",
+      "A new column rather than a diverted one: load_source joins TPA events onto the sidecar on five fields including rx_number, so changing that one would unjoin the dispense rather than produce a disagreement",
+      "Only planned where the TPA rendering is already canonical, or a vendor disagreement would be indistinguishable from D-6 -- the one thing it has to be told apart from",
+      "The modulus is coprime to both drift moduli so the two defects cannot land on the same episodes by arithmetic coincidence",
+      "There is no AST test banning decision logic in a formatter -- branching is legal and all three formatters do it. The guard that binds is that every two-decimal amount emitted must appear verbatim in the TPA feed, so a divergence may ride an identifier and may not ride an amount",
+      "PROVENANCE: agent default")
+
+    E("An unexplained verdict transition is the finding", "Learning",
+      "Replacing evidence cannot claim nothing moved the way adding evidence can, so the acceptance test for vendor-sourced ingest reconciles differences instead of asserting a matching digest",
+      "Every episode whose verdict changes must fall into a named bucket; an unexplained transition fails with the before and after codes in the message, because 35 episodes changed says nothing and C-09 became C-11 on four episodes says where to look",
+      "It worked: landing vendor divergence produced C-13 to C-01 on one episode, which the test refused as unexplained -- correct behaviour arriving through a cause the test did not yet know about",
+      "The third bucket is keyed to the specific episodes the generator disputed rather than to the transition, because allowing C-13 to C-01 generally would excuse it everywhere")
+
+    # --- corrections to earlier waves ---------------------------------------
+    UNOBS("The vendor adapters are written and unwired",
+          "NOTHING IN src/ IMPORTS IT",
+          "a full build produces 0 BEACON_ID rows and 0 PAYMENT_REFERENCE rows")
+    OBS("The vendor adapters are written and unwired",
+        "SUPERSEDED on the TPA side: build_dataset(tpa_source=verity|craneware) runs the whole engine on a vendor export, and vendor rows reach 25 episodes through Verity and 28 through Craneware",
+        "Beacon three inbound payloads are ingested on every build, so BEACON_ID and PAYMENT_REFERENCE are published on an ordinary run",
+        "What remains unwired is the dashboard: /api/regenerate takes no tpa_source and always builds generic, so the vendor door is reachable from Python and the suite and from nowhere a reviewer would click")
+
+    OBS("Connector-ready",
+        "The two-state split this entity names is closed on the TPA side: the vendor sources now reach the database, are asserted at verdict level rather than at normalized_record, and their differences from the generic feed are reconciled per verdict code")
+
+    R("A TPA may not assert rebate status", "constrains", "TPA_INVOICE_LINE")
+    R("TPA_INVOICE_LINE", "realises", "Connector-ready")
+    R("A data-derived filename accumulates runs that never happened", "threatens", "TPA_INVOICE_LINE")
+    R("The 340B feed carries two authorities", "constrains", "The vendor adapters are written and unwired")
+    R("No vendor export carries the rebate request", "threatens", "The vendor adapters are written and unwired")
+    R("Verity cannot express a disqualification", "threatens", "The vendor adapters are written and unwired")
+    R("Craneware lands a whole report at one instant", "threatens", "The vendor adapters are written and unwired")
+    R("Vendor divergence", "realises", "An unexplained verdict transition is the finding")
+    R("A mock that repairs a defect is worse than one that adds a wrong value", "threatens", "Vendor divergence")
+    R("An unexplained verdict transition is the finding", "constrains", "The 340B feed carries two authorities")
+
+
+# ===========================================================================
+# WAVE 17 -- pitching the system to people who did not build it
+# ===========================================================================
+
+def wave_17_pitching_the_system():
+    E("A correction banner is perishable in both directions", "Trap",
+      "PROVENANCE: agent default, found by re-auditing a correction that a previous audit had written",
+      "Both walkthroughs carried a banner saying 'the worked example is wrong, point at E-000007 instead'. Re-run against the database, BOTH halves had rotted: the thing it corrected FROM and the thing it corrected TO",
+      "E-000042 is no longer A-02/C-00 as the banner asserts -- it is A-13/C-14. E-000007 is no longer A-04/C-09 at $6,638.63 and $1,929.00 -- it is A-02/C-00, PENDING, nothing received",
+      "The E-000007 figures were STALE, NOT INVENTED, and the distinction matters because it changes the fix. docs/images/01-dashboard.png shows them, so they were true of the generation that was live when the banner was written",
+      "The generator reassigns episode ids on every reseed, so any id quoted in prose is a snapshot of one dataset generation and nothing tells the prose when that generation is replaced",
+      "The same rot hits committed screenshots: docs/images/ shows queue counts 34/11/15 where the database now answers CLOSED 10, EXCEPTION 40, PENDING 10. A screenshot is a dataset generation too, and it is the kind nobody re-derives",
+      "Fixed by making the banner self-refreshing rather than by finding a better id -- it now names E-000004 AND carries the SQL that re-derives the pointer, and says outright that its own first version rotted",
+      "E-000004 is the whole approved-but-unpaid-rebate story and the only C-09 on the spine: $14,540.39 expected and received with the deposit matched, then a $4,149.00 rebate approved and sitting at C-01 for ten cursors before the age threshold trips it to C-09 at the last one",
+      "A correction inherits the defect it corrects. Writing one without a way to re-derive it just moves the expiry date")
+
+    E("Proving the engine is not serving mock verdicts", "Learning",
+      "PROVENANCE: user challenge -- 'have we created verdict mock data as well, or is our engine really generating that data' -- with the proof method an agent default",
+      "The doubt is reasonable and recurs: a demo whose verdicts look this tidy is exactly what a seeded fixture table would look like",
+      "Reading the code does not settle it, because a reader cannot tell a computed row from a loaded one by looking at the schema",
+      "The proof is destructive and must be run on a COPY: drop the append-only triggers (they exist precisely to forbid this), DELETE every row from verdict, then replay engine.run_all over the monthly cursors",
+      "The rebuilt table came back byte-identical to the original, verdicts and reasons both. Verdicts are computed from (episode, cursor) and nothing else",
+      "The second half of the proof is a grep: nothing outside generators/ reads ground_truth.json except a test and the docstrings that forbid it",
+      "State the method, not the row count, when recording this. The counts move with every reseed -- the byte-identity does not")
+
+    E("A broad ignore rule can commit a document with broken images", "Trap",
+      "PROVENANCE: agent default, introduced and then caught while assembling the pitch folder",
+      ".gitignore carried a blanket `*.png` to keep Playwright screenshot debris out of the repository",
+      "It also swallowed every diagram the pitch document and the HTML deck reference by relative path, so both committed clean and rendered with broken images for anyone who cloned",
+      "Nothing errors. The build passes, the markdown is valid, and the failure is only visible to a reader who is not the author",
+      "Fixed with negation rules per content directory rather than by narrowing the debris rule, because the debris rule is right and the content is the exception",
+      "The .pptx was immune because it EMBEDS its images. A format that copies its assets cannot have this bug -- a format that links them always can")
+
+    E("Merging Excalidraw files means rewriting references, not prefixing ids", "Learning",
+      "PROVENANCE: agent default, from building one canvas that holds every pitch diagram",
+      "Naive concatenation collides ids across files. Prefixing every element id fixes the collision and silently breaks the drawing",
+      "Excalidraw points at ids from five other places -- containerId, frameId, groupIds, boundElements and startBinding/endBinding -- and every one must be rewritten with the same prefix or arrows detach from shapes and labels float free of their containers",
+      "Verified structurally instead of visually: 321 elements, zero duplicate ids, zero dangling references",
+      "Chromium cannot screenshot the result -- a 16,224-unit canvas exceeds the renderer. Loading was proved instead by exporting SVG through Excalidraw's own engine, 458 shapes and 389 texts with no page errors",
+      "Hand-laying out Excalidraw text needs a per-case width factor: about 0.55 of the font size per character for mixed case, but nearer 0.685 for UPPERCASE and underscore-heavy strings. Using the low figure on an uppercase label collided two columns")
+
+    E("The pitch artefacts are a build, with the document frozen", "Decision",
+      "PROVENANCE: user decisions throughout -- language, page budget, slide ceiling, file format and the freeze were all stated explicitly",
+      "Audience is solution engineers and investors, and the document is RECITED aloud, which is what sets the language bar: plain enough to read off, no vocabulary chosen to sound impressive",
+      "Stated budgets were hard, not aspirational: under 10 pages for the document, under 15 slides for the deck",
+      "Diagrams were constrained the same way -- no dense arrows, no subtitles, no detail added because it was available",
+      "The deck had to become a real .pptx with embedded images rather than markdown or a hosted page, so it can be edited locally without the author in the loop",
+      "Once the document was accepted it was FROZEN: later requests for a rebate walkthrough and for an episode-assembly view were both answered by adding a slide, never by reopening the document",
+      "PowerPoint holds an exclusive lock on an open deck, so the builder takes an output path as argv[1]. Build to a temp path and copy in later -- killing the process risks the user's unsaved edits and is never the right move")
+
+    # --- corrections to earlier waves -----------------------------------------
+    # Neither entity below is named in grounding.py's ROUTES tables, so extending
+    # them moves no proposer prompt and invalidates no recorded eval trace.
+
+    UNOBS("The walkthrough narrates an episode that does not exist",
+          "The closest true episode is E-000007")
+    OBS("The walkthrough narrates an episode that does not exist",
+        "The fix is not better numbers and not a real-looking id a reader will click -- it is a pointer that carries the query which re-derives it, because the id itself rots on the next reseed",
+        "The E-000007 replacement this entity used to name has itself gone stale, which is recorded separately as the trap that a correction banner is perishable in both directions")
+
+    OBS("Craneware lands a whole report at one instant",
+        "The committed demo database is the Craneware build -- 43 TPA_CRANEWARE raw records and zero TPA_PORTAL -- so this clustering is what every walkthrough and every screenshot is actually showing",
+        "Measured on that build: 43 rows across 6 distinct arrival moments, 38 of them sharing the final cursor 2026-07-01T23:59:59Z",
+        "The consequence a reader notices first is ORDER. Qualification is supposed to precede the Beacon submission it gates, and on this spine it arrives last, after Beacon, because the delivery stamp is the only time the vendor publishes",
+        "So the walkthrough is describing a real inversion rather than a defect: the logical order holds, the observed arrival order does not, and only the arrival order is visible in the data")
+
+    R("A correction banner is perishable in both directions", "supersedes", "The walkthrough narrates an episode that does not exist")
+    R("A correction banner is perishable in both directions", "realises", "Deleting a document orphans every pointer into it")
+    R("A correction banner is perishable in both directions", "realises", "A citation by line number rots on the next edit")
+    R("Proving the engine is not serving mock verdicts", "supports", "Deterministic boundary")
+    R("Proving the engine is not serving mock verdicts", "depends on", "Cursor replay")
+    R("Proving the engine is not serving mock verdicts", "constrains", "Recompute never mutate")
+    R("A broad ignore rule can commit a document with broken images", "threatens", "The pitch artefacts are a build, with the document frozen")
+    R("Merging Excalidraw files means rewriting references, not prefixing ids", "supports", "The pitch artefacts are a build, with the document frozen")
+    R("The pitch artefacts are a build, with the document frozen", "depends on", "Craneware lands a whole report at one instant")
+
+
+def wave_18_vendor_default_and_the_beacon_limit():
+    """Making a vendor the default, and what checking the Beacon docs first settled.
+
+    The user's instruction was to check the documentation before building either
+    Beacon item. Doing so answered both with "do not", which is the most valuable
+    thing this session produced.
+    """
+
+    E("Our Beacon mock can only restate the feed", "Learning",
+      "beacon_payloads.rebate_status reads manufacturer_decision off the same MANUFACTURER_DECISION event -- or REBATE_PAYMENT_BATCH line -- that the engine already ingests",
+      "Measured on the demo profile: Beacon's decision agrees with the feed on 30 of 30 dispenses, and zero REJECTED validation outcomes exist that the feed cannot already explain",
+      "So enabling beacon_rebate_status would add 30 duplicate TPA_MANUFACTURER_DECISION records through a second door for no informational gain",
+      "It specifically CANNOT turn C-05 into C-07, which is what the code comment predicted: where the feed is silent _manufacturer_decision returns None and Beacon is silent too, so that population does not exist",
+      "A new verdict code for a validation refusal would likewise give one judgement two codes -- REJECTED means a NOT_QUALIFIED qualification or a rejected manufacturer decision, both already modelled",
+      "This is a limit of the MOCK, not of the architecture: DOC2-004 genuinely makes Beacon authoritative for rebate status, and our Beacon is a re-dressing of the 340B feed",
+      "Making it demonstrable needs Beacon able to DISAGREE with the feed -- the same deliberate divergence the two TPAs carry -- at which point Beacon winning is a demonstration rather than a duplicate row",
+      "PROVENANCE: user instructed that the Beacon documentation be read before deciding; the documentation and the code decided it")
+
+    E("The default TPA source is a vendor", "Decision",
+      "build_dataset and /api/regenerate read the TPA's own rows from a vendor export unless told otherwise; the generic feed is still generated in every mode because the vendor formatters read it",
+      "In production there is no generic TPA feed -- there is Verity's export, or Craneware's, or a sixth TPA's -- so a prototype defaulting to the one shape no vendor ships demonstrates the wrong thing",
+      "Craneware rather than Verity, on the state space rather than preference: verity_accumulations is a population selected on qualification_status and cannot express a disqualification, so four episodes lose their 340B track and read as never-340B instead of refused, against Craneware's one",
+      "Verity stays one query parameter away and is the only vendor exercising TPA_INVOICE_LINE",
+      "PROVENANCE: approved by the user")
+
+    E("Switching a default turns theoretical gaps real", "Learning",
+      "Flipping the TPA source to a vendor broke three things, and all three were genuine rather than test brittleness",
+      "One refused Beacon submission lost its cover and now sits in PENDING -- an operator waiting on a manufacturer decision that cannot arrive, because nothing in the engine reads a validation refusal",
+      "test_api asserted every cited file is one the build reads, from a list written before vendor sources existed; claims_report.csv became a legitimate citation",
+      "The agent eval fixtures replayed against a generic-default dossier and missed, needing a re-record",
+      "The stranded episode is pinned as an EXACT count rather than relaxed, so it cannot grow quietly and so the day it reaches zero the test says the gap closed",
+      "Fixing it properly moves the verdict-pair count off the 372 the oracle is built on, which is why it is its own measured work and not something to slip in beside a default switch")
+
+    E("A readiness report can understate its own build", "Trap",
+      "The connectivity page listed craneware_claims_report as 'not configured' and 'switched off' while the build read it on every run",
+      "Both facts were individually true: the gate columns describe whether a source could reach a VENDOR SYSTEM, and that is still correctly no",
+      "But a reviewer reading only that would conclude the build ignores a file it is in fact reconciling from -- the mirror of the failure this report is shaped to avoid, which is flattering the build",
+      "Fixed by carrying active_tpa_source -- what was READ -- alongside live_vendor_connections -- what was REACHED, still empty. Two facts, kept apart",
+      "Found by browser-testing the running dashboard, not by any test in the suite",
+      "PROVENANCE: agent default")
+
+    E("A stale dev server serves old code for days", "Trap",
+      "Nine processes from 9/16 and 9/17 were still bound to ports 8000 and 5173-5177 four days later",
+      "The one on 8000 answered /api/meta with 'database is at schema version 8, this build expects 7' -- it was running pre-migration code, so every manual check against it had been measuring a dead build",
+      "A newly started uvicorn cannot bind and dies, so 'the server is running' and 'the server is running MY code' are different claims and look identical from a browser",
+      "Vite silently walks to the next free port, so five stale frontends had accumulated the same way",
+      "Check the listener's start time, not just that something answers: Get-NetTCPConnection -LocalPort N gives the owning process, and its StartTime gives the truth",
+      "PROVENANCE: agent default")
+
+    E("Vite binds IPv6 only", "Trap",
+      "The dev server listens on [::1]:5173 and not on 127.0.0.1, so curl against the IPv4 loopback hangs while a browser on localhost works",
+      "Cost real time diagnosing a frontend that was in fact up; the README now says localhost rather than 127.0.0.1 for exactly this reason")
+
+    # --- corrections to wave 16 -------------------------------------------
+    OBS("No vendor export carries the rebate request",
+        "CLOSED. _derive_rebate now reads `tpa_requests or beacon_submissions`, so the submission fact comes from Beacon's acknowledgement rather than the TPA's word for it -- which is also what DOC2-004 says",
+        "BEACON_ACKNOWLEDGMENT is bucketed to its own dimension, not folded into tpa_requests: the two are different parties' facts about the same step and a dossier must be able to say which it held",
+        "Delta measured alone before landing: one episode on the generic build, C-03 to C-05. The vendor deltas fell from 35 and 30 episodes changed to 4 and 1")
+
+    OBS("The vendor adapters are written and unwired",
+        "FULLY SUPERSEDED. /api/regenerate now takes tpa_source, and a vendor export is the default, so the vendor door is reachable from the dashboard rather than only from Python and pytest")
+
+    R("Our Beacon mock can only restate the feed", "constrains", "The default TPA source is a vendor")
+    R("The default TPA source is a vendor", "realises", "The vendor adapters are written and unwired")
+    R("Switching a default turns theoretical gaps real", "threatens", "The default TPA source is a vendor")
+    R("A readiness report can understate its own build", "threatens", "Connector-ready")
+    R("A stale dev server serves old code for days", "threatens", "The default TPA source is a vendor")
+    R("Vite binds IPv6 only", "threatens", "A stale dev server serves old code for days")
+    R("Our Beacon mock can only restate the feed", "constrains", "A TPA may not assert rebate status")
+
+
 WAVES = [wave_1_domain, wave_2_object_model, wave_3_decisions,
          wave_4_feeds, wave_5_state_space, wave_6_learnings, wave_7_artifacts,
          wave_8_implementation, wave_9_state_do_not_narrate, wave_10_agent_layer,
          wave_11_agent_layer_built, wave_12_explaining_the_build,
-         wave_13_trimmed_for_submission]
+         wave_13_trimmed_for_submission, wave_14_connectivity,
+         wave_15_building_and_reviewing_the_connector,
+         wave_16_vendor_sourced_ingest,
+         wave_17_pitching_the_system,
+         wave_18_vendor_default_and_the_beacon_limit]
 
 
 def main():

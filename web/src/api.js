@@ -63,6 +63,12 @@ export const api = {
   // timeline event's `file:line` in the detailed view.
   record: (rawId) => get(`/record/${rawId}`),
   feedExceptions: (cursor) => get('/feed-exceptions', { cursor }),
+  // Connector readiness (requirement F3). The only call in this file that takes no cursor, and
+  // deliberately: readiness is a property of the build — which transports exist, which contracts
+  // are registered, which credential nobody has issued — not of the moment being replayed.
+  // Derived on the server from code and config on every request; there is no generated file
+  // behind it, so a connector deleted five minutes ago is gone from the next response.
+  connectivity: () => get('/connectivity'),
   // `seed` omitted rebuilds the published dataset byte for byte; a seed gives a genuinely
   // different one. The seed is chosen HERE, at the edge — nothing inside the generator reads a
   // clock, because a generator that invented its own seed could never be replayed.

@@ -156,6 +156,13 @@ class NormalizedRecord:
     ach_trace_number: str | None
     allocation_code: str | None
     authorization_number: str | None
+    #: Connector-layer identifiers (requirement 4.6).  All nullable and all NULL on every
+    #: record the six generated feeds produce: a record from before the connector layer
+    #: carries none of these, and writing a value it never had would be fabrication.
+    beacon_id: str | None
+    hcpcs: str | None
+    site_id: str | None
+    payment_reference: str | None
     payer_id: str | None
     amount_cents: int | None
     quantity_milli: int | None
@@ -185,6 +192,10 @@ class NormalizedRecord:
             ach_trace_number=_column(row, "ach_trace_number"),
             allocation_code=_column(row, "allocation_code"),
             authorization_number=_column(row, "authorization_number"),
+            beacon_id=_column(row, "beacon_id"),
+            hcpcs=_column(row, "hcpcs"),
+            site_id=_column(row, "site_id"),
+            payment_reference=_column(row, "payment_reference"),
             payer_id=_column(row, "payer_id"),
             amount_cents=_column(row, "amount_cents"),
             quantity_milli=_column(row, "quantity_milli"),

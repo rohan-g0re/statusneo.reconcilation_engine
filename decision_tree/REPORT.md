@@ -439,4 +439,9 @@ scope on purpose. They should not be read as the same kind of event.
 | `leaves.json` | 4,224 composite case objects |
 | `leaves_classified.json` | Same, annotated with curated verdicts |
 | `pairs.json` | 372 verdict pairs with configuration counts |
-| `NOTES.md` | Chunk-by-chunk work log, written as the work happened |
+
+The chunk-by-chunk work log this report was written from (`NOTES.md`) was removed once
+this document superseded it. Its four durable findings survive here in full — the
+validator that was itself wrong on its first run, the four hand-counting errors that
+partially cancelled, the 252x verdict-frequency skew, and the removal of SLA
+thresholds — and each is also a named entity in `docs/knowledge_graph.jsonl`.

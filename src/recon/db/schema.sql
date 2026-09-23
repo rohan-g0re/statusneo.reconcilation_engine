@@ -50,7 +50,11 @@ CREATE TABLE ingest_batch (
   source_system TEXT    NOT NULL,
   file_sha256   TEXT    NOT NULL UNIQUE,   -- re-loading the same file is a no-op
   record_count  INTEGER NOT NULL,
-  loaded_at     TEXT    NOT NULL           -- operational wall-clock; NOT a domain date
+  loaded_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  -- Which registered source produced this batch (requirement A1). Nullable, because a
+  -- batch loaded before the connector layer existed genuinely has no source to name, and
+  -- backfilling one would be inventing provenance.
+  source_id     TEXT
 ) STRICT;
 
 -- ═══ RAW -- immutable, exactly as received ═════════════════════════════════
@@ -59,7 +63,9 @@ CREATE TABLE raw_record (
   batch_id         INTEGER NOT NULL REFERENCES ingest_batch(batch_id),
   source_system    TEXT    NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
-                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK')),
+                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',
+                     -- named vendors, added by the connector layer per requirement 4.7
+                     'BEACON','TPA_VERITY','TPA_CRANEWARE')),
   source_record_id TEXT,                   -- record_id as given; NULL for bank CSV rows
   source_line_no   INTEGER NOT NULL,       -- 1-based position in the file
   payload          TEXT    NOT NULL,       -- verbatim JSONL line, or CSV row re-encoded as JSON
@@ -80,6 +86,42 @@ CREATE TRIGGER trg_raw_no_update BEFORE UPDATE ON raw_record
   BEGIN SELECT RAISE(ABORT, 'raw_record is immutable'); END;
 CREATE TRIGGER trg_raw_no_delete BEFORE DELETE ON raw_record
   BEGIN SELECT RAISE(ABORT, 'raw_record is immutable'); END;
+
+-- ═══ CONTROL TOTALS -- F2: what the vendor declared vs what arrived ════════
+-- Doc 2 step 5's second clause.  The failure this exists to catch is the one that parses
+-- cleanly: a truncated file is still valid JSONL, every surviving record is well-formed,
+-- every total is internally consistent, and the only evidence that half the day is missing
+-- is a number in the trailer that nobody compared against the rows.
+--
+-- Immutable, with the same triggers raw_record carries and for a stronger reason: a control
+-- total you can edit is not a control total.  The whole value of the declared figure is that
+-- it was fixed by someone else before the data arrived, so a process that can reconcile a
+-- mismatch by rewriting the declaration has reconciled nothing.
+--
+-- No FK to ingest_batch, deliberately.  A batch that FAILS its control total must still
+-- record why it failed, and the failure path does not produce a batch row to point at.
+CREATE TABLE control_total (
+  control_id     INTEGER PRIMARY KEY,
+  source_id      TEXT    NOT NULL,          -- the registered source (A1)
+  source_file    TEXT    NOT NULL,
+  file_sha256    TEXT    NOT NULL,          -- which exact bytes were being checked
+  declared_count INTEGER,                   -- NULL = the vendor declared none
+  observed_count INTEGER NOT NULL,
+  -- Money is compared in cents, as integers, and only ever compared -- never summed here.
+  -- This column is a figure the file declared, copied across; the observed side is computed
+  -- where amounts already live.
+  declared_cents INTEGER,
+  observed_cents INTEGER,
+  reconciled     INTEGER NOT NULL CHECK (reconciled IN (0,1)),
+  checked_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  detail         TEXT
+) STRICT;
+CREATE INDEX ix_control_total_source ON control_total(source_id, checked_at);
+
+CREATE TRIGGER trg_control_total_no_update BEFORE UPDATE ON control_total
+  BEGIN SELECT RAISE(ABORT, 'control_total is immutable; a total you can edit is not a control total'); END;
+CREATE TRIGGER trg_control_total_no_delete BEFORE DELETE ON control_total
+  BEGIN SELECT RAISE(ABORT, 'control_total is immutable; a total you can edit is not a control total'); END;
 
 -- ═══ QUARANTINE -- D-5 malformed: cannot be normalized, lineage intact ═════
 CREATE TABLE quarantined_record (
@@ -106,10 +148,19 @@ CREATE TABLE normalized_record (
                      'REMITTANCE','REMITTANCE_CLAIM_LINE','PROVIDER_LEVEL_ADJUSTMENT',
                      'MEDICAL_SUBMISSION','MEDICAL_ACKNOWLEDGMENT',
                      'TPA_QUALIFICATION','TPA_REBATE_REQUEST','TPA_MANUFACTURER_DECISION',
-                     'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION')),
+                     'TPA_REVERSAL','REBATE_BATCH','REBATE_DISPENSE_LINE','BANK_TRANSACTION',
+                     -- Beacon's inbound shapes, added by the connector layer per DOC2-007.
+                     'BEACON_ACKNOWLEDGMENT','BEACON_VALIDATION_OUTCOME',
+                     'BEACON_PAYMENT_REFERENCE',
+                     -- A TPA's own rebate invoice line.  Not REBATE_DISPENSE_LINE: DOC2-004
+                     -- gives rebate status to Beacon and the manufacturer, and authority.py
+                     -- refuses a TPA source that kind outright.
+                     'TPA_INVOICE_LINE')),
   source_system    TEXT NOT NULL CHECK (source_system IN (
                      'PBM_ADJUDICATION','PBM_REMITTANCE','TPA_PORTAL','MANUFACTURER_REBATE',
-                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK')),
+                     'CLEARINGHOUSE_837','MEDICAL_REMITTANCE','BANK',
+                     -- named vendors, added by the connector layer per requirement 4.7
+                     'BEACON','TPA_VERITY','TPA_CRANEWARE')),
   adapter_version  TEXT NOT NULL,
   received_at      TEXT NOT NULL,
   -- Idempotency is the SOURCE record_id, never a natural key.  A-17 (duplicate
@@ -140,6 +191,12 @@ CREATE TABLE normalized_record (
   ach_trace_number     TEXT,
   allocation_code      TEXT,
   authorization_number TEXT,
+  -- connector-layer identifiers (4.6). All nullable: a record from before the connector
+  -- layer carries none of these, and writing a value it never had would be fabrication.
+  beacon_id            TEXT,    -- C5: what Beacon assigned on submission
+  hcpcs                TEXT,    -- E2: the J-code a medical-benefit drug is billed under
+  site_id              TEXT,    -- E4: contract pharmacy within an NPI-holding entity
+  payment_reference    TEXT,    -- E3: the manufacturer's own reference, not TRN02
   payer_id             TEXT,   -- resolved reference id, NULL if unresolvable
   amount_cents         INTEGER,
   quantity_milli       INTEGER,
@@ -199,6 +256,8 @@ CREATE TABLE episode (
   billing_provider_npi     TEXT,
   -- 340B
   is_340b_flagged          INTEGER NOT NULL DEFAULT 0 CHECK (is_340b_flagged IN (0,1)),
+  hcpcs                    TEXT,    -- E2
+  site_id                  TEXT,    -- E4
   covered_entity_id        TEXT,
   created_from_received_at TEXT    NOT NULL,
   -- Exactly one reimbursement track.  Never both, never neither.  This is what makes
@@ -240,7 +299,9 @@ CREATE TABLE crosswalk_key (
   key_type              TEXT NOT NULL CHECK (key_type IN (
                           'NCPDP_CLAIM','MEDICAL_CLM01','PAYER_ICN','TRN02',
                           'ALLOCATION_CODE','NATURAL_340B_PHARMACY','NATURAL_340B_MEDICAL',
-                          'PBM_AUTH')),
+                          'PBM_AUTH',
+                          -- added by the connector layer per requirement 4.7; the eight above are unchanged
+                          'BEACON_ID','COVERED_ENTITY_340B','HCPCS','PAYMENT_REFERENCE')),
   key_value             TEXT NOT NULL,     -- canonical normalized string form
   episode_id            TEXT REFERENCES episode(episode_id),
   remittance_norm_id    INTEGER REFERENCES normalized_record(norm_id),  -- bank hop 1
@@ -367,7 +428,9 @@ CREATE TABLE parked_record (
   record_kind TEXT    NOT NULL,
   received_at TEXT    NOT NULL,
   park_reason TEXT    NOT NULL CHECK (park_reason IN (
-                'NO_KEY_MATCH','AMBIGUOUS_KEY_MATCH','NO_KEYS_PRESENT'))
+                'NO_KEY_MATCH','AMBIGUOUS_KEY_MATCH','NO_KEYS_PRESENT',
+                -- added by the connector layer for requirement E1; the three above are unchanged
+                'COVERED_ENTITY_MISMATCH'))
 ) STRICT;
 -- Orphan-rebate reporting asks for parked rows by kind, so the kind leads.
 CREATE INDEX ix_parked_kind_received ON parked_record(record_kind, received_at);
@@ -377,7 +440,8 @@ CREATE TABLE parked_record_key (
   key_type  TEXT    NOT NULL CHECK (key_type IN (
               'NCPDP_CLAIM','MEDICAL_CLM01','PAYER_ICN','TRN02',
               'ALLOCATION_CODE','NATURAL_340B_PHARMACY','NATURAL_340B_MEDICAL',
-              'PBM_AUTH')),
+              'PBM_AUTH',
+              'BEACON_ID','COVERED_ENTITY_340B','HCPCS','PAYMENT_REFERENCE')),
   key_value TEXT    NOT NULL,
   PRIMARY KEY (parked_id, key_type, key_value)
 ) STRICT;
@@ -463,4 +527,65 @@ CREATE TRIGGER trg_work_item_no_update BEFORE UPDATE ON work_item
 CREATE TRIGGER trg_work_item_no_delete BEFORE DELETE ON work_item
   BEGIN SELECT RAISE(ABORT, 'work_item is append-only: no update and no delete'); END;
 
-PRAGMA user_version = 3;
+-- ═══ CONNECTORS -- how the bytes got here, and whether we were allowed ═══════
+--
+-- Requirement group A of docs/connectivity_layer_requirements.md. All additive: no
+-- existing column changes type and no existing table loses a constraint.
+--
+-- Deliberately absent: a connector_fetch table. Per-fetch history is observability,
+-- which Doc 2 puts in step 6, and this build stops at step 5. The checkpoint is the
+-- only fetch state a connector-ready build needs.
+
+-- A registered source. One row per thing we fetch from (A1).
+--
+-- credential_ref is a NAME, never a secret -- it is the key connectors/credentials.py
+-- resolves from the environment or a secrets file. That is what lets this table be
+-- committed, dumped and diffed without leaking anything (A3).
+CREATE TABLE connector_source (
+  source_id       TEXT    PRIMARY KEY,
+  vendor          TEXT    NOT NULL,
+  transport_kind  TEXT    NOT NULL CHECK (transport_kind IN ('LOCAL_DIRECTORY','SFTP','HTTP_API')),
+  source_system   TEXT    NOT NULL,
+  endpoint        TEXT    NOT NULL,
+  credential_ref  TEXT,                     -- a name, never a value
+  -- Per-source, because config.ADAPTER_VERSION is a single global written onto every
+  -- normalized_record. Once several vendors have independently versioned mappings that
+  -- global is not merely incomplete, it is misleading: it claims every record was mapped
+  -- by the same logic at the moment that stopped being true (requirement 4.8).
+  mapping_version TEXT    NOT NULL,
+  enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1))
+) STRICT;
+
+-- A versioned field contract per source (B1). Inbound records are validated against the
+-- registered version BEFORE adaptation, because adaptation is where meaning is assigned
+-- and assigning meaning to a wrongly-shaped record produces a confidently wrong canonical
+-- record instead of a quarantine.
+CREATE TABLE schema_contract (
+  source_id   TEXT    NOT NULL REFERENCES connector_source(source_id),
+  version     TEXT    NOT NULL,
+  fields_json TEXT    NOT NULL,             -- the FieldSpec tuple, as declared
+  is_current  INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)),
+  PRIMARY KEY (source_id, version)
+) STRICT;
+
+-- Per-source fetch cursor (A4, A5). The only fetch state a connector-ready build needs.
+--
+-- This is the one table in the schema where a wall-clock timestamp is legitimate, and the
+-- restriction is load-bearing rather than stylistic (requirement 4.11). Every random stream
+-- in this system is seeded from a canonical path string and ingest_batch.loaded_at is pinned
+-- to the epoch, precisely so no wall-clock leaks into the data. Real transport introduces a
+-- real clock; it is contained here.
+--
+-- NOTHING DOWNSTREAM MAY READ fetched_at. received_at remains the only temporal field the
+-- pipeline honours, because the cursor is what makes replay equal reality -- a verdict that
+-- moved because a file was fetched on a Tuesday would not be reproducible.
+CREATE TABLE connector_checkpoint (
+  source_id      TEXT    NOT NULL REFERENCES connector_source(source_id),
+  document_name  TEXT    NOT NULL,
+  remote_mtime   TEXT,                      -- as the remote reported it; NULL if it did not
+  content_sha256 TEXT    NOT NULL,          -- what makes a re-delivery under a new name a no-op
+  fetched_at     TEXT    NOT NULL,          -- operational wall-clock; NOT a domain date
+  PRIMARY KEY (source_id, document_name)
+) STRICT;
+
+PRAGMA user_version = 8;

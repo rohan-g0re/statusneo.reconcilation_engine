@@ -9,7 +9,10 @@ Three properties of this surface are deliberate.
 **There is no update and no delete.**  Not "we avoid them": there is no function whose
 name begins with ``update_`` or ``delete_``, and a test asserts it by introspection.
 The raw, normalized, episode and verdict tables have triggers that abort such a
-statement anyway; this is the same rule stated where a caller would look for it.
+statement anyway; this is the same rule stated where a caller would look for it.  Two
+functions here do upsert — ``write_meta`` and ``record_connector_fetch`` — and both
+write a table that holds a current position rather than a history, which is the line the
+rule is actually drawn along; each says so at its own definition.
 
 **The cursor predicate is mandatory on every derived lookup.**  ``resolve_keys`` and
 ``parked_matching`` take ``cursor`` as a required positional argument.  Omitting it
@@ -105,6 +108,18 @@ __all__ = [
     "read_meta",
     "batch_for_file_sha256",
     "QUEUE_ORDERINGS",
+    # connector fetch state (A4, A5) — operational position, not domain history
+    "register_connector_source",
+    "record_connector_fetch",
+    "connector_checkpoints",
+    # control totals (F2) — declared against observed, immutable once written
+    "record_control_total",
+    "control_totals",
+    # Beacon reads.  No writer joins them -- see the section comment at the foot of the file.
+    "beacon_id_for_episode",
+    "beacon_payment_references_for_episode",
+    "episodes_awaiting_beacon_decision",
+    "beacon_validation_failures",
 ]
 
 
@@ -202,13 +217,14 @@ def insert_ingest_batch(
     file_sha256: str,
     record_count: int,
     loaded_at: str,
+    source_id: str | None = None,
 ) -> int:
     system = _enum(SourceSystem, source_system, "source_system")
     with _atomic(conn) as tx:
         cursor = tx.execute(
-            "INSERT INTO ingest_batch(source_file, source_system, file_sha256, record_count, loaded_at)"
-            " VALUES (?,?,?,?,?)",
-            (source_file, str(system), file_sha256, record_count, loaded_at),
+            "INSERT INTO ingest_batch(source_file, source_system, file_sha256, record_count,"
+            " loaded_at, source_id) VALUES (?,?,?,?,?,?)",
+            (source_file, str(system), file_sha256, record_count, loaded_at, source_id),
         )
         return int(cursor.lastrowid)
 
@@ -265,6 +281,15 @@ _NORM_COLUMNS = (
     "ach_trace_number",
     "allocation_code",
     "authorization_number",
+    # Connector-layer identifiers (requirement 4.6).  The columns landed with the schema in
+    # wave 4; wave 5 is what makes them reachable.  Until this tuple named them, they were
+    # columns nothing could ever write — ``insert_normalized_record`` builds its INSERT from
+    # this tuple alone, so a column absent here takes SQLite's implicit NULL forever and no
+    # test would notice, because a NULL column and an unwritable column look identical.
+    "beacon_id",
+    "hcpcs",
+    "site_id",
+    "payment_reference",
     "payer_id",
     "amount_cents",
     "quantity_milli",
@@ -343,7 +368,18 @@ _EPISODE_COLUMNS = (
     "medical_payer_id",
     "billing_provider_npi",
     "is_340b_flagged",
+    # The three 340B-identity columns.  All added to this tuple by the connector layer's
+    # requirement E1/E2/E4; ``covered_entity_id`` was already a column and was already in
+    # this list, but ``_create_episode`` passed it ``None`` unconditionally, so the effect
+    # was the same as being absent.
+    #
+    # These must be set HERE, at insert, or never: ``trg_episode_no_update`` aborts any
+    # UPDATE on ``episode``, because episode identity is immutable.  There is no later pass
+    # that can fill them in, which is why the anchor record has to carry enough to derive
+    # them (or correctly leave them NULL).
     "covered_entity_id",
+    "hcpcs",
+    "site_id",
     "created_from_received_at",
 )
 
@@ -595,8 +631,14 @@ def quarantine_record(
     reason = _enum(QuarantineReason, reason_code, "reason_code")
     with _atomic(conn) as tx:
         cursor = tx.execute(
+            # ON CONFLICT DO NOTHING, so re-running ingest() over rows already processed
+            # is a no-op rather than an IntegrityError. Every other write on that path is
+            # already idempotent -- normalized records collapse on their idempotency key --
+            # and quarantine was the one exception, which made replay crash exactly when the
+            # data contained something unparseable. A record quarantined twice for the same
+            # reason is the same fact, not a second one.
             "INSERT INTO quarantined_record(raw_id, received_at, reason_code, detail)"
-            " VALUES (?,?,?,?)",
+            " VALUES (?,?,?,?) ON CONFLICT(raw_id) DO NOTHING",
             (raw_id, received_at, str(reason), detail),
         )
         return int(cursor.lastrowid)
@@ -1078,3 +1120,374 @@ def batch_for_file_sha256(conn: sqlite3.Connection, file_sha256: str):
     from recon.domain.models import IngestBatch
 
     return IngestBatch.from_row(row)
+
+
+# --- connector fetch state (A4, A5) ----------------------------------------
+
+
+def register_connector_source(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    vendor: str,
+    transport_kind: str,
+    source_system: SourceSystem | str,
+    endpoint: str,
+    credential_ref: str | None,
+    mapping_version: str,
+    enabled: bool,
+) -> None:
+    """Record a source as registered, so its fetch state has something to hang from.
+
+    An upsert, for the same reason ``write_meta`` and ``record_connector_fetch`` are: this
+    row is a source's *current* configuration, not a history of what it used to be.  The
+    ban the module docstring describes is on exporting a name beginning ``update_``, and it
+    exists so that rewriting something once believed is greppable — a registry row is not
+    something believed, it is something declared.
+
+    Called on every load rather than at startup, because ``connector_checkpoint.source_id``
+    is a foreign key onto this table: a source that fetched without being registered first
+    would fail its very first checkpoint write, and it would fail it *after* the bytes had
+    already moved.
+
+    ``credential_ref`` is a name and never a value.  That is what makes this table safe to
+    dump, diff and commit (requirement A3).
+    """
+    system = _enum(SourceSystem, source_system, "source_system")
+    with _atomic(conn) as tx:
+        tx.execute(
+            "INSERT INTO connector_source(source_id, vendor, transport_kind, source_system,"
+            " endpoint, credential_ref, mapping_version, enabled)"
+            " VALUES (?,?,?,?,?,?,?,?)"
+            " ON CONFLICT(source_id) DO UPDATE SET"
+            "   vendor=excluded.vendor,"
+            "   transport_kind=excluded.transport_kind,"
+            "   source_system=excluded.source_system,"
+            "   endpoint=excluded.endpoint,"
+            "   credential_ref=excluded.credential_ref,"
+            "   mapping_version=excluded.mapping_version,"
+            "   enabled=excluded.enabled",
+            (
+                source_id,
+                vendor,
+                str(transport_kind),
+                str(system),
+                endpoint,
+                credential_ref,
+                mapping_version,
+                1 if enabled else 0,
+            ),
+        )
+
+
+def record_connector_fetch(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    document_name: str,
+    remote_mtime: str | None,
+    content_sha256: str,
+    fetched_at: str,
+) -> None:
+    """Remember the last successful fetch of one document, replacing any earlier mark.
+
+    **Why an upsert is allowed here, and why the name still does not start with
+    ``update_``.**  The rule at the top of this module bans the exported *name*, not the
+    statement — ``write_meta`` has done the same thing since the beginning.  The reason the
+    ban is worth having is that mutation should be intentional and greppable, and a name is
+    the grep surface.  ``connector_checkpoint`` is not a history: it is exactly one row per
+    ``(source_id, document_name)`` saying where the fetch cursor stands right now, it carries
+    no trigger because there is nothing to protect, and "which file did we last pull" is
+    position rather than evidence.  An ``update_``-prefixed export would advertise the
+    opposite — that something we once believed is being rewritten — which is the operation
+    the raw, normalized, episode and verdict tables forbid outright.  ``record_connector_fetch``
+    says what the caller is doing, and one grep for it finds every write this table can take.
+
+    ``fetched_at`` is a wall-clock, and the only one the schema permits outside logs
+    (§4.11).  It is accepted as an argument rather than read here so that replay stays
+    deterministic; nothing downstream may read it back, because ``received_at`` is the only
+    temporal field the pipeline honours.
+
+    Note the foreign key: a checkpoint cannot exist for a ``source_id`` absent from
+    ``connector_source``, so a caller must register the source before fetching for it.
+    """
+    with _atomic(conn) as tx:
+        tx.execute(
+            "INSERT INTO connector_checkpoint"
+            " (source_id, document_name, remote_mtime, content_sha256, fetched_at)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(source_id, document_name) DO UPDATE SET"
+            "   remote_mtime = excluded.remote_mtime,"
+            "   content_sha256 = excluded.content_sha256,"
+            "   fetched_at = excluded.fetched_at",
+            (source_id, document_name, remote_mtime, content_sha256, fetched_at),
+        )
+
+
+def connector_checkpoints(
+    conn: sqlite3.Connection, source_id: str
+) -> list[dict[str, str | None]]:
+    """Every fetch mark this source holds, in document-name order.
+
+    Plain rows rather than a typed object, because the type that gives them meaning —
+    ``recon.connectors.checkpoint.Checkpoint`` — lives in the connector package, and
+    importing it here would invert the dependency: ``db/`` would need ``connectors/`` in
+    order to load, when the whole point of the connector package is that it sits above
+    persistence.  ``duplicate_deliveries`` returns bare tuples for the same reason.
+
+    Ordered so that a caller iterating the result behaves identically on two runs.
+    """
+    rows = conn.execute(
+        "SELECT source_id, document_name, remote_mtime, content_sha256, fetched_at"
+        "  FROM connector_checkpoint"
+        " WHERE source_id = ?"
+        " ORDER BY document_name",
+        (source_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# --- control totals (F2) ---------------------------------------------------
+
+
+#: Every column of ``control_total`` except its surrogate key, in schema order.
+#:
+#: A tuple rather than ten inline names for the reason ``_NORM_COLUMNS`` gives: the INSERT is
+#: built from this, so a column missing here is a column nothing can ever write, and a NULL
+#: that was never offered looks exactly like a NULL that was.
+_CONTROL_TOTAL_COLUMNS = (
+    "source_id",
+    "source_file",
+    "file_sha256",
+    "declared_count",
+    "observed_count",
+    "declared_cents",
+    "observed_cents",
+    "reconciled",
+    "checked_at",
+    "detail",
+)
+
+
+def record_control_total(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    source_file: str,
+    file_sha256: str,
+    declared_count: int | None,
+    observed_count: int,
+    declared_cents: int | None,
+    observed_cents: int | None,
+    reconciled: bool,
+    checked_at: str,
+    detail: str | None,
+) -> int:
+    """Append one declared-against-observed comparison (requirement F2).
+
+    Write-once by construction.  ``control_total`` carries ``BEFORE UPDATE`` and
+    ``BEFORE DELETE`` triggers that ``RAISE(ABORT)``, so there is deliberately no companion
+    function to revise a row: a control total you can edit is not a control total, because
+    the whole value of the declared figure is that somebody else fixed it before the data
+    arrived.
+
+    **The mismatched case is recorded and then the caller fails.**  That ordering is why this
+    is its own statement rather than part of the batch write — the row has no foreign key
+    onto ``ingest_batch`` precisely so a batch that never comes into existence still leaves
+    an explanation behind.  Writing it inside the failing batch's transaction would roll the
+    evidence back along with the batch.
+
+    ``reconciled`` is stored as 0/1 under a SQL ``CHECK``; the boolean is coerced here so no
+    caller has to know that.  ``checked_at`` is an operational wall-clock, the same narrow
+    permission §4.11 grants ``connector_checkpoint.fetched_at``, and it is an argument rather
+    than a clock read here so a replayed run produces the same row.
+    """
+    values = (
+        source_id,
+        source_file,
+        file_sha256,
+        declared_count,
+        observed_count,
+        declared_cents,
+        observed_cents,
+        1 if reconciled else 0,
+        checked_at,
+        detail,
+    )
+    with _atomic(conn) as tx:
+        cursor = tx.execute(
+            f"INSERT INTO control_total ({','.join(_CONTROL_TOTAL_COLUMNS)})"
+            f" VALUES ({_placeholders(len(_CONTROL_TOTAL_COLUMNS))})",
+            values,
+        )
+        return int(cursor.lastrowid)
+
+
+def control_totals(
+    conn: sqlite3.Connection, source_id: str | None = None
+) -> list[dict[str, object]]:
+    """Every control total recorded, or every one for a single source, in write order.
+
+    Plain rows rather than a typed object, for the reason :func:`connector_checkpoints`
+    gives: the type that gives them meaning lives in ``recon.connectors``, and importing it
+    here would make ``db/`` depend on the package that sits above it.
+
+    ``ORDER BY control_id`` is the order the checks happened in, which is the order a reader
+    wants when the question is "what did this source do today".  The index on
+    ``(source_id, checked_at)`` serves the operational filter; this is a small, append-only
+    audit table and a read of it is not on any hot path.
+    """
+    if source_id is None:
+        rows = conn.execute(
+            f"SELECT control_id, {','.join(_CONTROL_TOTAL_COLUMNS)}"
+            "  FROM control_total ORDER BY control_id"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT control_id, {','.join(_CONTROL_TOTAL_COLUMNS)}"
+            "  FROM control_total WHERE source_id = ? ORDER BY control_id",
+            (source_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# ═══ Beacon ═════════════════════════════════════════════════════════════════
+#
+# Four reads and no writer, and the absent writer is the finding rather than an omission.
+#
+# The question that produced this section was whether the connector fabric should be able to
+# write to the database, or whether the shared write capability should be pulled out into a
+# module both the fabric and the engine call.  Neither: the second already exists.  This
+# module is the only one in the system that writes SQL, ``connectors/`` is forbidden from
+# writing any — ``test_the_connector_package_writes_no_sql_at_all`` enforces it — and the
+# whole Beacon inbound leg was built with the fabric holding zero write capability:
+#
+#     Transport -> Document -> _read_rows -> _adapt_beacon -> CanonicalRecord
+#               -> pipeline._attach -> repository writes
+#
+# Giving the fabric write access would break the source-of-truth boundary rather than merely
+# duplicate code.  ``connectors/authority.py`` works precisely *because* vendor data must pass
+# through adaptation before anything is written: that is where a TPA is refused permission to
+# assert a manufacturer's decision, and it caught two real defects — nine Craneware rows
+# quarantined as ``SOURCE_AUTHORITY_BREACH``, and every Verity invoice row when the adapter
+# first wrote a plain ``beacon_id``.  A fabric that could write would let a vendor's file
+# author its own facts, and DOC2-004's boundary would become a comment rather than a
+# constraint.
+#
+# So what was missing was never a capability.  It was a *vocabulary*: 40 public functions and
+# one mention of Beacon, so a Beacon fact was reachable only by hand-written SQL at the call
+# site.
+
+
+def beacon_id_for_episode(conn: sqlite3.Connection, episode_id: str) -> str | None:
+    """The Beacon submission identifier this episode was acknowledged under, if any.
+
+    Read off ``normalized_record.beacon_id`` through the crosswalk rather than off ``episode``,
+    and that is forced rather than chosen: ``trg_episode_no_update`` aborts any UPDATE on
+    ``episode``, so an identifier that did not arrive with the anchor can never be added to
+    that row later.  The acknowledgement arrives long afterwards, so the episode table cannot
+    hold it and the join is the only route.
+
+    Returns the earliest by arrival when an episode has more than one, which is a real
+    possibility rather than a defensive default — a resubmission gets its own Beacon ID — and
+    the first is the one every other record's lookup resolved against.
+    """
+    row = conn.execute(
+        "SELECT n.beacon_id FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE k.episode_id = ? AND n.beacon_id IS NOT NULL"
+        " ORDER BY n.received_at, n.norm_id LIMIT 1",
+        (episode_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def beacon_payment_references_for_episode(
+    conn: sqlite3.Connection, episode_id: str
+) -> list[NormalizedRecord]:
+    """Beacon's payment-reference records for this episode, in arrival order.
+
+    These carry a rebate amount that is deliberately **not** promoted to ``amount_cents``:
+    Beacon reports the same payment the 340B feed already reports, so summing both would
+    stamp C-14 "duplicate rebate payment" on every paid episode.  The figure rides in
+    ``canonical`` for display, and this function hands back the whole record so a caller can
+    show it without any temptation to add it up.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT n.* FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE k.episode_id = ? AND n.record_kind = 'BEACON_PAYMENT_REFERENCE'"
+        " ORDER BY n.received_at, n.norm_id",
+        (episode_id,),
+    ).fetchall()
+    return [NormalizedRecord.from_row(row) for row in rows]
+
+
+def episodes_awaiting_beacon_decision(conn: sqlite3.Connection, cursor: str) -> list[str]:
+    """Episodes Beacon acknowledged by ``cursor`` and has not decided on.
+
+    "Has not decided" means no validation outcome carrying a decision — a ``PENDING`` outcome
+    counts as *not decided*, because Beacon writes one with a null ``decided_at`` precisely to
+    say so, and the reader dates it to the delivery.  Treating a PENDING row as an answer
+    would empty this list of the only episodes it exists to name.
+
+    Both halves are cursor-bounded.  Without that on the inner query an episode decided
+    *after* the cursor would read as decided now, which is the replay leak the whole system is
+    built to prevent: a question about 18 March would be answered with April's knowledge.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT k.episode_id FROM crosswalk_key k"
+        "  JOIN normalized_record n ON n.norm_id = k.resolved_from_norm_id"
+        " WHERE n.record_kind = 'BEACON_ACKNOWLEDGMENT'"
+        "   AND n.received_at <= :cursor AND k.first_seen_at <= :cursor"
+        "   AND NOT EXISTS ("
+        "     SELECT 1 FROM crosswalk_key k2"
+        "       JOIN normalized_record d ON d.norm_id = k2.resolved_from_norm_id"
+        "      WHERE k2.episode_id = k.episode_id"
+        "        AND d.record_kind = 'BEACON_VALIDATION_OUTCOME'"
+        "        AND d.received_at <= :cursor"
+        "        AND json_extract(d.canonical, '$.validation_outcome') IN"
+        "            ('ACCEPTED','REJECTED','REVERSED'))"
+        " ORDER BY k.episode_id",
+        {"cursor": cursor},
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def beacon_validation_failures(
+    conn: sqlite3.Connection, cursor: str
+) -> list[NormalizedRecord]:
+    """Submissions Beacon refused — the ones that never reached a manufacturer at all.
+
+    ``REJECTED`` is a submission Beacon would not accept; ``REVERSED`` is one it accepted and
+    then withdrew.  Both mean the same thing about the money: no manufacturer ever saw this
+    claim, so no manufacturer decision about it can ever arrive.
+
+    **This surfaces a gap rather than closing one, and the gap is smaller than predicted.**
+    ``BEACON_VALIDATION_OUTCOME`` is outside ``dimensions._KIND_BUCKETS``, so a refusal moves
+    no verdict.  The expectation was that those claims would therefore sit at C-05, "request
+    submitted, manufacturer pending", forever.  Measured on the demo profile, none does.
+
+    What they survive on is two different accidents, neither connected to Beacon.  Of the
+    eight episodes behind a refused submission, four carry a manufacturer decision that
+    arrived independently through the 340B feed and land on a real code that way.  The other
+    four have no such decision at all: three carry a reversal and reach C-13 "clawed back",
+    and one was never qualified and closes at C-02.
+
+    So no operator is currently told to wait for a decision that cannot arrive — and nothing
+    guarantees that.  Each of those routes is a separate record from a separate authority that
+    happens to exist here.  Closing it properly needs a ``Dimensions`` field, a branch in
+    ``_derive_rebate``, and either a new row in the state space or an argument for folding it
+    into C-07.  Named here so it is a decision rather than a discovery, and
+    ``tests/test_repository_beacon.py`` pins the property that matters: a refused submission
+    must never sit in ``PENDING``.
+    """
+    rows = conn.execute(
+        "SELECT * FROM normalized_record"
+        " WHERE record_kind = 'BEACON_VALIDATION_OUTCOME'"
+        "   AND received_at <= :cursor"
+        "   AND json_extract(canonical, '$.validation_outcome') IN ('REJECTED','REVERSED')"
+        " ORDER BY received_at, norm_id",
+        {"cursor": cursor},
+    ).fetchall()
+    return [NormalizedRecord.from_row(row) for row in rows]

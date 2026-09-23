@@ -21,6 +21,7 @@ from typing import Any
 from recon import config
 from recon.api import service
 from recon.config import Profile, Settings, load_settings
+from recon.domain.enums import SourceSystem
 
 __all__ = ["create_app", "build_dataset"]
 
@@ -36,23 +37,197 @@ def _require_fastapi():
         ) from exc
 
 
-def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any]:
+#: The Beacon payloads this build ingests, and the one it deliberately does not.
+#:
+#: ``beacon_rebate_status`` is held out, and the reason has been measured rather than
+#: assumed — the assumption was wrong and is worth recording.
+#:
+#: This comment used to say landing it would turn C-05 into C-07 "wherever the 340B feed was
+#: silent and Beacon says rejected". **Beacon is never saying anything the feed did not.**
+#: ``beacon_payloads.rebate_status`` reads ``manufacturer_decision`` off the very
+#: ``MANUFACTURER_DECISION`` event — or the ``REBATE_PAYMENT_BATCH`` line — that the engine
+#: already ingests. Checked across the demo profile: Beacon's decision agrees with the feed
+#: on 30 of 30 dispenses. Where the feed is silent, ``_manufacturer_decision`` returns
+#: ``None`` and Beacon is silent too, so the C-05 population it was supposed to rescue does
+#: not exist.
+#:
+#: Landing it would therefore add 30 duplicate ``TPA_MANUFACTURER_DECISION`` records carrying
+#: a decision already present, through a second door, for no informational gain — the same
+#: hazard ``BEACON_PAYMENT_REFERENCE`` is shaped to avoid on the money side.
+#:
+#: This is a limit of the **mock**, not of the architecture. DOC2-004 genuinely makes Beacon
+#: authoritative here; our Beacon is a re-dressing of the 340B feed, so it can only restate
+#: it. Making this demonstrable needs Beacon to be able to *disagree* with the feed — the
+#: same deliberate divergence the two TPAs now carry — at which point Beacon winning is a
+#: real demonstration instead of a duplicate row.
+#:
+#: ``beacon_submissions`` is outbound and fetches nothing.
+#:
+#: ``beacon_submissions`` is outbound and fetches nothing.
+_BEACON_INBOUND = ("beacon_acknowledgements", "beacon_validation_outcomes",
+                   "beacon_payment_references")
+
+
+def _beacon_inbound_sources(settings: Settings) -> tuple[Any, ...]:
+    """Beacon's inbound payloads, read as files off the directory the build just wrote.
+
+    **Files rather than HTTP, and the reason is the demo rather than laziness.**  The loopback
+    Beacon server exists and is well tested, but it is instantiated in exactly one place in
+    the repository — a test. Wiring the demo to it would give the demo a port to bind, a
+    process to start and stop, and a new way to fail, for a build whose defining property is
+    that the same seed produces the same bytes. ``LocalDirectoryTransport`` also carries the
+    ground-truth refusal, which an HTTP client does not need and would not have.
+
+    Requirement A2's claim is that a document is a document however it arrived, so proving
+    the Beacon leg over files and the HTTP transport separately is a stronger demonstration
+    than coupling them — and ``tests/test_api_pattern.py`` already proves the HTTP half
+    against a real socket.
+    """
+    from recon.connectors import registry
+    from recon.connectors.transport import LocalDirectoryTransport
+
+    beacon_dir = settings.vendor_dir() / "beacon"
+    return registry.beacon_sources(
+        {source_id: str(beacon_dir) for source_id in _BEACON_INBOUND},
+        transport=LocalDirectoryTransport(beacon_dir),
+        enabled=True,
+    )
+
+
+#: The TPA source that reads ``tpa_340b_events.jsonl`` — today's behaviour, and the default.
+#:
+#: A name rather than ``None`` because "generic" is a real, nameable choice with a real
+#: drawback: that feed's shape is ours, invented under Doc 1, and no TPA ships anything like
+#: it. ``None`` would read as "unset", which is the one thing it is not.
+GENERIC_TPA_SOURCE = "generic"
+
+#: What a build reads when the caller does not say — **a vendor, not the generic feed**.
+#:
+#: In production there is no generic TPA feed. There is Verity's export, or Craneware's, or a
+#: sixth TPA's, and a prototype whose default is the one shape no vendor ships is
+#: demonstrating the wrong thing. The generic feed remains available and remains *generated*
+#: in every mode, because the vendor formatters read it.
+#:
+#: **Craneware rather than Verity**, and the reason is the state space rather than a
+#: preference. ``verity_accumulations`` is a population selected on ``qualification_status``,
+#: so it cannot express a disqualification at all: four episodes lose their 340B track
+#: entirely and read as "never 340B" rather than "refused". Craneware's Claims Report is a
+#: report of claims, a non-qualifying claim is still a claim, and every disqualification
+#: survives — one episode differs from the generic baseline instead of four.
+#:
+#: Verity is one query parameter away and exercises ``TPA_INVOICE_LINE``, which Craneware has
+#: no dataset for. Neither is "the" answer; that is the point of the switch.
+DEFAULT_TPA_SOURCE = "craneware"
+
+#: Which datasets carry a TPA's own account of a dispense, per vendor.
+#:
+#: Verity contributes two because it ships the qualification and the rebate invoice as
+#: separate exports; Craneware's Claims Report carries the qualification and Craneware
+#: publishes no invoice dataset we hold a shape for.  That asymmetry is the vendors', not
+#: ours, and it is one of the differences the parity measurement has to explain rather than
+#: smooth over.
+_VENDOR_TPA_DATASETS: dict[str, tuple[str, ...]] = {
+    "verity": ("verity_accumulations", "verity_invoices"),
+    "craneware": ("craneware_claims_report",),
+}
+
+
+def vendor_tpa_sources(settings: Settings, vendor: str) -> tuple[Any, ...]:
+    """The registry rows that make one vendor's export the TPA's voice in this build.
+
+    **One vendor at a time, deliberately.**  The claim worth making is not "the engine reads
+    vendor data" — it is "the engine reads *either* vendor's data and reaches the same
+    answer".  A mode that blended both would prove neither, and would hide exactly the
+    disagreement a reconciliation engine exists to catch.
+
+    ``enabled=True`` because the registry rows ship disabled behind DOC2-016's Week 3 access
+    gate.  Reading a directory this build just wrote is not reaching a vendor's SFTP server,
+    and the caller saying so explicitly is the honest version of that distinction.
+
+    The filenames are resolved by prefix because Verity stamps its export names from the data
+    (``DOC2-010``), so the landed name is not knowable in advance.  That resolution is
+    single-valued only because ``verity_export.remove_superseded`` keeps one generation on
+    disk; before it existed this would have picked whichever superseded run sorted first.
+
+    Raises:
+        KeyError: an unknown vendor name, rather than a silently empty source list — which
+            would load nothing, reach every episode with no 340B evidence at all, and read as
+            a dataset in which nothing qualified.
+    """
+    from recon.connectors import registry, vendors
+    from recon.connectors.transport import LocalDirectoryTransport
+
+    directory = settings.vendor_dir() / vendor
+    landed: dict[str, tuple[str, ...]] = {}
+    for source_id in _VENDOR_TPA_DATASETS[vendor]:
+        prefix = vendors.mapping_for(source_id).filename_prefix
+        names = sorted(
+            path.name for path in directory.glob("*.csv") if path.name.startswith(prefix)
+        )
+        if not names:
+            raise FileNotFoundError(
+                f"no export starting {prefix!r} in {directory}; the vendor files are written "
+                "by coverage.write_all during the build, so this means generation did not run"
+            )
+        landed[source_id] = tuple(names)
+
+    return registry.vendor_sources(
+        {source_id: str(directory) for source_id in landed},
+        filenames=landed,
+        transport=LocalDirectoryTransport(directory),
+        enabled=True,
+    )
+
+
+def build_dataset(
+    settings: Settings,
+    *,
+    rebuild: bool = False,
+    tpa_source: str = DEFAULT_TPA_SOURCE,
+) -> dict[str, Any]:
     """Generate the feeds, load them, reconcile, and return what happened.
 
     This is the regenerate control's implementation, and it is deliberately the *whole* pipeline
     rather than a reset: the dataset is a derived artefact, so rebuilding it from the seed is both
     the cheapest way to get a clean state and a continuous proof that it is reproducible.
+
+    ``tpa_source`` chooses where the TPA's own account of a dispense comes from:
+    ``"generic"`` (the default, and today's behaviour) reads it from
+    ``tpa_340b_events.jsonl``; ``"verity"`` or ``"craneware"`` reads it from that vendor's
+    export instead.  In production there is no generic TPA feed — there is Verity's export,
+    or Craneware's, or a sixth TPA's — so the vendor modes are the shape the engine would
+    really run in, and the generic one is the synthetic convenience.
+
+    **The generic feed is still read in every mode**, because it is not only the TPA's.  Its
+    rows declare their own author and 35 of them are the *manufacturer's* — rebate payment
+    batches and manufacturer decisions, which DOC2-004 puts outside a TPA's authority
+    entirely and which no vendor export could carry.  Switching source swaps 78 rows, not a
+    file.
     """
     from recon.db import connection, migrate
     from recon.engine import run as engine
     from recon.generators import orchestrator
     from recon.ingest import pipeline
+    from recon.mocks import coverage
 
     if rebuild:
         migrate.rebuild(settings.db_path)
 
     generation = orchestrator.generate(settings)
     hashes = orchestrator.write_outputs(settings, generation)
+
+    # The vendor exports are written here rather than inside ``write_outputs`` because they are
+    # *derived from* the feeds it just wrote: ``coverage.write_all`` re-reads the six feed files
+    # and the identifier sidecar off disk and re-dresses them in each vendor's own layout. Putting
+    # the call in ``write_outputs`` would make ``recon.generators`` import ``recon.mocks``, and the
+    # mocks are downstream of generation by design — they format what the generators decided and
+    # decide nothing themselves.
+    #
+    # Until this line existed the vendor layer was reachable only from the test suite, so
+    # ``data/generated/<profile>/vendor/`` held the identifier sidecar and nothing else: every
+    # Verity dataset and Craneware report was real code with no output a human could open. A
+    # connector whose payloads only exist inside a pytest tmp dir cannot be demonstrated.
+    coverage.write_all(settings)
 
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = connection.connect(settings.db_path)
@@ -61,7 +236,37 @@ def build_dataset(settings: Settings, *, rebuild: bool = False) -> dict[str, Any
 
     migrate.stamp_meta(conn, settings, fingerprint())
     try:
-        stats = pipeline.load_feeds(conn, settings.feeds_dir())
+        # The TPA's own rows come out of the generic feed or out of a vendor's export, never
+        # both: ingesting each dispense's qualification twice would not merely duplicate
+        # evidence, it would make ``_read_rebate_lines``-style counting tests meaningless and
+        # leave the crosswalk resolving one dispense through two doors.
+        exclude = (
+            frozenset({SourceSystem.TPA_PORTAL})
+            if tpa_source != GENERIC_TPA_SOURCE
+            else frozenset()
+        )
+        stats = pipeline.load_feeds(
+            conn, settings.feeds_dir(), exclude_source_systems=exclude
+        )
+        if tpa_source != GENERIC_TPA_SOURCE:
+            stats.raw_records += pipeline.load_from_sources(
+                conn,
+                vendor_tpa_sources(settings, tpa_source),
+                fetched_at=settings.max_cursor,
+            ).raw_records
+        # Loaded after the feeds and before ingest, which is the only order that works: a
+        # Beacon acknowledgement resolves against an episode, and the episodes do not exist
+        # until the anchors from the six feeds have been adapted. Landing raw rows first and
+        # adapting everything once keeps that ordering the arrival cursor's business rather
+        # than this function's.
+        # ``fetched_at`` is the end of the generation window rather than a wall clock. It is
+        # used for exactly one thing — a PENDING validation outcome, whose ``decided_at`` is
+        # null because Beacon has not decided — and it says the true thing about such a row:
+        # as of the end of the window, no decision had arrived. A real clock here would make
+        # the same seed produce different bytes on two different days.
+        stats.raw_records += pipeline.load_from_sources(
+            conn, _beacon_inbound_sources(settings), fetched_at=settings.max_cursor
+        ).raw_records
         pipeline.ingest(conn, stats=stats)
 
         # Evaluate at a series of cursors across the window, not only at the end.
@@ -121,6 +326,8 @@ def create_app(settings: Settings | None = None):
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
 
+    from recon.db import migrate as migrate_errors
+
     resolved = settings or load_settings(Profile.DEMO)
 
     app = FastAPI(
@@ -139,6 +346,33 @@ def create_app(settings: Settings | None = None):
         allow_headers=["*"],
     )
     app.state.settings = resolved
+
+    @app.exception_handler(migrate_errors.SchemaVersionMismatch)
+    def _stale_database(request, exc):  # noqa: ANN001 - framework signature
+        """Answer a stale database with an instruction instead of a stack trace.
+
+        Found by actually opening the dashboard in a browser, which nothing in the test
+        suite does: the repository ships databases stamped by an older build, so the very
+        first request after any schema change raised here and FastAPI turned it into a bare
+        ``500 Internal Server Error``.  The message naming the one-line fix went to the
+        server log, where the person staring at the blank page was not looking.
+
+        ``503`` rather than ``500`` because the distinction is real and worth making: the
+        service is fine and its data is not ready.  ``Retry-After`` is deliberately absent —
+        waiting does not fix this, and advertising a retry would suggest it might.
+        """
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "stale_database",
+                "detail": str(exc),
+                "found_schema_version": exc.found,
+                "expected_schema_version": exc.expected,
+                "remedy": "POST /api/regenerate?profile=demo",
+            },
+        )
 
     @contextmanager
     def open_conn():
@@ -335,6 +569,72 @@ def create_app(settings: Settings | None = None):
         with open_conn() as conn:
             return service.feed_exceptions(conn, resolve_cursor(cursor))
 
+    @app.get("/api/connectivity")
+    def connectivity() -> dict[str, Any]:
+        """Requirement F3's connector-readiness report, derived at the moment it is asked for.
+
+        Nothing is cached and nothing is read from a generated file, which is the requirement
+        rather than an oversight: the report is produced by inspecting the registry, the
+        transport classes, the schema contracts, the provenance tables and the evidence index
+        *as they are now*, so a connector deleted five minutes ago is missing from the next
+        response. A cached copy would be a hand-maintained table with a timestamp on it.
+
+        The database connection is handed in so the control-total column is read from rows that
+        actually landed rather than reported as "not checked". ``build_report`` queries it
+        defensively and tolerates the table being absent, so a fresh deployment answers this
+        endpoint before its first ingest.
+
+        **What this endpoint must never be read as saying.** Every connector in this build talks
+        to a local mock. ``live_vendor_connections`` is the payload's first key and is expected
+        to be empty; ``live_vendor_connection_statement`` is the sentence that goes with it, and
+        both are computed by :mod:`recon.connectors.readiness` rather than by the client, so no
+        front end can render a connection this build has not made.
+
+        **The adapter module is handed in, and this route is the only place that could do it.**
+        The report has to say whether a source's rows become canonical records — the difference
+        between "we read this file" and "we read this file and deliberately stop at the rows" —
+        and that fact lives in :mod:`recon.ingest.adapters`, on the far side of a seam the
+        report keeps deliberately: ``readiness`` imports nothing from ``recon.ingest``, and a
+        test asserts it on the import graph. An API route is the composition root that owns both
+        layers, so the wiring belongs here and the rule stays over there. No rule is written in
+        this function; :func:`recon.connectors.readiness.adapter_coverage` reads the answer off
+        the module by shape, and omitting the argument would report "not measured" rather than
+        "no".
+        """
+        from recon.connectors import readiness
+        from recon.ingest import adapters
+
+        with open_conn() as conn:
+            report = readiness.build_report(
+                control_totals=conn,
+                settings=app.state.settings,
+                adapters=adapters,
+            )
+        payload = readiness.as_dict(report)
+        # **Which TPA source this build actually read, stated separately from readiness.**
+        #
+        # The gate columns describe whether a source could reach a *vendor system* — credential
+        # resolved, transport configured, access gate cleared — and for every vendor row the
+        # honest answer is still no. But the build now reads one of those datasets on every
+        # run, out of a local mock directory, and a page that showed only "not configured,
+        # switched off" against the source supplying the qualifications would be telling a
+        # reviewer this build ignores a file it is in fact reconciling from.
+        #
+        # Two facts, kept apart, because collapsing them is the failure this whole report is
+        # shaped to avoid: `active` is what was read, `live_vendor_connections` is what was
+        # reached, and the second is still empty.
+        payload["active_tpa_source"] = {
+            "source": DEFAULT_TPA_SOURCE,
+            "datasets": list(_VENDOR_TPA_DATASETS.get(DEFAULT_TPA_SOURCE, ())),
+            "statement": (
+                f"The TPA's own rows are read from {DEFAULT_TPA_SOURCE}'s export on every "
+                "build, out of a local mock directory. That is a file this build reconciles "
+                "from -- it is not a connection to a vendor system, and the gate columns "
+                "below still read 'not configured' for exactly that reason."
+            ),
+        }
+        return payload
+
     @app.post("/api/regenerate")
     def regenerate(
         profile: str = Query("demo"),
@@ -343,6 +643,14 @@ def create_app(settings: Settings | None = None):
             description=(
                 "Master seed. Omit to rebuild the published dataset byte for byte; pass a new "
                 "value for a genuinely different one."
+            ),
+        ),
+        tpa_source: str = Query(
+            DEFAULT_TPA_SOURCE,
+            description=(
+                "Where the TPA's own account of a dispense comes from: 'generic' reads "
+                "tpa_340b_events.jsonl, 'verity' or 'craneware' reads that vendor's export "
+                "instead. The manufacturer's rows are read from the feed in every mode."
             ),
         ),
     ) -> dict[str, Any]:
@@ -383,6 +691,19 @@ def create_app(settings: Settings | None = None):
             raise HTTPException(
                 status_code=422, detail=f"seed must be a positive integer, got {seed}"
             )
+        # Validated against the table that actually serves it, so a fourth vendor becomes
+        # reachable here by adding a mapping rather than by editing this handler. Rejected
+        # loudly rather than falling back to generic: a typo that silently rebuilt the
+        # default would answer "which TPA is this?" with the wrong TPA, and the whole point
+        # of the control is that the answer differs.
+        if tpa_source != GENERIC_TPA_SOURCE and tpa_source not in _VENDOR_TPA_DATASETS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"unknown tpa_source {tpa_source!r}; expected {GENERIC_TPA_SOURCE!r} or "
+                    f"one of {sorted(_VENDOR_TPA_DATASETS)}"
+                ),
+            )
 
         current: Settings = app.state.settings
         rebuilt = current.for_profile(target)
@@ -392,8 +713,13 @@ def create_app(settings: Settings | None = None):
             rebuilt = replace(rebuilt, master_seed=seed)
         app.state.settings = rebuilt
 
-        result = build_dataset(app.state.settings, rebuild=True)
+        result = build_dataset(app.state.settings, rebuild=True, tpa_source=tpa_source)
         result["master_seed"] = app.state.settings.master_seed
+        # Echoed back because the rest of the payload cannot be read without it. Two rebuilds
+        # of the same profile and seed legitimately produce different verdicts depending on
+        # which TPA supplied the qualifications, so a response that did not say which one it
+        # used would be an unattributable measurement.
+        result["tpa_source"] = tpa_source
         return result
 
     # The agent layer's HTTP surface (docs/agent_layer_design.md S8.6). Always mounted:

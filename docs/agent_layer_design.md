@@ -136,12 +136,13 @@ Scorers compose as a weighted list, borrowed from Prime Intellect's `Rubric`: `r
 
 ## 4. Schemas
 
-**Reasoning first. Always.** Worth ~60pp on hard tasks; `pydantic.BaseModel` preserves declaration order into `model_json_schema()`.
+**Reasoning first. Always.** Worth ~60pp on hard tasks, so the schema has to preserve declaration order.
+*Correction, added after implementation:* this section originally said `pydantic.BaseModel` does that via `model_json_schema()`. The build does not use pydantic at all. `schemas.py` is frozen dataclasses plus a hand-written ordered `_FIELD_SCHEMAS` dict and a `json_schema()` classmethod, because pydantic arrives only with the `api` extra and the agent layer must import on a base install that has neither it nor FastAPI. The ordering guarantee is stronger this way — it is written down rather than inherited.
 
 ```python
 class ProposedAction(BaseModel):
     reasoning: str                      # FIRST, non-negotiable
-    evidence: list[EvidenceSpan]        # verbatim quote + offsets + source id
+    evidence: list[EvidenceSpan]        # verbatim quote + source kind + source ref
     grounding_clause_id: str | None
     action: ActionEnum                  # small closed set, includes ABSTAIN
     required_artifacts: list[str]
@@ -174,14 +175,23 @@ Three rules that fall out of the evidence:
 
 Nine, which is comfortably inside the safe zone — measured degradation starts around 15–20 and gets severe past 30–40. (Seven when this was written, for the Investigator and the Coordinator. The Portfolio Analyst added `get_portfolio_overview` and `get_exception_queue`; `spec_tools.md`'s decision D-T4 had excluded a portfolio tool explicitly *because only two roles were being built*, and that reason went away when the third one was.) Our only real risk at this count is *semantic overlap* between tools, so the description effort goes into sharpening boundaries, not managing count.
 
-The concise/detailed pattern Anthropic recommends is **already built**: `essential` is the cheap default, `facts` the drill-down, `get_raw_record(raw_id)` the third level. Concise responses measured at roughly ⅓ the tokens of detailed ones.
+The concise/detailed pattern Anthropic recommends is **already built**: `essential` is the cheap default, `full` the drill-down, `get_raw_record(raw_id)` the third level. Concise responses measured at roughly ⅓ the tokens of detailed ones.
+
+*Added after implementation, because this section was written before the tool layer existed and never named the thing it all routes through.* **Every tool reads through one module, `tools.py`** — nothing outside it touches the database, and an AST test holds that line.
+
+*Corrected again, later, by counting call sites rather than trusting the sentence above.* An earlier version of this paragraph said every one of the nine tools reads through one **function**, `dossier.build_dossier()`. That is not true and was never true. `build_dossier()` is called four times: `get_episode`, `get_rebate_status`, `get_remittance_detail`, `get_cash_match`. The other four readers go their own way — `calculate_reconciliation` queries `episode` and calls `repository.latest_verdict()`, `get_raw_record` runs its own SQL, `get_portfolio_overview` and `get_exception_queue` call into `service.py` — and `create_mock_work_item` writes through `repository` directly.
+
+The weaker claim is the one that holds, and it is still the claim worth making: the read surface is auditable because it is **one file**, not because it is one function. Checking what an agent can see means reading `tools.py`, and there is nowhere else to look.
+
+It is also where the agent's view deliberately diverges from the operator's. The dossier **withholds two crosswalk key types**, `COVERED_ENTITY_340B` and `HCPCS`, which stay on the operator's `/api/episode/{id}/trace`. Both are restatements of an identity already in the list — a scoped key wraps a natural key that is already there, and the HCPCS key is the same provider, drug and date with the drug named by J-code instead of NDC. Unfiltered, a medical episode shows eight rows for four claims, and "more keys than claims" is how a duplicate looks to anything reading the structure. The filter narrows no resolution; both types are live in `crosswalk_key`. It is scoped to *published* keys, so if one is ever the **basis** on which something resolved, that is a fact about the match and belongs in the dossier.
 
 Every tool returns one envelope:
 
 ```python
 {"status": "ok" | "error",
  "data": ...,
- "error_type": "not_found" | "invalid_input" | "ambiguous" | "db_error",
+ "error_type": "not_found" | "invalid_input" | "ambiguous" | "db_error"
+               | "not_permitted" | "duplicate_call_blocked",
  "message": "...",           # carries the next step
  "retryable": bool}
 ```
@@ -204,7 +214,7 @@ Append-only JSONL, one event per step, `derive_state(log)` to replay. Per iterat
 
 That single artifact is simultaneously the required tool-call trace, the audit trail, and the replay fixture.
 
-**Keyless replay testing** follows from it: record real traces once, derive a mock model from the fixture, and run the eval set in CI with no API key. Three modes — `replay` / `record` / `refresh`. This is how the eval set stays runnable by a reviewer who has no credentials.
+**Keyless replay testing** follows from it: record real traces once, derive a mock model from the fixture, and run the eval set in CI with no API key. Three modes — `live` / `record` / `replay`. (An earlier draft said `refresh`; there is no such mode. Refreshing a stale fixture is re-running `record`, which truncates and rewrites the file rather than appending.) This is how the eval set stays runnable by a reviewer who has no credentials.
 
 Fail closed with a typed reason. If the evaluator cannot run — database unreachable, judge API down — say so and stop. Never default to allow.
 
@@ -242,7 +252,7 @@ Worth noting the architecture has independent industry backing: Candid Health, a
 
 ## 8.5 The programmatic framework: none, and that is the point
 
-**Custom harness, plain Python, OpenAI-compatible wire client.** Roughly 150 lines of loop. The reasoning is not minimalism for its own sake — it is that every alternative costs us something we need.
+**Custom harness, plain Python, OpenAI-compatible wire client.** Estimated at ~150 lines of loop; `harness.py` landed at 416 lines, about 214 of them code, once budgets, journaling, self-bias detection and the repair loop were real. The reasoning is not minimalism for its own sake — it is that every alternative costs us something we need.
 
 Four sources were checked for an off-the-shelf loop with an evaluator: Pi, DeepSeek Harness, Prime Intellect's `verifiers`, PyHarness. **None ships one.** dsh's own agent-loop README has no reference to evaluators, critics, judges, scoring or confidence. So the eval loop is ours to write regardless of what sits underneath — the framework choice only decides the plumbing around a thing we are building either way.
 
@@ -253,7 +263,7 @@ Given that, the question becomes: what does each option *cost*?
 | Pi / DeepSeek Harness | TypeScript sidecar, RPC to Python for every tool call. Both are coding-agent harnesses — filesystem tools, terminal UIs. dsh warns "nothing about it is stable yet" |
 | Pydantic AI | A 0.x dependency at the centre of the graded component, abstracting the tool boundary the assignment is specifically testing |
 | Anthropic SDK as the framework | Locks the provider. Loses DeepSeek, GLM, Qwen, Kimi — the cheap tier |
-| **Custom loop + OpenAI-compatible client** | We write ~150 lines |
+| **Custom loop + OpenAI-compatible client** | We write ~150 lines (actual: 416, ~214 code) |
 
 ### Why the wire format decides the provider question
 
@@ -331,7 +341,7 @@ This section originally specified its own screen: "different questions, differen
 
 What was built instead is a read-only panel on the dashboard itself, placed below the operational queues and above the reference-only verdict distribution — a position chosen so it stays deliberately un-prominent even while living on the same screen. It filters to work items whose `at_cursor` is at or before the dashboard's replay cursor, for the same reason every other thing on that screen is a function of the cursor: a work item recorded after the point in time the dashboard is currently replaying has no business appearing yet. It does not silently drop the rest — it counts them, on screen, so "N to-dos recorded after this cursor" is visible rather than a discrepancy the reviewer has to notice on their own.
 
-Read-only is load-bearing, not laziness. `work_item` is append-only at the schema-trigger level — `UPDATE` and `DELETE` both abort (`src/recon/db/schema.sql:461-464`) — so there is no done state to check off and therefore no mutation affordance to build. The per-episode to-do list on `/analyse/{episode_id}` is unchanged: this panel is a second, cross-episode read of the same table, not a replacement for it.
+Read-only is load-bearing, not laziness. `work_item` is append-only at the schema-trigger level — `UPDATE` and `DELETE` both abort (`src/recon/db/schema.sql:518-521`) — so there is no done state to check off and therefore no mutation affordance to build. The per-episode to-do list on `/analyse/{episode_id}` is unchanged: this panel is a second, cross-episode read of the same table, not a replacement for it.
 
 A work item carries **what is needed to act, and nothing else**: the action, a short rationale, the concrete artifacts required (form numbers, document names, identifiers to quote), and a link back to the episode. It does not restate the timeline — anyone who wants the story clicks through to the episode that has it.
 
