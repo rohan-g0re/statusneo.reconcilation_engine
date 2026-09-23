@@ -330,6 +330,96 @@ def test_supports_forced_tool_choice_is_false_for_v4_pro_and_true_for_chat():
     assert supports_forced_tool_choice("deepseek-chat") is True
 
 
+@pytest.fixture
+def _forget_learned_capabilities():
+    """`_FORCED_TOOL_CHOICE_UNSUPPORTED` is process-scoped by design, so a test that
+    teaches the client something must un-teach it or leak into the next one."""
+    from recon.agents import client as client_module
+
+    before = set(client_module._FORCED_TOOL_CHOICE_UNSUPPORTED)
+    yield
+    client_module._FORCED_TOOL_CHOICE_UNSUPPORTED.clear()
+    client_module._FORCED_TOOL_CHOICE_UNSUPPORTED.update(before)
+
+
+_THINKING_MODE_REFUSAL = {
+    "error": {
+        "message": "Thinking mode does not support this tool_choice",
+        "type": "invalid_request_error",
+        "param": None,
+        "code": "invalid_request_error",
+    }
+}
+
+_FORCED = {"type": "function", "function": {"name": "emit_evaluation"}}
+
+
+def test_a_thinking_mode_tool_choice_refusal_is_resent_without_the_force(tmp_path, _forget_learned_capabilities):
+    """The failure that killed a live Decide run on 2026-09-22.
+
+    `deepseek-flash` moved to thinking mode, started answering HTTP 400 "Thinking
+    mode does not support this tool_choice", and the evaluator's very first call died
+    -- `run_until` fails closed on an evaluator error, so the whole run ended as a
+    bare "Run failed" with a proposal already in hand. The name no longer tells you
+    the capability, so the client finds out and re-sends.
+    """
+    seen: list[object] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        seen.append(body.get("tool_choice"))
+        if isinstance(body.get("tool_choice"), dict):
+            return httpx.Response(400, json=_THINKING_MODE_REFUSAL)
+        return httpx.Response(200, json=_raw_payload())
+
+    journal = Journal(tmp_path / "downgrade.jsonl", "run-downgrade", now=_clock())
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.deepseek.com", api_key=None, journal=journal,
+            client=http_client, sleep=lambda seconds: None,
+        )
+        result = client.complete(
+            agent="evaluator", messages=[{"role": "user", "content": "grade it"}],
+            model="deepseek-flash", tools=[], tool_choice=_FORCED,
+        )
+        # Learned: the second call never pays the 400 again.
+        assert supports_forced_tool_choice("deepseek-flash") is False
+        client.complete(
+            agent="evaluator", messages=[{"role": "user", "content": "grade it again"}],
+            model="deepseek-flash", tools=[], tool_choice=_FORCED,
+        )
+    journal.close()
+
+    assert result.content == "ok"
+    assert seen == [_FORCED, "auto", "auto"], "the forced choice must be paid exactly once"
+    # The refusal stays on the record rather than being papered over.
+    kinds = [e.kind for e in read_journal(tmp_path / "downgrade.jsonl")]
+    assert kinds == ["llm_request", "llm_error", "llm_request", "llm_response", "llm_request", "llm_response"]
+
+
+def test_a_400_that_is_not_the_tool_choice_refusal_still_raises(tmp_path, _forget_learned_capabilities):
+    """Matching the message, not just the status: a malformed tool schema must not be
+    quietly retried into a degraded run."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "Invalid tool schema at tools[0]"}})
+
+    journal = Journal(tmp_path / "other-400.jsonl", "run-other-400", now=_clock())
+    with _fake_client(handler) as http_client:
+        client = OpenAICompatClient(
+            base_url="https://api.deepseek.com", api_key=None, journal=journal,
+            client=http_client, sleep=lambda seconds: None,
+        )
+        with pytest.raises(LLMError) as excinfo:
+            client.complete(
+                agent="evaluator", messages=[{"role": "user", "content": "grade it"}],
+                model="deepseek-flash", tools=[], tool_choice=_FORCED,
+            )
+    journal.close()
+
+    assert excinfo.value.status == 400
+    assert supports_forced_tool_choice("deepseek-flash") is True, "an unrelated 400 teaches nothing"
+
+
 # ═══ 9. retry behaviour: 429 then 200 succeeds; three 429s raise LLMError ═══
 
 

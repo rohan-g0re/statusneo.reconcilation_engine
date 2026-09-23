@@ -14,21 +14,27 @@ gets a response still has to leave a readable trace of what was sent.
 
 ═══ Provider facts, measured this session -- encoded here, not re-probed ══════════
 
-Two DeepSeek models sit behind this client: ``deepseek-chat`` (serves
-``deepseek-flash``, non-thinking) and ``deepseek-v4-pro`` (thinking, returns
-``reasoning_content``). Measured against the live API:
+``GET /models`` lists two: ``deepseek-flash`` and ``deepseek-v4-pro``. A third name,
+``deepseek-chat``, is not listed but still resolves -- to flash with thinking OFF,
+which is the only non-thinking tier reachable at all. Measured against the live API:
 
 * ``tool_choice={"type": "function", ...}`` (forced tool-use) -- works on
   ``deepseek-chat``; HTTP 400 ``"Thinking mode does not support this tool_choice"``
-  on ``deepseek-v4-pro``.
+  on ``deepseek-flash`` **and** ``deepseek-v4-pro``.
 * ``response_format={"type": "json_schema"}`` -- HTTP 400 ``"This response_format
   type is unavailable now"`` on *both* models.
 * ``response_format={"type": "json_object"}`` -- works, but does not honour an
   enum (a ``Literal`` field came back as free text).
 
 So forced tool-use is the only structured-output path available at all, and it only
-works on the non-thinking model. :func:`supports_forced_tool_choice` encodes that so
-callers branch on capability, not on a hard-coded model name.
+works with thinking off. The second bullet is the one that moved: it read
+"``deepseek-flash``, non-thinking" until 2026-09-22, when flash started answering in
+thinking mode and a Decide run configured against it died on its first evaluator
+call. The capability does not live in the model name, so it is no longer read out of
+one -- :func:`supports_forced_tool_choice` answers from what this process has
+watched the provider actually do, and :meth:`OpenAICompatClient.complete` re-sends
+the one request that refusal invalidates. Callers branch on capability, and the
+capability is now observed rather than assumed.
 """
 
 from __future__ import annotations
@@ -119,15 +125,48 @@ class ReplayMiss(Exception):
         self.nearest = nearest
 
 
+#: Models observed, in THIS process, to reject a forced ``tool_choice``.
+#:
+#: The substring rule below was a guess about how the provider names its thinking
+#: models, and the guess expired. Measured 2026-09-22 against the live API:
+#: ``deepseek-flash`` -- which this module's own docstring described as the
+#: non-thinking tier -- now answers HTTP 400 ``"Thinking mode does not support this
+#: tool_choice"`` exactly like ``deepseek-v4-pro``. ``GET /models`` lists only those
+#: two; the ``deepseek-chat`` alias still resolves to flash with thinking OFF and
+#: still accepts a forced choice, so the capability now splits on a *mode* the model
+#: name does not carry.
+#:
+#: Rather than chase that with a longer substring list, the client learns: the first
+#: 400 of that shape for a model records it here, and every later call skips the
+#: forced path outright. Process-scoped and never persisted -- a provider that fixes
+#: this tomorrow should not be permanently down-rated by a file written today.
+_FORCED_TOOL_CHOICE_UNSUPPORTED: set[str] = set()
+
+#: The provider's own wording for the refusal, lowercased. Matching the message and
+#: not just the 400 matters: a 400 also covers a malformed tool schema or a bad
+#: parameter, and silently retrying THOSE without the forced choice would turn a
+#: real bug into a quietly degraded run.
+_UNSUPPORTED_TOOL_CHOICE_MARKER = "does not support this tool_choice"
+
+
+def _is_forced_tool_choice(tool_choice: str | dict[str, Any] | None) -> bool:
+    return isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
+
+
+def _rejects_forced_tool_choice(exc: LLMError) -> bool:
+    return exc.status == 400 and _UNSUPPORTED_TOOL_CHOICE_MARKER.casefold() in exc.body.casefold()
+
+
 def supports_forced_tool_choice(model: str) -> bool:
     """Whether a forced ``tool_choice={"type": "function", ...}`` works on ``model``.
 
-    Measured this session: ``deepseek-chat`` accepts it, ``deepseek-v4-pro`` returns
-    HTTP 400 ``"Thinking mode does not support this tool_choice"``. Every thinking
-    model DeepSeek ships carries the ``v4-pro`` marker, so that substring is the
-    capability test rather than an exact-match model list that would need updating
-    every time a new thinking model ships.
+    Answered from what this process has actually observed first, and only then from
+    the name. The substring is a prior, not a fact: ``deepseek-v4-pro`` has always
+    refused, and a model this client has already watched refuse is refused regardless
+    of what it is called. See :data:`_FORCED_TOOL_CHOICE_UNSUPPORTED`.
     """
+    if model in _FORCED_TOOL_CHOICE_UNSUPPORTED:
+        return False
     return "v4-pro" not in model
 
 
@@ -336,6 +375,55 @@ class OpenAICompatClient:
         temperature: float | None = None,
         iteration: int | None = None,
     ) -> LLMResponse:
+        # A model already known to refuse a forced choice is never asked again -- the
+        # 400 below is paid once per model per process, not once per call.
+        if _is_forced_tool_choice(tool_choice) and not supports_forced_tool_choice(model):
+            tool_choice = "auto"
+
+        result = self._attempt(
+            agent=agent, messages=messages, model=model, tools=tools, tool_choice=tool_choice,
+            max_tokens=max_tokens, temperature=temperature, iteration=iteration,
+        )
+        if result is not None:
+            return result
+
+        # Only reachable when `_attempt` met the provider's "thinking mode does not
+        # support this tool_choice" refusal, which it has already journalled as the
+        # `llm_error` it was. The request itself is sound -- the same messages and the
+        # same single tool, asked without the force -- so it is re-sent rather than
+        # failed. The caller (`coordinator._emit_structured`) is built for exactly this
+        # reply shape: with `tool_choice="auto"` a model may answer in prose, and the
+        # transcription repair turn is what recovers that case.
+        second = self._attempt(
+            agent=agent, messages=messages, model=model, tools=tools, tool_choice="auto",
+            max_tokens=max_tokens, temperature=temperature, iteration=iteration,
+        )
+        if second is None:  # refused a choice we did not force: not a case that exists
+            raise LLMError(
+                f"{self._base_url}/chat/completions rejected tool_choice='auto' on {model!r}.",
+                status=400, body=_UNSUPPORTED_TOOL_CHOICE_MARKER, attempts=1,
+            )
+        return second
+
+    def _attempt(
+        self,
+        *,
+        agent: str,
+        messages: list[dict[str, Any]],
+        model: str,
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | dict[str, Any] | None,
+        max_tokens: int | None,
+        temperature: float | None,
+        iteration: int | None,
+    ) -> LLMResponse | None:
+        """One journalled request/response pair.
+
+        Returns ``None`` -- and only ``None`` -- when the provider refused the forced
+        ``tool_choice`` this call carried, which is the one failure :meth:`complete`
+        retries differently rather than raising. Every other failure raises
+        :class:`LLMError` from here, unchanged.
+        """
         body = self._build_body(model, messages, tools, tool_choice, max_tokens, temperature)
         digest = request_digest(model, messages, tools, tool_choice)
 
@@ -363,6 +451,13 @@ class OpenAICompatClient:
             return result
         except LLMError as exc:
             failure = exc
+            if _is_forced_tool_choice(tool_choice) and _rejects_forced_tool_choice(exc):
+                # Learned, not guessed. Both the refusal and the downgrade stay on the
+                # record via the `llm_error` the `finally` below writes -- a client that
+                # silently papered over a provider contract violation is how the
+                # violation stops being visible to the next person who hits it.
+                _FORCED_TOOL_CHOICE_UNSUPPORTED.add(model)
+                return None
             raise
         finally:
             # Unconditional: llm_response/llm_error is journaled either way, which is
