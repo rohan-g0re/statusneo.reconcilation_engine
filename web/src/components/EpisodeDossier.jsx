@@ -168,8 +168,8 @@ export default function EpisodeDossier({ dossier, busy, onClose }) {
 
       {current && current.reason_codes.length > 0 ? (
         <p className="dossier-reasons">
-          {current.reason_codes.map((code) => (
-            <span className="chip" key={code} title={code}>
+          {current.reason_codes.map((code, i) => (
+            <span className="chip" key={`${code}-${i}`} title={code}>
               {labels.reason(code).label}
             </span>
           ))}

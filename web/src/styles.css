@@ -1306,3 +1306,28 @@ td.todo-artifacts {
 /* `th, td` forces `white-space: nowrap` for the dense tabular columns; a blocked item's summary
  * runs several hundred characters and has to wrap instead of pushing the table off the edge. */
 td.conn-wrap { white-space: normal; min-width: 28ch; max-width: 56ch; }
+
+/* The work-item artifact rows: an ordered list a reviewer can actually reorder, with the write
+ * tool's 120-character ceiling shown per row rather than enforced by a 422 after the fact. */
+.wi-artifact-row { display: flex; align-items: center; gap: var(--space-3); }
+.wi-artifact-row input { flex: 1 1 auto; min-width: 0; }
+.wi-artifact-n {
+  font-family: var(--mono); font-size: var(--text-xs); color: var(--text-muted);
+  min-width: 1.4em; text-align: right;
+}
+.wi-artifact-count {
+  font-family: var(--mono); font-size: var(--text-xxs); color: var(--text-muted);
+  min-width: 5.5ch; text-align: right; font-variant-numeric: tabular-nums;
+}
+.wi-artifact-count.at-limit { color: var(--status-critical); font-weight: 600; }
+.wi-artifact-row button:disabled { opacity: 0.35; cursor: default; }
+
+/* The outcome's one-sentence "why", and the run id that replaces the printed audit trail. */
+.outcome-why {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-body);
+  max-width: 78ch;
+}
+.outcome-runid { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--text-muted); }

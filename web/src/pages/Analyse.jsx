@@ -29,18 +29,13 @@ const OUTCOME_STYLE = {
   episode_not_found: { color: 'var(--status-critical)', label: 'Episode not found', icon: '✕' },
 }
 
-const VERDICT_COLOR = {
-  SUPPORTED: 'var(--status-good)',
-  CONTRADICTED: 'var(--status-critical)',
-  NOT_ADDRESSED: 'var(--status-warning)',
-}
-
-const GATE_COLOR = {
-  complete: 'var(--status-good)',
-  insufficient_data: 'var(--accent)',
-  stalled: 'var(--status-warning)',
-  capped: 'var(--status-warning)',
-  continue: 'var(--text-muted)',
+// What a status means for the claim, when the run carried no reason of its own. Written for the
+// person holding the claim, not for the person holding the harness.
+const OUTCOME_FALLBACK = {
+  stalled: 'Two more rounds of review did not improve on the recommendation below, so the loop stopped rather than spend a third. Treat the draft as a starting point and check it yourself.',
+  capped: 'The review ran out of its budget before it cleared the bar. The recommendation below is the best it reached, not a settled answer.',
+  complete: 'The recommendation below cleared every check the reviewer applies.',
+  insufficient_data: 'The records available at this cursor do not settle the question. The draft below says what is missing.',
 }
 
 function truncate(text, n) {
@@ -48,186 +43,59 @@ function truncate(text, n) {
   return text.length > n ? `${text.slice(0, n)}…` : text
 }
 
-// ═══ the decide loop's event log — one row per SSE frame, in arrival order ══════════════════
+// The one artifact rule the write tool enforces (`tools.py`: at most 120 characters, no "; ",
+// no newline), applied here so a reviewer never meets it as a 422 from a draft they did not
+// write. "; " is the tool's own separator when it folds the list into one stored string, so a
+// semicolon inside an entry would silently split it in two; a comma carries the same meaning to
+// a reader and survives the round trip.
+const ARTIFACT_MAX = 120
 
-function LogRow({ kind, payload }) {
-  switch (kind) {
-    case 'run_started':
-      return (
-        <div className="agent-log-row muted">
-          run started — role {payload.role}, cursor {String(payload.cursor).slice(0, 10)}
-        </div>
-      )
-    case 'iteration_started':
-      return <div className="agent-log-divider">Iteration {payload.iteration + 1}</div>
-    case 'llm_request':
-      return (
-        <div className="agent-log-row muted">
-          → {payload.agent} calling {payload.model}
-        </div>
-      )
-    case 'llm_response':
-      return (
-        <div className="agent-log-row muted">
-          ← {payload.agent} responded
-          {payload.usage?.total_tokens ? ` (${payload.usage.total_tokens} tokens)` : ''}
-          {payload.finish_reason ? ` · ${payload.finish_reason}` : ''}
-        </div>
-      )
-    case 'llm_error':
-      return (
-        <div className="agent-log-row bad">
-          llm_error: {payload.agent} / {payload.model} — status {payload.status}, {payload.attempts} attempt(s)
-        </div>
-      )
-    case 'tool_call':
-      return (
-        <div className="agent-log-row mono">
-          tool_call {payload.name}({truncate(JSON.stringify(payload.arguments ?? {}), 140)})
-        </div>
-      )
-    case 'tool_result':
-      return (
-        <div className={`agent-log-row mono ${payload.status === 'error' ? 'bad' : 'muted'}`}>
-          ↳ {payload.status}
-          {payload.error_type ? ` (${payload.error_type})` : ''} · {payload.bytes ?? 0} B · {payload.elapsed_ms ?? 0} ms
-        </div>
-      )
-    case 'proposal':
-      // A `proposal` event carrying `schema_repair_attempted` is not a proposal — it is
-      // the coordinator recording that one came back malformed and is being asked for
-      // again. Rendering it through the card below would print "Proposal undefined".
-      if (payload.schema_repair_attempted)
-        return (
-          <div className="agent-log-row muted">
-            note: the proposal did not validate ({truncate(payload.error, 160)}) — asking once for a corrected one
-          </div>
-        )
-      return (
-        <div className="agent-log-card">
-          <div className="agent-log-card-head">
-            Proposal <span className="verdict-code">{payload.action}</span>
-            {payload.blocked ? <span className="chip flag">blocked: {payload.blocked_reason}</span> : null}
-          </div>
-          <div className="agent-log-card-body">{truncate(payload.reasoning, 320)}</div>
-          <div className="agent-log-card-foot">
-            {payload.evidence?.length ?? 0} evidence span(s) · {payload.required_artifacts?.length ?? 0} artifact(s) required
-          </div>
-        </div>
-      )
-    case 'evaluation':
-      return (
-        <div className="agent-log-card">
-          <div className="agent-log-card-head">Evaluation ({payload.model})</div>
-          <div className="agent-log-criteria">
-            {(payload.per_criterion ?? []).map((f) => (
-              <span
-                key={f.criterion_id}
-                className="chip"
-                style={{ borderColor: VERDICT_COLOR[f.verdict], color: 'var(--text-primary)' }}
-                title={f.reasoning}
-              >
-                {f.criterion_id.split('_')[0]} {f.verdict}
-              </span>
-            ))}
-          </div>
-        </div>
-      )
-    case 'score': {
-      // Show the criteria that FAILED, not just the number.
-      //
-      // The four vetoes are deterministic -- Python, no model call -- so they never
-      // appeared in the `evaluation` event, and a reviewer watching the stream saw
-      // three green SUPPORTED chips sitting directly above "score: 0.000" with
-      // nothing to explain the contradiction. It reads as a broken scorer rather than
-      // as a veto doing its job, which is the opposite of what a watchable loop is for.
-      const failed = (payload.findings ?? []).filter((f) => f.verdict !== 'SUPPORTED')
-      return (
-        <div className="agent-log-row">
-          <div>
-            score: <strong>{Number(payload.value).toFixed(3)}</strong>
-            {failed.length ? <span className="muted"> — {failed.length} criterion/criteria not supported</span> : null}
-          </div>
-          {failed.map((f) => (
-            <div key={f.criterion_id} className="agent-log-criteria" style={{ marginTop: 4 }}>
-              <span
-                className="chip"
-                style={{ borderColor: VERDICT_COLOR[f.verdict], color: 'var(--text-primary)' }}
-                title={f.reasoning}
-              >
-                {f.criterion_id.split('_')[0]} {f.verdict}
-              </span>
-              <span className="muted" style={{ fontSize: 11 }}>{truncate(f.reasoning, 150)}</span>
-            </div>
-          ))}
-        </div>
-      )
-    }
-    case 'critique':
-      // The text actually sent back to the proposer for the next round. Without it the
-      // stream shows two independent-looking proposals and leaves the reviewer to
-      // infer what changed the model's mind -- when the feed-forward IS the loop's
-      // argument for existing.
-      return (
-        <div className="agent-log-card">
-          <div className="agent-log-card-head">Fed back to the proposer</div>
-          <div className="agent-log-card-body">{truncate(payload.text, 600)}</div>
-        </div>
-      )
-    case 'gate':
-      return (
-        <div className="agent-log-row" style={{ color: GATE_COLOR[payload.decision] ?? 'inherit' }}>
-          gate: <strong>{payload.decision}</strong>
-          {payload.score !== undefined ? ` (score ${Number(payload.score).toFixed(3)})` : ''}
-          {payload.unanswerable?.length ? ` — unanswerable: ${payload.unanswerable.join(', ')}` : ''}
-          {payload.budget_note ? ` — ${payload.budget_note}` : ''}
-          {payload.proposer_blocked ? ' — the proposer asked to stop' : ''}
-        </div>
-      )
-    case 'iteration_finished':
-      return <hr className="agent-log-rule" />
-    case 'injection_attempt_recorded':
-      return (
-        <div className="agent-log-row bad">
-          ⚠ injection attempt recorded: {payload.name}({truncate(JSON.stringify(payload.arguments ?? {}), 100)})
-        </div>
-      )
-    case 'forced_tool_name_coerced':
-      return (
-        <div className="agent-log-row muted">
-          note: {payload.model} answered under {payload.returned_name}, coerced to {payload.coerced_to}
-        </div>
-      )
-    case 'work_item_written':
-      return (
-        <div className="agent-log-row">
-          work item {payload.work_item_id} written for verdict {payload.from_verdict_id}
-        </div>
-      )
-    case 'run_finished':
-      return (
-        <div className="agent-log-row muted">
-          run finished — outcome {payload.outcome}
-          {payload.wall_ms !== undefined ? ` · ${payload.wall_ms} ms` : ''}
-        </div>
-      )
-    case 'client_error':
-      return <div className="agent-log-row bad">stream error: {payload.detail}</div>
-    case 'outcome':
-      return null // rendered as the banner below the log, not as a log line
-    default:
-      return (
-        <div className="agent-log-row muted">
-          {kind}: {truncate(JSON.stringify(payload), 200)}
-        </div>
-      )
-  }
+function cleanArtifact(text) {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').replace(/;\s/g, ', ').trim()
+  return flat.length > ARTIFACT_MAX ? `${flat.slice(0, ARTIFACT_MAX - 1).trimEnd()}…` : flat
 }
 
-// ═══ the terminal outcome banner ═════════════════════════════════════════════════════════════
+// Which role is working, in words. Keyed on the SSE frame kinds the harness already emits, so
+// there is nothing new on the wire -- the stream is simply read for one fact instead of printed.
+const PROGRESS = {
+  run_started: 'reading the episode',
+  iteration_started: (p) => `round ${(p.iteration ?? 0) + 1} — proposing an action`,
+  tool_call: (p) => `looking up ${String(p.name ?? '').replace(/_/g, ' ')}`,
+  proposal: (p) => (p.schema_repair_attempted ? 'correcting the proposal' : 'grading the proposal'),
+  evaluation: 'grading the proposal',
+  score: 'checking the result against the bar',
+  critique: 'sending it back for another round',
+}
 
+// ═══ the outcome, as a reader needs it ══════════════════════════════════════════════════════
+//
+// What used to sit here was the harness's own audit trail, streamed frame by frame: every
+// llm_request, every tool_call and its byte count, the proposer's full reasoning, the
+// evaluator's per-criterion grades as `G6 CONTRADICTED` chips, the score to three decimals, the
+// critique fed forward, and a closing "Full checklist (10 criteria graded)". All of it is real
+// and all of it is still recorded -- `GET /api/agent/runs/{run_id}` returns the whole journal,
+// event for event, and the JSONL on disk is untouched. None of it belongs on this screen.
+//
+// A criterion id is a name for an argument the engine has with itself. `G3_figures_are_sourced`
+// CONTRADICTED does not tell an operator anything they can act on; it tells a maintainer that
+// the number scorer fired. Rendering it beside the recommendation asks the reader to audit the
+// grader instead of reading the recommendation, and the two are not the same job. The run id is
+// kept, so the trail is one HTTP call away for whoever does want to audit it.
 function OutcomeBanner({ outcome }) {
   const style = OUTCOME_STYLE[outcome.status] ?? { color: 'var(--border-strong)', label: outcome.status, icon: '?' }
+  // One sentence, in plain words, for why the loop ended where it did. The four outcomes each
+  // carry their reason on a different field, and exactly one of them is ever populated.
+  //
+  // Every status gets one, including the two that carry no reason field of their own. A live run
+  // ended "Stalled" with nothing under it, which tells a reader the machine stopped and not what
+  // that means for the claim in front of them -- a status word alone is a shrug.
+  const why =
+    outcome.detail ||
+    outcome.blocked_reason ||
+    outcome.missing_narrative ||
+    outcome.budget_note ||
+    OUTCOME_FALLBACK[outcome.status] ||
+    null
   return (
     <div className="outcome-banner" style={{ '--oc': style.color }} data-testid="decide-outcome" data-status={outcome.status}>
       <div className="outcome-banner-head">
@@ -235,55 +103,12 @@ function OutcomeBanner({ outcome }) {
           {style.icon}
         </span>
         <span className="outcome-banner-label">{style.label}</span>
-        {outcome.iterations_run !== undefined ? (
-          <span className="dossier-note">
-            {outcome.iterations_run} iteration{outcome.iterations_run === 1 ? '' : 's'}
-            {outcome.final_score !== undefined && outcome.final_score !== null
-              ? ` · final score ${Number(outcome.final_score).toFixed(3)}`
-              : ''}
-          </span>
-        ) : null}
       </div>
-      {outcome.score_trajectory?.length ? (
-        <div className="outcome-trajectory mono">
-          {outcome.score_trajectory.map((v) => Number(v).toFixed(2)).join(' → ')}
-          {outcome.self_bias_suspected ? (
-            <span className="chip flag" style={{ marginLeft: 8 }}>
-              possible self-bias
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {outcome.detail ? <p className="dossier-note" style={{ margin: '6px 0 0' }}>{outcome.detail}</p> : null}
-      {outcome.missing_criteria?.length ? (
-        <p className="dossier-note" style={{ margin: '6px 0 0' }}>
-          not addressed: {outcome.missing_criteria.join(', ')}
-          {outcome.missing_narrative ? ` — ${outcome.missing_narrative}` : ''}
+      {why ? <p className="outcome-why" data-testid="decide-why">{why}</p> : null}
+      {outcome.run_id ? (
+        <p className="outcome-runid">
+          Full reasoning trace recorded as run <span className="mono">{outcome.run_id.slice(0, 12)}</span>
         </p>
-      ) : null}
-      {outcome.proposer_blocked ? (
-        <p className="dossier-note" style={{ margin: '6px 0 0' }}>the proposer asked to stop: {outcome.blocked_reason}</p>
-      ) : null}
-      {outcome.budget_note ? <p className="dossier-note" style={{ margin: '6px 0 0' }}>{outcome.budget_note}</p> : null}
-
-      {outcome.findings ? (
-        <details style={{ marginTop: 10 }}>
-          <summary style={{ cursor: 'pointer', fontSize: 12.5, color: 'var(--text-secondary)' }}>
-            Full checklist ({Object.keys(outcome.findings).length} criteria graded)
-          </summary>
-          <div className="agent-log-criteria" style={{ marginTop: 8 }}>
-            {Object.entries(outcome.findings).map(([criterionId, finding]) => (
-              <span
-                key={criterionId}
-                className="chip"
-                style={{ borderColor: VERDICT_COLOR[finding.verdict], color: 'var(--text-primary)' }}
-                title={finding.reasoning}
-              >
-                {criterionId} — {finding.verdict}
-              </span>
-            ))}
-          </div>
-        </details>
       ) : null}
     </div>
   )
@@ -375,12 +200,13 @@ function ExplainPanel({ episodeId, onRun }) {
 // ═══ the decide panel: the streamed loop, the outcome, the editable draft ══════════════════════
 
 function DecidePanel({ episodeId, canRun }) {
-  const [events, setEvents] = useState([])
   const [running, setRunning] = useState(false)
+  // One line of plain progress instead of the raw frame log: which of the two roles is working
+  // right now. The SSE stream still arrives in full -- this reads it and keeps one string.
+  const [progress, setProgress] = useState(null)
   const [outcome, setOutcome] = useState(null)
   const [unavailable, setUnavailable] = useState(null)
   const abortRef = useRef(null)
-  const logRef = useRef(null)
 
   // Work-item draft, seeded from the proposal once an outcome carrying one arrives, then
   // freely editable — the safety property the task calls for, not a convenience: a human
@@ -401,10 +227,6 @@ function DecidePanel({ episodeId, canRun }) {
   }, [])
 
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [events])
-
-  useEffect(() => {
     api.agent
       .workItemsForEpisode(episodeId)
       .then((payload) => setEpisodeWorkItems(payload.work_items))
@@ -416,7 +238,16 @@ function DecidePanel({ episodeId, canRun }) {
   useEffect(() => {
     if (outcome?.proposal) {
       setWiAction(ACTIONS.includes(outcome.proposal.action) ? outcome.proposal.action : 'ABSTAIN')
-      setWiArtifacts(outcome.proposal.required_artifacts?.length ? [...outcome.proposal.required_artifacts] : [''])
+      // Sanitised on the way in, not only on the way out. The model writes an artifact as a
+      // sentence with a semicolon in it and no length discipline; the write tool rejects
+      // anything over 120 characters, containing "; " (its own list separator) or a newline.
+      // Seeding the form with text the server will refuse puts a 422 in front of a reviewer who
+      // did nothing wrong, which is exactly what happened.
+      setWiArtifacts(
+        outcome.proposal.required_artifacts?.length
+          ? outcome.proposal.required_artifacts.map(cleanArtifact)
+          : [''],
+      )
       setWiSummary((outcome.proposal.reasoning || '').slice(0, 600))
       setWiResult(null)
       setWiError(null)
@@ -425,17 +256,18 @@ function DecidePanel({ episodeId, canRun }) {
 
   function run() {
     if (abortRef.current) abortRef.current()
-    setEvents([])
     setOutcome(null)
     setUnavailable(null)
     setRunning(true)
+    setProgress('reading the episode')
     abortRef.current = api.agent.decide(episodeId, null, (kind, payload) => {
       if (kind === 'client_error' && /503/.test(payload.detail ?? '')) {
         setUnavailable(payload.detail)
         setRunning(false)
         return
       }
-      setEvents((prev) => [...prev, { key: prev.length, kind, payload }])
+      const step = PROGRESS[kind]
+      if (step) setProgress(typeof step === 'function' ? step(payload) : step)
       if (kind === 'outcome' || kind === 'client_error') {
         setOutcome(kind === 'outcome' ? payload : { status: 'error', detail: payload.detail })
         setRunning(false)
@@ -452,6 +284,18 @@ function DecidePanel({ episodeId, canRun }) {
   function removeArtifact(index) {
     setWiArtifacts((prev) => (prev.length <= 1 ? [''] : prev.filter((_, i) => i !== index)))
   }
+  // Order is meaning in this list: it is what a person works down, so the one they must do first
+  // belongs at the top. The reviewer could add, edit and strike an entry but not move one, which
+  // left reordering as "delete it and retype it somewhere else".
+  function moveArtifact(index, delta) {
+    setWiArtifacts((prev) => {
+      const to = index + delta
+      if (to < 0 || to >= prev.length) return prev
+      const next = [...prev]
+      ;[next[index], next[to]] = [next[to], next[index]]
+      return next
+    })
+  }
 
   async function addToDo() {
     const summary = wiSummary.trim()
@@ -459,7 +303,23 @@ function DecidePanel({ episodeId, canRun }) {
       setWiError(`Rationale must be 20–600 characters (currently ${summary.length}).`)
       return
     }
+    // Checked here, against the same rule the tool applies, so a violation is reported next to
+    // the field that caused it rather than as a raw 422 quoting an entry the reviewer has to go
+    // and find. `cleanArtifact` already keeps typed text legal; this catches a paste.
     const artifacts = wiArtifacts.map((a) => a.trim()).filter(Boolean)
+    const bad = artifacts.findIndex((a) => a.length > ARTIFACT_MAX || a.includes('; ') || /[\r\n]/.test(a))
+    if (bad !== -1) {
+      setWiError(
+        `Artifact ${bad + 1} is ${artifacts[bad].length} characters and must be at most ` +
+          `${ARTIFACT_MAX}, on one line, with no semicolon followed by a space. Shorten it, or ` +
+          `split it into two artifacts.`,
+      )
+      return
+    }
+    if (artifacts.length > 8) {
+      setWiError(`At most 8 required artifacts; there are ${artifacts.length}. Remove ${artifacts.length - 8}.`)
+      return
+    }
     setWiBusy(true)
     setWiError(null)
     setWiResult(null)
@@ -489,7 +349,7 @@ function DecidePanel({ episodeId, canRun }) {
           ? {
               recommended_action: outcome.proposal.action,
               summary: outcome.proposal.reasoning,
-              required_artifacts: outcome.proposal.required_artifacts,
+              required_artifacts: (outcome.proposal.required_artifacts ?? []).map(cleanArtifact),
             }
           : null,
         run_id: outcome?.run_id ?? null,
@@ -525,14 +385,10 @@ function DecidePanel({ episodeId, canRun }) {
         </div>
       ) : null}
 
-      {events.length > 0 ? (
-        <div className="agent-log" ref={logRef} data-testid="decide-log">
-          {events
-            .filter((e) => e.kind !== 'outcome')
-            .map((e) => (
-              <LogRow key={e.key} kind={e.kind} payload={e.payload} />
-            ))}
-        </div>
+      {running ? (
+        <p className="spinner" data-testid="decide-progress">
+          {progress ?? 'working'}…
+        </p>
       ) : null}
 
       {outcome ? <OutcomeBanner outcome={outcome} /> : null}
@@ -567,19 +423,47 @@ function DecidePanel({ episodeId, canRun }) {
             <span>Required artifacts</span>
             {wiArtifacts.map((artifact, i) => (
               <div key={i} className="wi-artifact-row">
+                <span className="wi-artifact-n" aria-hidden="true">{i + 1}</span>
                 <input
                   data-testid={`wi-artifact-${i}`}
                   type="text"
                   value={artifact}
+                  maxLength={ARTIFACT_MAX}
                   onChange={(e) => updateArtifact(i, e.target.value)}
                   placeholder="e.g. corrected NDC on a resubmitted claim"
                 />
-                <button type="button" onClick={() => removeArtifact(i)} title="Remove this artifact">
+                <span
+                  className={`wi-artifact-count${artifact.length >= ARTIFACT_MAX ? ' at-limit' : ''}`}
+                  title={`${ARTIFACT_MAX}-character limit`}
+                >
+                  {artifact.length}/{ARTIFACT_MAX}
+                </span>
+                <button
+                  type="button"
+                  data-testid={`wi-artifact-up-${i}`}
+                  onClick={() => moveArtifact(i, -1)}
+                  disabled={i === 0}
+                  title="Move up"
+                  aria-label={`Move artifact ${i + 1} up`}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  data-testid={`wi-artifact-down-${i}`}
+                  onClick={() => moveArtifact(i, 1)}
+                  disabled={i === wiArtifacts.length - 1}
+                  title="Move down"
+                  aria-label={`Move artifact ${i + 1} down`}
+                >
+                  ↓
+                </button>
+                <button type="button" onClick={() => removeArtifact(i)} title="Remove this artifact" aria-label={`Remove artifact ${i + 1}`}>
                   ✕
                 </button>
               </div>
             ))}
-            <button type="button" onClick={addArtifact}>
+            <button type="button" data-testid="wi-add-artifact" onClick={addArtifact} disabled={wiArtifacts.length >= 8}>
               + add artifact
             </button>
           </div>
