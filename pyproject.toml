@@ -28,6 +28,13 @@ agent = ["httpx"]
 # never a blanket `ignore::DeprecationWarning`.
 connectors = ["paramiko"]
 dev = ["pytest"]
+# Charting for `scripts/visualize_db.py`, which reads a built database and writes a
+# standalone HTML dashboard. An extra rather than a base dependency for the same reason
+# as everything above it, and deliberately plotly on its own: graph_objects takes plain
+# Python lists, so the usual pandas/numpy stack that comes with charting is not needed to
+# plot rows a SELECT already returned. Nothing the engine, the API or the agent layer
+# imports lives here -- deleting this extra cannot break a verdict.
+viz = ["plotly"]
 
 [project.scripts]
 recon = "recon.cli:main"

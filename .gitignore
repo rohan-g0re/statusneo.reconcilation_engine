@@ -104,3 +104,6 @@ data/agent_runs/
 # Stray scratch diagram at the repo root, superseded by docs/images/.
 /architecture.excalidraw
 data/generated/*/vendor/
+
+# local db exports (scripts/export_db.py)
+exports/
