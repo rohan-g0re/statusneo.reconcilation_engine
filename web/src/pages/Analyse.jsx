@@ -94,6 +94,15 @@ function LogRow({ kind, payload }) {
         </div>
       )
     case 'proposal':
+      // A `proposal` event carrying `schema_repair_attempted` is not a proposal — it is
+      // the coordinator recording that one came back malformed and is being asked for
+      // again. Rendering it through the card below would print "Proposal undefined".
+      if (payload.schema_repair_attempted)
+        return (
+          <div className="agent-log-row muted">
+            note: the proposal did not validate ({truncate(payload.error, 160)}) — asking once for a corrected one
+          </div>
+        )
       return (
         <div className="agent-log-card">
           <div className="agent-log-card-head">

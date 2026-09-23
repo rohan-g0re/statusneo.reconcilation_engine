@@ -238,6 +238,82 @@ def test_the_proposer_session_uses_forced_tool_use_on_deepseek_chat(tmp_path):
     assert client.calls[1]["tool_choice"] == {"type": "function", "function": {"name": "emit_proposed_action"}}
 
 
+def test_a_malformed_proposal_gets_one_repair_turn_instead_of_killing_the_run(tmp_path):
+    """`run_until` has a fail-closed handler for `evaluate` and none for `propose`, so a
+    `SchemaError` out of the proposer used to end the whole run as a bare "error" --
+    measured on live run 0dd212af, after five minutes of the model's own thinking. One
+    repair turn, aimed at the offending field, the same treatment `_make_evaluate`
+    already gives the evaluator.
+    """
+    good = _proposed_action_args(
+        action="ESCALATE",
+        evidence=[{"quote": "x", "source_kind": "tool_result", "source_ref": "tool_result#1"}],
+        required_artifacts=["Escalate to compliance review"], blocked=False, blocked_reason=None, missing_evidence=[],
+    )
+    # Non-ABSTAIN with no artifacts: rejected by `ProposedAction.parse`, and NOT one of
+    # the spellings `_require_nullable_str` now forgives -- so the repair path is what
+    # rescues it, not the coercion.
+    malformed = {**good, "required_artifacts": []}
+    client = ScriptedClient(
+        [
+            _prose_response("I have everything I need.", model="deepseek-chat"),
+            _tool_call_response("emit_proposed_action", malformed, model="deepseek-chat"),
+            _tool_call_response("emit_proposed_action", good, model="deepseek-chat", call_id="call-2"),
+        ]
+    )
+    journal = _journal(tmp_path)
+    tool_ctx = _make_tool_ctx(sqlite3.connect(":memory:"), journal)
+    session = coordinator._ProposerSession(
+        client=client, model="deepseek-chat", tool_ctx=tool_ctx, episode_id="E-000812", cursor=CURSOR,
+        verdict_glossary="B-06: denied", grounding_clause_index="(none in this fixture)", journal=journal,
+        max_calls_per_iteration=8,
+    )
+
+    proposal = session(HarnessContext(dossier=_dossier(), clauses=()), None, 0)
+
+    assert proposal.action.value == "ESCALATE"
+    assert proposal.required_artifacts == ("Escalate to compliance review",)
+    # The rejection is on the record, and the repair turn names the field.
+    repairs = [ev for ev in journal.events if ev.kind == "proposal" and ev.fields.get("schema_repair_attempted")]
+    assert len(repairs) == 1
+    assert "required_artifacts" in repairs[0].fields["error"]
+    # The repair turn went onto the conversation as a user message naming the field.
+    # (`messages` is one list mutated in place across calls, so this reads the session's
+    # own history rather than a per-call snapshot -- which is the thing being asserted.)
+    assert any(
+        m.get("role") == "user" and "required_artifacts must list at least one" in (m.get("content") or "")
+        for m in client.calls[2]["messages"]
+    )
+
+
+def test_a_proposal_malformed_twice_still_fails_closed(tmp_path):
+    """One retry, not a loop: a second identical failure raises, exactly as the
+    evaluator's own repair path does."""
+    good = _proposed_action_args(
+        action="ESCALATE",
+        evidence=[{"quote": "x", "source_kind": "tool_result", "source_ref": "tool_result#1"}],
+        required_artifacts=["Escalate to compliance review"], blocked=False, blocked_reason=None, missing_evidence=[],
+    )
+    malformed = {**good, "required_artifacts": []}
+    client = ScriptedClient(
+        [
+            _prose_response("I have everything I need.", model="deepseek-chat"),
+            _tool_call_response("emit_proposed_action", malformed, model="deepseek-chat"),
+            _tool_call_response("emit_proposed_action", malformed, model="deepseek-chat", call_id="call-2"),
+        ]
+    )
+    journal = _journal(tmp_path)
+    tool_ctx = _make_tool_ctx(sqlite3.connect(":memory:"), journal)
+    session = coordinator._ProposerSession(
+        client=client, model="deepseek-chat", tool_ctx=tool_ctx, episode_id="E-000812", cursor=CURSOR,
+        verdict_glossary="B-06: denied", grounding_clause_index="(none in this fixture)", journal=journal,
+        max_calls_per_iteration=8,
+    )
+
+    with pytest.raises(SchemaError, match="required_artifacts"):
+        session(HarnessContext(dossier=_dossier(), clauses=()), None, 0)
+
+
 # ═══ 2. auto + one repair turn on the non-forcible evaluator model ══════════════
 
 
