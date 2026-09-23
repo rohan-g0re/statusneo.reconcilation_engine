@@ -260,24 +260,31 @@ const KEY_TYPES = {
 // the whole tag and capitalised the first letter, which rendered TPA_QUALIFICATION as
 // "Tpa qualification" on every episode carrying a rebate.
 const RECORD_KINDS = {
-  PHARMACY_CLAIM: 'Claim filed at the counter',
-  PHARMACY_REVERSAL: 'Pharmacy cancelled the sale',
-  REMITTANCE: 'Payer sent a remittance',
+  PHARMACY_CLAIM: 'Pharmacy claim',
+  PHARMACY_REVERSAL: 'Pharmacy reversal',
+  REMITTANCE: 'Remittance',
+  // Three exceptions, where the record kind names the document and not what the document did.
+  // A remittance claim line IS the payer's decision on one claim; a provider-level adjustment
+  // IS a clawback; a rebate batch is the manufacturer actually paying. In each case the enum
+  // describes the envelope and the label describes the event, which is what a timeline is for.
   REMITTANCE_CLAIM_LINE: 'Payer’s payment decision',
   PROVIDER_LEVEL_ADJUSTMENT: 'Payer clawback',
-  MEDICAL_SUBMISSION: 'Claim filed to the insurer',
-  MEDICAL_ACKNOWLEDGMENT: 'Clearinghouse accepted the claim',
-  TPA_QUALIFICATION: '340B administrator ruled on eligibility',
-  TPA_REBATE_REQUEST: 'Rebate requested from the manufacturer',
-  TPA_MANUFACTURER_DECISION: 'Manufacturer ruled on the rebate',
-  TPA_REVERSAL: '340B claim reversed',
-  TPA_INVOICE_LINE: 'Administrator invoice line',
+  MEDICAL_SUBMISSION: 'Medical submission',
+  MEDICAL_ACKNOWLEDGMENT: 'Medical acknowledgment',
+  // TPA, not Tpa. The wording is the enum's own, as everywhere else here; only the casing is
+  // corrected, because "Tpa" was never a naming decision -- it is what lowercasing the whole
+  // token and capitalising one letter does to an initialism.
+  TPA_QUALIFICATION: 'TPA qualification',
+  TPA_REBATE_REQUEST: 'TPA rebate request',
+  TPA_MANUFACTURER_DECISION: 'TPA manufacturer decision',
+  TPA_REVERSAL: 'TPA reversal',
+  TPA_INVOICE_LINE: 'TPA invoice line',
   REBATE_BATCH: 'Manufacturer paid a rebate batch',
-  REBATE_DISPENSE_LINE: 'Rebate line for this dispense',
-  BANK_TRANSACTION: 'Money moved at the bank',
-  BEACON_ACKNOWLEDGMENT: 'Beacon received the submission',
+  REBATE_DISPENSE_LINE: 'Rebate dispense line',
+  BANK_TRANSACTION: 'Bank transaction',
+  BEACON_ACKNOWLEDGMENT: 'Beacon acknowledgment',
   BEACON_PAYMENT_REFERENCE: 'Beacon payment reference',
-  BEACON_VALIDATION_OUTCOME: 'Beacon validated the submission',
+  BEACON_VALIDATION_OUTCOME: 'Beacon validation outcome',
   CASH: 'Cash',
   // "Verdict", not "The answer changed". A verdict is the system's own noun for the thing it
   // produces -- it is what the engine writes, what the queue sorts on, what the log records and
