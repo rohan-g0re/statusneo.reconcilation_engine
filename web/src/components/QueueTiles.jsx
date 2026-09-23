@@ -12,11 +12,11 @@ import * as labels from '../labels.js'
 // design, so the icon-plus-label pairing is what keeps the meaning legible. Colour alone never
 // carries it.
 //
-// The label names the action, not the state. `Exception`, `Pending` and `Closed` are the
-// engine's enum members and they describe what a row *is*; an operator is deciding what to
-// *do*, and the whole reason there are exactly three buckets is that the question has exactly
-// three answers. The enum still shows, as a muted suffix, because it is what the API returns
-// and what anyone reading the design note will be looking for.
+// One label, and it is the bucket's own name. The tile used to carry two -- an invented action
+// word in the heading and the engine's enum beside it in muted mono -- which made an operator
+// read the same fact twice and left them to work out that the two were the same thing. See
+// `labels.js` for why the invented half was the half that had to go: it claimed more than the
+// bucket guarantees.
 //
 // The one-line meaning moves out of the `title` attribute and onto the tile. It was the most
 // valuable copy on the screen and it was invisible without a mouse.
@@ -45,19 +45,24 @@ export default function QueueTiles({ overview, selected, onSelect }) {
             <span className="label">
               <span className="icon" aria-hidden="true">{tile.icon}</span>
               {label}
-              <span className="tile-enum">{tile.key}</span>
             </span>
             {/*
               The dollars are the headline and the claim count is the subtitle. It used to be the
               other way round -- a 28px episode count above a 12px money line -- so the eye landed
               on "40" when the reason anyone opened the screen is $517,240.34.
+
+              Subtitle, though, not footnote. The count sat at 12px in muted mono, level with the
+              blurb, which put "how many claims is that?" -- the second question anyone asks, and
+              the one that turns a number into a workload -- below the line where the eye stops.
+              It is a figure of its own now: the number reads at display weight, the unit stays
+              small beside it.
             */}
-            <div className="count" data-testid={`tile-money-${tile.key}`}>
+            <div className="tile-money" data-testid={`tile-money-${tile.key}`}>
               {formatMoney(stats.variance_cents)}
             </div>
-            <div className="money">
-              <span data-testid={`tile-count-${tile.key}`}>{stats.episodes}</span>
-              {stats.episodes === 1 ? ' claim' : ' claims'}
+            <div className="tile-claims">
+              <span className="n" data-testid={`tile-count-${tile.key}`}>{stats.episodes}</span>
+              <span className="unit">{stats.episodes === 1 ? 'claim' : 'claims'}</span>
             </div>
             {/* Reopened gets its own line. 31 of 40 exceptions are money that was already
                 recognised and has come undone, which is the loudest signal on the page and read

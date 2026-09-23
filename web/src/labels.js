@@ -148,12 +148,20 @@ const DATA_EXCEPTIONS = {
 }
 
 // ── dispositions ───────────────────────────────────────────────────────────
-// The queue buckets. Named for the action rather than the state: "what do I do with this?"
-// has three answers, and they are the labels.
+// The queue buckets, under the engine's own names.
+//
+// These used to be renamed for the action -- "Needs work", "Waiting on someone", "Settled" --
+// on the reasoning that an operator is deciding what to *do* and the enum only says what a row
+// *is*. Two labels then had to sit side by side on every tile, the invented one loud and the
+// real one as a muted suffix, and the invented one was not reliably true: a PENDING row is not
+// always waiting on a person, and a CLOSED row is not always settled in any sense an accountant
+// would accept -- 512 of them came back. A label that overstates is worse than a label that
+// only names the bucket, because the sentence underneath is free to say what the bucket means
+// and can be corrected without renaming anything.
 const DISPOSITIONS = {
-  EXCEPTION: ['Needs work', 'A defect exists. Work it.'],
-  PENDING: ['Waiting on someone', 'Waiting on an external party. No defect. Ranked by age.'],
-  CLOSED: ['Settled', 'Nothing to do.'],
+  EXCEPTION: ['Exception', 'A defect exists. Work it.'],
+  PENDING: ['Pending', 'Waiting on an external party. No defect. Ranked by age.'],
+  CLOSED: ['Closed', 'Nothing to do.'],
 }
 
 // ── reason codes ───────────────────────────────────────────────────────────
@@ -263,8 +271,12 @@ const RECORD_KINDS = {
   BEACON_ACKNOWLEDGMENT: 'Beacon received the submission',
   BEACON_PAYMENT_REFERENCE: 'Beacon payment reference',
   BEACON_VALIDATION_OUTCOME: 'Beacon validated the submission',
-  CASH: 'Cash attributed to this claim',
-  VERDICT: 'The answer changed',
+  CASH: 'Cash',
+  // "Verdict", not "The answer changed". A verdict is the system's own noun for the thing it
+  // produces -- it is what the engine writes, what the queue sorts on, what the log records and
+  // what every document here calls it. Paraphrasing it into a sentence renamed the central
+  // object of the product on the one screen where a reader watches it being built.
+  VERDICT: 'Verdict',
 }
 
 // ── lookup ─────────────────────────────────────────────────────────────────
