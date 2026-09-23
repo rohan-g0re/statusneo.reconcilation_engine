@@ -432,20 +432,17 @@ select {
   text-transform: uppercase;
   color: var(--text-muted);
 }
-.tile-reopened {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--status-critical);
-  margin-top: var(--space-2);
-}
 /* Was a `title` attribute, which meant the clearest sentence on the screen only existed for
- * someone hovering a mouse. */
+ * someone hovering a mouse.
+ *
+ * No `max-width` any more. It was 32ch, a sane measure for a sentence long enough to need one,
+ * and every note is a single short sentence now -- so all the cap could still do was wrap one at
+ * a narrower width than the tile it sits in. The tile is the measure. */
 .tile-blurb {
   font-size: var(--text-xs);
   color: var(--text-muted);
   line-height: var(--leading-tight);
   margin-top: var(--space-3);
-  max-width: 32ch;
 }
 
 /* ═══ tables ═══════════════════════════════════════════════════════════ */

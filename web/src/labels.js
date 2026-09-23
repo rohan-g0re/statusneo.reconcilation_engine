@@ -158,9 +158,16 @@ const DATA_EXCEPTIONS = {
 // would accept -- 512 of them came back. A label that overstates is worse than a label that
 // only names the bucket, because the sentence underneath is free to say what the bucket means
 // and can be corrected without renaming anything.
+//
+// `detail` is one line on the tile, so it is one sentence here. PENDING's used to run to three
+// -- "Waiting on an external party. No defect. Ranked by age." -- and wrapped, which made it the
+// only tile whose note was a paragraph. The two clauses that went are both recoverable where
+// they matter: "no defect" is the whole distinction between this bucket and EXCEPTION, which the
+// three tiles side by side already make, and the sort order is named in the queue's own
+// order-by control rather than asserted on a card above it.
 const DISPOSITIONS = {
   EXCEPTION: ['Exception', 'A defect exists. Work it.'],
-  PENDING: ['Pending', 'Waiting on an external party. No defect. Ranked by age.'],
+  PENDING: ['Pending', 'Waiting on an external party.'],
   CLOSED: ['Closed', 'Nothing to do.'],
 }
 

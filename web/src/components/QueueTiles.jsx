@@ -31,7 +31,7 @@ export default function QueueTiles({ overview, selected, onSelect }) {
   return (
     <div className="tiles" role="group" aria-label="Episodes by disposition">
       {TILES.map((tile) => {
-        const stats = byDisposition[tile.key] ?? { episodes: 0, variance_cents: 0, reopened: 0 }
+        const stats = byDisposition[tile.key] ?? { episodes: 0, variance_cents: 0 }
         const { label, detail } = labels.disposition(tile.key)
         return (
           <button
@@ -64,14 +64,14 @@ export default function QueueTiles({ overview, selected, onSelect }) {
               <span className="n" data-testid={`tile-count-${tile.key}`}>{stats.episodes}</span>
               <span className="unit">{stats.episodes === 1 ? 'claim' : 'claims'}</span>
             </div>
-            {/* Reopened gets its own line. 31 of 40 exceptions are money that was already
-                recognised and has come undone, which is the loudest signal on the page and read
-                as a six-word fragment at the end of a money line. */}
-            {stats.reopened > 0 ? (
-              <div className="tile-reopened">
-                {stats.reopened} previously settled, now reopened
-              </div>
-            ) : null}
+            {/* Three lines per tile, and the third is a sentence rather than a second statistic.
+                A red "N previously settled, now reopened" used to sit here, on the argument that
+                money which had already been recognised and came undone is the loudest fact on the
+                screen. It is -- but a tile is not where it gets read. Three of them stacked put a
+                fourth figure on a card that already has two, in a colour that says "error" next to
+                a count that is only context, and the eye stopped there instead of on the money.
+                The fact keeps its real homes: the queue's default sort is reopened-first, every
+                reopened row is marked, and the episode panel says which bucket it came back from. */}
             <div className="tile-blurb">{detail}</div>
           </button>
         )
