@@ -165,6 +165,21 @@ header.masthead {
 }
 .masthead .sub { color: var(--text-muted); font-size: var(--text-sm); }
 .masthead .sub code { font-family: var(--mono); font-size: var(--text-sm); }
+/* Which dataset is on screen, in one word. Profile, seed and engine version are on its title:
+ * reproducibility is checked by one person occasionally, not read by everyone constantly. */
+.build-stamp {
+  font-family: var(--mono);
+  font-size: var(--text-xxs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-label);
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 0 var(--space-2);
+  margin-left: var(--space-4);
+  cursor: help;
+}
 
 /* The rebuild controls, folded. A native <details> rather than a popover: no library, no
  * focus trap to get wrong, and it closes on Escape for free. */
@@ -375,6 +390,15 @@ select {
 }
 .tile .money { font-family: var(--mono); font-size: var(--text-sm); font-variant-numeric: tabular-nums; color: var(--text-secondary); }
 .tile .money .reopened { color: var(--status-critical); font-weight: 600; }
+/* Money read at display size wants the display tracking; a count did not, which is why this
+ * was not needed until the two swapped places. */
+.tile .count { letter-spacing: var(--tracking-tight); }
+.tile-reopened {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--status-critical);
+  margin-top: var(--space-2);
+}
 /* The engine's own enum, kept beside the action word. Small, muted and monospace: it is what
  * the API returns and what the design note calls this bucket, so an operator can still map the
  * two — but it is not what the tile is telling you. */

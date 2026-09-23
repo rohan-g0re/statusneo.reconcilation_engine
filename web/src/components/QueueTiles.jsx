@@ -47,16 +47,26 @@ export default function QueueTiles({ overview, selected, onSelect }) {
               {label}
               <span className="tile-enum">{tile.key}</span>
             </span>
-            <div className="count" data-testid={`tile-count-${tile.key}`}>{stats.episodes}</div>
-            <div className="money">
-              {formatMoney(stats.variance_cents)} variance
-              {stats.reopened > 0 ? (
-                <>
-                  {' · '}
-                  <span className="reopened">{stats.reopened} reopened</span>
-                </>
-              ) : null}
+            {/*
+              The dollars are the headline and the claim count is the subtitle. It used to be the
+              other way round -- a 28px episode count above a 12px money line -- so the eye landed
+              on "40" when the reason anyone opened the screen is $517,240.34.
+            */}
+            <div className="count" data-testid={`tile-money-${tile.key}`}>
+              {formatMoney(stats.variance_cents)}
             </div>
+            <div className="money">
+              <span data-testid={`tile-count-${tile.key}`}>{stats.episodes}</span>
+              {stats.episodes === 1 ? ' claim' : ' claims'}
+            </div>
+            {/* Reopened gets its own line. 31 of 40 exceptions are money that was already
+                recognised and has come undone, which is the loudest signal on the page and read
+                as a six-word fragment at the end of a money line. */}
+            {stats.reopened > 0 ? (
+              <div className="tile-reopened">
+                {stats.reopened} previously settled, now reopened
+              </div>
+            ) : null}
             <div className="tile-blurb">{detail}</div>
           </button>
         )

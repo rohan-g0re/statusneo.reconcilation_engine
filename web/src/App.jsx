@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api, formatMoney } from './api.js'
+import * as labels from './labels.js'
 import CursorScrubber from './components/CursorScrubber.jsx'
 import QueueTiles from './components/QueueTiles.jsx'
 import QueueTable from './components/QueueTable.jsx'
@@ -98,17 +99,15 @@ function PortfolioAnalystPanel({ cursor }) {
   return (
     <section className="panel">
       <div className="panel-head-row">
-        <h2>Portfolio Analyst</h2>
+        {/* Named for what it does, not for the agent role that does it. */}
+        <h2>Ask about the book</h2>
         <button type="button" data-testid="portfolio-run" onClick={run} disabled={busy}>
           {busy ? 'Analysing…' : result ? 'Run again' : 'Analyse the book'}
         </button>
       </div>
       <p className="hint">
-        Aggregates the same counts and money the tiles above show, plus the exception queue's own
-        deterministic ranking, into a narrative answer to "what is the state of the book right
-        now, and what carries the most money" — every figure is quoted from a tool result and
-        every ordering is a SQL sort the agent only explains; it never re-ranks a queue itself.
-        Ask a specific question below, or leave it blank for a general summary.
+        Every figure it quotes was computed by the engine and cited. It explains the numbers; it
+        never produces one.
       </p>
       <label className="wi-field">
         <span>Question (optional)</span>
@@ -344,16 +343,24 @@ export default function App() {
       <header className="masthead">
         <div>
           <h1>Post-Claim Pharmacy Financial Reconciliation</h1>
+          {/*
+            The claim worth making, and nothing else. This line used to open with "Deterministic
+            layer" and end with the profile, the seed and the engine version -- three build
+            parameters that tell a reader the thing they are looking at is a test harness. They
+            have not gone anywhere: they are the `title` on the build marker below, which is
+            where someone checking reproducibility will think to look and nobody else has to.
+          */}
           <div className="sub">
-            Deterministic layer. Every figure below was computed in Python and is shown verbatim —
-            nothing on this screen calculates.
+            Every figure was computed in Python and is shown verbatim. Nothing on this screen
+            calculates.
             {meta ? (
-              <>
-                {' '}
-                Profile <code>{meta.profile}</code>, seed{' '}
-                <code data-testid="seed">{meta.stored?.master_seed ?? '—'}</code>, engine{' '}
-                <code>{meta.engine_version}</code>.
-              </>
+              <span
+                className="build-stamp"
+                data-testid="seed"
+                title={`profile ${meta.profile} · seed ${meta.stored?.master_seed ?? '—'} · engine ${meta.engine_version}`}
+              >
+                {meta.profile}
+              </span>
             ) : null}
           </div>
         </div>
@@ -472,18 +479,21 @@ export default function App() {
             ask once you have seen those two: what could not be matched at all, what the agent
             layer makes of it, what the team has already committed to.
           */}
+          {/*
+            Every panel's hint is now one line that states the question the panel answers. They
+            were three to five lines each, explaining how the system was built -- good writing
+            aimed at a reviewer grading the architecture, and the first thing a reader has to get
+            past to reach a number. The reasoning did not go anywhere; it is in DESIGN_NOTE.md,
+            where someone looking for it will find it.
+          */}
           <section className="panel">
-            <h2>Queues at this cursor</h2>
-            <p className="hint">
-              Three dispositions, because “what do I do with this?” has three answers. A queue is a
-              query over the verdict log, not a table things are moved into — which is why it can be
-              asked at any cursor and why deleting the log loses nothing.
-            </p>
+            <h2>Where the money is</h2>
+            <p className="hint">What do I do with this? There are three answers.</p>
             <QueueTiles overview={overview} selected={disposition} onSelect={selectDisposition} />
           </section>
 
           <section className="panel">
-            <h2>{disposition} queue</h2>
+            <h2>{labels.disposition(disposition).label}</h2>
             <QueueTable
               rows={rows}
               orderBy={orderBy}
@@ -495,10 +505,9 @@ export default function App() {
           </section>
 
           <section className="panel">
-            <h2>Feed-level exceptions</h2>
+            <h2>Money and documents we could not match</h2>
             <p className="hint">
-              Properties of ingestion rather than of any claim, which is why they are not multiplied into
-              the episode state space. Each one is a query, not a stored flag.
+              Faults in what arrived, not facts about any claim.
             </p>
             <FeedExceptions data={feeds} />
           </section>
@@ -525,11 +534,15 @@ export default function App() {
             <section className="panel">
               <h2>Verdict distribution</h2>
               <p className="hint">
-                Fifty deterministic rules generate 372 reachable verdict pairs compositionally — the
-                engine resolves each track independently and then annotates, rather than enumerating
-                combinations.
+                Every combination of insurance outcome and rebate outcome in the book, most
+                frequent first. Top 25 — the counts do not sum to the total.
               </p>
-              <div className="table-wrap">
+              {/*
+                Capped like every other long table on this screen. It was the one without a
+                height, so a profile with more distinct pairs pushed the page to several
+                thousand pixels -- the exact failure `.queue-scroll` exists to prevent.
+              */}
+              <div className="table-wrap queue-scroll">
                 <table data-testid="verdict-distribution">
                   <thead>
                     <tr>
@@ -573,10 +586,8 @@ export default function App() {
               ) : null}
             </div>
             <p className="hint">
-              One claim, everything that happened to it, in the order we learned it — the claim filed,
-              what the payer said, when the money moved, how the 340B rebate went, and every point at
-              which the verdict changed. This is the same object the agent layer receives in a single
-              call, and nothing in it was written by a model: every line is composed from the records.
+              One claim, everything that happened to it, in the order we learned it. Nothing here
+              was written by a model.
             </p>
             <EpisodeDossier dossier={dossier} busy={dossierBusy} />
           </section>

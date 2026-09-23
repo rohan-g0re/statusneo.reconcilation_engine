@@ -95,16 +95,20 @@ export default function TodoListPanel({ cursor }) {
   return (
     <section className="panel" data-testid="todo-panel">
       <div className="panel-head-row">
-        <h2>To-do list — all episodes</h2>
+        <h2>Actions committed by the team</h2>
         <button type="button" data-testid="todo-refresh" onClick={load} disabled={busy}>
           {busy ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+      {/*
+        The hint used to name the database table and the schema trigger that makes it
+        append-only. True, and an answer to a question a business reader has not asked -- what
+        they need from this sentence is that a person signed off on every row and that nothing
+        here can be quietly edited afterwards.
+      */}
       <p className="hint">
-        Read-only: work_item is append-only by schema trigger, so there is no "done" state and
-        nothing on this screen mutates anything. Every row here was committed on its own episode's
-        analysis screen, behind the human gate -- this panel only reads what already happened. It
-        re-reads itself when this tab regains focus, or on Refresh.
+        Every row was approved by a person on a claim’s own page. Nothing here can be edited or
+        checked off.
       </p>
 
       {unavailable ? (
